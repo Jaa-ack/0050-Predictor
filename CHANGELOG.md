@@ -2,6 +2,11 @@
 
 ## Unreleased — 2026-11-05
 
+- Fixed FRED real-time end dates in Taiwan mornings to respect the provider's St. Louis calendar day; retained the requested and effective bounds.
+- Separated Fubon login rejections from market-data initialization errors using fixed diagnostic codes without exposing SDK account results.
+- Protected native SDK rotating logs with a private directory and publication exclusions; force-tracked logs remain blocked by the audit.
+- Added long-history research and market-context acquisition configurations, verified real historical replay/maturity, and documented manual daily paper operations and remaining release gates.
+- Displayed synthetic/replayed/timely issuance labels and an independent reserved-holdout panel, keeping development metrics and historical replay counts distinct from live paper evidence.
 - Added owner-only local PKCS#12 certificate import, SDK certificate permission checks, and publication-audit coverage for ignored versus force-tracked credentials.
 - Integrated free TWSE material disclosures and annual calendar candidates, the current TDCC OpenAPI ownership snapshot, and bounded GDELT GKG archive acquisition with explicit metadata-only coverage.
 - Added a keyless acquisition plan, document/version exports and numeric ownership events; unchanged observations retain their first receipt while corrections and reversions survive.

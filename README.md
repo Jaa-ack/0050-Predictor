@@ -6,6 +6,10 @@
 
 金鑰僅存本機私人 `.env`（0600）或環境變數；可提交的 `.env.example` 保持空白。請先讀 [網頁操作指南](docs/WEB_GUIDE.md)、[來源與Key設定](docs/DATA_SOURCES.md)、[完整專案剩餘項目](docs/PROJECT_STATUS.md)、[Key保護與開源檢查](docs/SECRETS.md)。
 
+已接資料後，完整歷史與每天的實際操作請讀[真實歷史檢查與每日影子預測](docs/DAILY_RESEARCH.md)：長期計畫為`configs/market_context_plan.json`，全歷史多折設定為`configs/research_history.json`。本機成果與線上合成預覽分開，沒有自動啟用排程。
+
+[架構、工程完成比例與正式驗收邊界](docs/SYSTEM_READINESS.md)將第一階段工程、資料完整性及模型可行性分開列示；可執行流程不等於已通過正式上線。
+
 富邦`.p12`／`.pfx`可透過`secrets import-cert --from /absolute/path/exported.p12`安全複製至本機私人目錄；API費用、免費替代與人工設定見[憑證及資源指南](docs/CERTIFICATES_AND_COSTS.md)。免費資料可直接執行：
 
 ```bash

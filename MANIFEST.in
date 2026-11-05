@@ -4,6 +4,7 @@ prune data
 prune output
 prune credentials
 prune .secrets
+prune log
 include .env.example
 include README.md
 recursive-include configs *.json *.csv *.example

@@ -2,7 +2,9 @@
 
 ```mermaid
 flowchart LR
-  A[FinMind / 合格CSV] --> B[不可覆寫原始資料]
+  A[FinMind / Fugle / 富邦唯讀 / 合格CSV] --> B[不可覆寫原始資料]
+  S[FRED / FMP / News API / Twinkle / 官方公開來源] --> R[來源快照與版本]
+  R --> D
   B --> C[驗證 / Parquet快照 / DuckDB]
   D[具發布時間的外部因子CSV] --> E[PIT特徵快照]
   C --> E
@@ -19,12 +21,16 @@ flowchart LR
   N --> O
   O --> H
   N --> P[本機研究工作台 / FastAPI]
+  P --> W[僅合成資料的私人靜態預覽]
 ```
 
 | 模組 | 介面與責任 |
 |---|---|
 | `data` | 嚴格行情契約、不可覆寫快照、檢查碼、DuckDB 查詢 |
 | `ingestion` | FinMind 原始／還原資料對齊、HTTP 失敗與有限重試、CSV |
+| `sources` / `public_sources` | 私人服務與TWSE／TAIFEX／TDCC／GDELT唯讀連接、日期及格式正規化、固定主機與覆蓋限制 |
+| `source_store` / `source_workflows` / `source_verification` | 不可覆寫來源快照、事件／文件匯出、首次收件與修訂、逐端點格式及權限驗證 |
+| `credentials` / `secret_audit` | 伺服端Key、PKCS#12私人複本、原生SDK日誌隔離、遮罩與發布集合稽核 |
 | `features` | `build_features`、`point_in_time_join`；只有 `f_` 欄位能進模型 |
 | `research` | `ResearchConfig`、`run_research`、`train_latest`、`simulate_portfolio` |
 | `holdout` | 固定資料時間界線之外的封存樣本評估 |

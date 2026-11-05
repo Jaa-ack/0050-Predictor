@@ -135,6 +135,22 @@ def import_certificate(source,project_dir=Path('.')):
     return private_certificate_path(destination)
 
 
+def prepare_sdk_log_directory(path=Path('log')):
+    """The native SDK writes rotating logs outside Python's logging filters."""
+    folder=Path(path)
+    if folder.is_symlink():raise ValueError('SDK log directory must not be a symlink')
+    folder.mkdir(mode=0o700,exist_ok=True)
+    for item in [folder,*folder.rglob('*')]:
+        if item.is_symlink():raise ValueError('SDK log paths must not contain symlinks')
+        info=item.stat()
+        if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+            raise ValueError('SDK logs require regular files and directories')
+        if os.name=='posix':
+            if info.st_uid!=os.getuid():raise ValueError('SDK logs must belong to this user')
+            item.chmod(0o700 if item.is_dir() else 0o600)
+    return folder
+
+
 def redact(value, secrets=()):
     sensitive={"token","apikey","apisecret","authorization","password","secret","personalid",
                "certpath","certificate","certpassword","mcpsessionid","xapikey","cookie","setcookie"}

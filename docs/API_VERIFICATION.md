@@ -52,6 +52,10 @@ artifacts/fubon-venv/bin/python -m twquant --root artifacts/fubon-verification s
 
 還需要的資料／工程項目見 [PROJECT_STATUS.md](PROJECT_STATUS.md)，值得接入但尚未接入的來源與套件見 [OPEN_RESOURCES.md](OPEN_RESOURCES.md)。
 
+富邦驗收現在區分`authentication_rejected`、`auth_stage`與`failure_code`：例如`record_not_found`只表示SDK登入回覆查無資料，不能憑此單獨斷言憑證錯誤、Key過期或未簽聲明。需分開核對憑證解密、ID對應及券商服務開通；[官方前置條件](https://www.fbs.com.tw/TradeAPI/docs/trading/prepare/)列有API聲明與連線測試。行情初始化失敗另列`market_data_initialization_failed`，不回傳帳戶物件或任意SDK訊息。
+
+FRED長期同步亦已實測：臺灣上午的`today`可能晚於St. Louis當地一天，官方會拒絕未來的`realtime_end`。連接器限制至供應商當地日，仍保留原請求結束日，沒有把尚未發生的版本補出來。長期研究及每日操作見[DAILY_RESEARCH.md](DAILY_RESEARCH.md)。
+
 ## 免費來源與憑證補強
 
 新增`configs/public_source_plan.json`，八個免費工作（TWSE行情／公司／營收／公告／日曆、TAIFEX、TDCC、GDELT）已實際同步成功。空的GDELT關鍵字批次可表示正常的0匹配，不視為憑證失效；`verify`會分開回報空批次、格式通過與模型映射狀態，不能視為完整新聞涵蓋。

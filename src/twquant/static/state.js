@@ -4,6 +4,16 @@ export const percent = (value,digits=2) => finite(value) ? `${(Number(value)*100
 export const decimal = (value,digits=4) => finite(value) ? Number(value).toLocaleString('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits}) : '—';
 export const integer = value => finite(value) ? Number(value).toLocaleString('en-US',{maximumFractionDigits:0}) : '—';
 
+export function forecastEvidence(row) {
+  if(row.data_kind==='synthetic') return '合成示範';
+  if(row.is_replay===true) return '歷史重播';
+  if(row.data_kind==='historical' && row.is_replay===false && Number.isFinite(Date.parse(row.issued_at)) && Number.isFinite(Date.parse(row.decision_ts))) return '即時簽發';
+  return '簽發待核對';
+}
+export function holdoutMetrics(report) {
+  return report?.metrics?.sealed_holdout?.metrics || null;
+}
+
 export function latestForecasts(rows,horizon) {
   const latest=new Map();
   for(const row of rows) {

@@ -37,6 +37,14 @@ class SourceHTTPError(RuntimeError):
         self.status_code=status_code
         super().__init__(f"{provider}: HTTP {status_code}; check entitlement, quota and parameters")
 
+
+class FubonAuthenticationError(RuntimeError):
+    """Only fixed diagnostic codes cross the SDK boundary; never its account result."""
+    def __init__(self,stage,code):
+        self.stage=stage
+        self.code=code
+        super().__init__(f'Fubon {stage} failed ({code}); sensitive SDK response omitted')
+
 FINMIND_DATASETS={"TaiwanStockPrice","TaiwanStockPriceAdj","TaiwanStockInstitutionalInvestorsBuySell",
     "TaiwanStockMarginPurchaseShortSale","TaiwanStockSecuritiesLending","TaiwanStockFinancialStatements",
     "TaiwanStockBalanceSheet","TaiwanStockCashFlowsStatement","TaiwanStockMonthRevenue",
@@ -188,10 +196,16 @@ def _result(t,provider,dataset,kind,records,**metadata):
 def fetch_fred(transport, series_id, start, end):
     identifier(series_id)
     list(date_windows(start,end))
+    # The provider's "today" is the St. Louis calendar day. In Taiwan's
+    # morning it is still yesterday there; FRED rejects a future realtime_end.
+    provider_day=pd.Timestamp(now_utc()).tz_convert('America/Chicago').date().isoformat()
+    realtime_end=min(str(pd.Timestamp(end).date()),provider_day)
+    if pd.Timestamp(start)>pd.Timestamp(realtime_end):
+        raise ValueError('FRED requested realtime window has not started in the provider timezone')
     records=[]
     # JSON permits at most 2,000 vintage dates. Bound real-time windows too,
     # not only observation dates; daily series can otherwise fail even for one month.
-    for first,last in date_windows(start,end,days=1460):
+    for first,last in date_windows(start,realtime_end,days=1460):
         offset=0
         for _ in range(100):
             params=dict(series_id=series_id,api_key=transport.credentials.get("FRED_API_KEY").get_secret_value(),
@@ -210,7 +224,7 @@ def fetch_fred(transport, series_id, start, end):
         else:
             raise RuntimeError("fred: pagination limit reached; split the date range")
     return _result(transport,"fred",series_id,"macro",records,vintage_mode="all_real_time_periods",
-        release_time_precision="date_only",complete=True)
+        release_time_precision="date_only",complete=True,requested_end=end,effective_realtime_end=realtime_end)
 
 
 def fetch_fmp(transport, dataset, symbol, start, end,statement_limit=5,period='quarter'):
@@ -423,6 +437,8 @@ class TwinkleClient:
 
 def fetch_fubon_prices(transport, tickers, start, end, sdk=None):
     if sdk is None:
+        from .credentials import prepare_sdk_log_directory
+        prepare_sdk_log_directory()
         try:
             from fubon_neo.sdk import FubonSDK
         except ImportError:
@@ -434,17 +450,22 @@ def fetch_fubon_prices(transport, tickers, start, end, sdk=None):
         from .credentials import private_certificate_path
         cert=private_certificate_path(c.get('FUBON_CERT_PATH').get_secret_value())
         sdk=FubonSDK()
+        prepare_sdk_log_directory()
         values=[c.get(k).get_secret_value() for k in ("FUBON_PERSONAL_ID",login_key,"FUBON_CERT_PATH")]
         values[2]=str(cert)
         if c.status()["FUBON_CERT_PASSWORD"]:
             values.append(c.get("FUBON_CERT_PASSWORD").get_secret_value())
         try:
             login=(sdk.apikey_login if login_key=="FUBON_API_KEY" else sdk.login)(*values)
-            if not getattr(login,"is_success",False):
-                raise RuntimeError("login rejected")
+        except Exception:
+            raise FubonAuthenticationError('login','sdk_login_error') from None
+        if not getattr(login,"is_success",False):
+            code='record_not_found' if str(getattr(login,'message','')).strip()=='查無資料' else 'login_rejected'
+            raise FubonAuthenticationError('login',code) from None
+        try:
             sdk.init_realtime()
         except Exception:
-            raise RuntimeError("Fubon authentication/market-data initialization failed; sensitive response omitted") from None
+            raise FubonAuthenticationError('market_data','market_data_initialization_failed') from None
     def get(ticker,first,last,adjusted):
         params={"symbol":ticker,"from":first,"to":last,"timeframe":"D","adjusted":str(adjusted).lower(),
                 "sort":"asc","fields":"open,high,low,close,volume"}

@@ -343,8 +343,14 @@ def test_fubon_api_key_login_uses_certificate_without_account_password(tmp_path,
     certificate=tmp_path/'cert.pfx'
     certificate.write_bytes(b'example-only-not-certificate')
     certificate.chmod(0o600)
+    monkeypatch.chdir(tmp_path)
+    log_dir=tmp_path/'log';log_dir.mkdir(mode=0o755)
+    log_file=log_dir/'sdk.20261105';log_file.write_text('private-sdk-record');log_file.chmod(0o644)
     calls=[]
     class SDK:
+        def __init__(self):
+            assert log_dir.stat().st_mode&0o777==0o700
+            assert log_file.stat().st_mode&0o777==0o600
         def apikey_login(self,*args):
             calls.append(('apikey_login',len(args)))
             return SimpleNamespace(is_success=True)
@@ -362,3 +368,18 @@ def test_fubon_api_key_login_uses_certificate_without_account_password(tmp_path,
     assert len(prices)==1
     assert calls==[('apikey_login',4)]
     assert all('example-api-key' not in p.read_text() and 'example-id' not in p.read_text() for p in (tmp_path/'raw').glob('*.json'))
+
+
+def test_fred_today_uses_provider_day_before_us_midnight(monkeypatch):
+    import twquant.sources as module
+    monkeypatch.setattr(module,'now_utc',lambda:'2026-11-05T02:00:00Z')
+    requested=[]
+    def fetch(method,url,kwargs):
+        params=kwargs['params'];requested.append(params)
+        if params['realtime_end']>'2026-11-04':
+            return Response({'error_code':400},400)
+        return Response({'count':1,'observations':[{'date':'2026-11-03','realtime_start':'2026-11-04','value':'4.0'}]})
+    result=fetch_fred(transport(fetch),'DGS10','2026-11-01','2026-11-05')
+    assert result.records
+    assert requested[-1]['realtime_end']=='2026-11-04'
+    assert result.metadata['requested_end']=='2026-11-05'

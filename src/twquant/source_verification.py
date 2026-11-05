@@ -12,7 +12,7 @@ from .credentials import redact
 from .data import PriceStore
 from .source_store import SourceStore
 from .source_workflows import source_status
-from .sources import (SourceTransport,SourceHTTPError,fetch_fred,fetch_fmp,fetch_finmind,fetch_fugle,
+from .sources import (SourceTransport,SourceHTTPError,FubonAuthenticationError,fetch_fred,fetch_fmp,fetch_finmind,fetch_fugle,
     fetch_fugle_prices,fetch_fubon_prices,fetch_news,fetch_public,TwinkleClient,events_from_result)
 from .workflows import write_json
 from .public_sources import fetch_tdcc,fetch_gdelt
@@ -124,6 +124,9 @@ def verify_sources(root,credentials,full=False,providers=None):
                 if isinstance(exc,SourceHTTPError):
                     row['http_status']=exc.status_code
                     row['status']='entitlement_blocked' if exc.status_code in {402,403,426} else 'failed'
+                if isinstance(exc,FubonAuthenticationError):
+                    row.update(auth_stage=exc.stage,failure_code=exc.code)
+                    if exc.stage=='login':row['status']='authentication_rejected'
                 if provider=='fubon':row['login_attempted']=True
             row['seconds']=round(time.monotonic()-started,2)
             checks.append(row)

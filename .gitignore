@@ -15,6 +15,7 @@ credentials/
 *.cer
 *.crt
 *.log
+/log/
 *.sarif
 data/
 artifacts/

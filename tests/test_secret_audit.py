@@ -69,3 +69,18 @@ def test_private_certificate_directory_is_excluded_but_force_added_cert_is_block
     result=audit_repository(tmp_path)
     assert not result['passed']
     assert any(x['rule']=='private_credential_file' for x in result['findings'])
+
+
+def test_native_sdk_logs_are_private_but_force_tracked_logs_are_blocked(tmp_path):
+    import subprocess
+    subprocess.run(['git','init','-q',str(tmp_path)],check=True,capture_output=True)
+    secret='example-private-sdk-credential'
+    folder=tmp_path/'log';folder.mkdir()
+    (folder/'sdk.20261105').write_text(secret)
+    credentials=Credentials({'FUBON_API_KEY':secret})
+    assert audit_repository(tmp_path,credentials)['passed']
+    subprocess.run(['git','add','log/sdk.20261105'],cwd=tmp_path,check=True,capture_output=True)
+    result=audit_repository(tmp_path,credentials)
+    assert not result['passed']
+    assert any(row['rule']=='tracked_runtime_artifact' for row in result['findings'])
+    assert secret not in str(result)

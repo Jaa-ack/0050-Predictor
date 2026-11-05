@@ -3,6 +3,23 @@ import assert from 'node:assert/strict';
 
 const state = await import('../src/twquant/static/state.js').catch(() => ({}));
 
+test('forecast evidence distinguishes synthetic, replay, timely and legacy issuance',()=>{
+  assert.equal(typeof state.forecastEvidence,'function');
+  assert.equal(state.forecastEvidence({data_kind:'synthetic',is_replay:false}),'合成示範');
+  assert.equal(state.forecastEvidence({data_kind:'historical',is_replay:true}),'歷史重播');
+  assert.equal(state.forecastEvidence({data_kind:'historical',is_replay:false,issued_at:'2026-11-04T12:01Z',decision_ts:'2026-11-04T12:00Z'}),'即時簽發');
+  assert.equal(state.forecastEvidence({data_kind:'historical',is_replay:false}),'簽發待核對');
+  assert.equal(state.forecastEvidence({}),'簽發待核對');
+});
+
+test('holdout display never falls back to development metrics',()=>{
+  assert.equal(typeof state.holdoutMetrics,'function');
+  const development={by_horizon:{'1':{accuracy:.99}}};
+  assert.equal(state.holdoutMetrics({metrics:development}),null);
+  const reserved={by_horizon:{'1':{accuracy:.51}}};
+  assert.equal(state.holdoutMetrics({metrics:{...development,sealed_holdout:{metrics:reserved}}}),reserved);
+});
+
 test('latest forecasts use decision timestamps rather than API ordering and retain the selected horizon', () => {
   assert.equal(typeof state.latestForecasts, 'function', 'chronological forecast selection must be available');
   const old = {ticker:'2330', horizon:1, anchor_date:'2025-01-02', decision_ts:'2025-01-02T09:00:00Z'};

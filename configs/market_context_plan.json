@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "notes": "Long-history market context for research. FRED conservative vintages and selected adjusted US market series only. Current financial, ownership and news snapshots stay in the separate source plan; they must not be backfilled into historical factors. No trading or subscription changes.",
+  "jobs": [
+    {"id":"fred-gdp","provider":"fred","dataset":"GDP","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fred-cpi","provider":"fred","dataset":"CPIAUCSL","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fred-pce","provider":"fred","dataset":"PCEPI","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fred-unemployment","provider":"fred","dataset":"UNRATE","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fred-payrolls","provider":"fred","dataset":"PAYEMS","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fred-policy-rate","provider":"fred","dataset":"FEDFUNDS","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fred-treasury10y","provider":"fred","dataset":"DGS10","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fred-treasury2y","provider":"fred","dataset":"DGS2","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fred-money","provider":"fred","dataset":"M2SL","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fred-vix","provider":"fred","dataset":"VIXCLS","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fred-usdtwd","provider":"fred","dataset":"DEXTAUS","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fmp-spy","provider":"fmp","dataset":"adjusted_prices","symbol":"SPY","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fmp-tsm","provider":"fmp","dataset":"adjusted_prices","symbol":"TSM","enabled":true,"start":"2014-01-01","end":"today"},
+    {"id":"fmp-nvda","provider":"fmp","dataset":"adjusted_prices","symbol":"NVDA","enabled":true,"start":"2014-01-01","end":"today"}
+  ]
+}
