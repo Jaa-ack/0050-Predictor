@@ -63,7 +63,7 @@
       "taifex"
     ],
     "default_adjusted_price_provider": "fugle",
-    "private_live_authentication": "pending_local_keys",
+    "private_live_authentication": "run sources verify; account-specific evidence stays local",
     "documentation": "docs/DATA_SOURCES.md",
     "status_documentation": "docs/PROJECT_STATUS.md"
   }

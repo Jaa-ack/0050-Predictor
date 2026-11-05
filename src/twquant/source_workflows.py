@@ -45,7 +45,7 @@ def _execute_job(t,job):
     if provider=='fred':
         return fetch_fred(t,dataset,start,end)
     if provider=='fmp':
-        return fetch_fmp(t,dataset,symbol,start,end)
+        return fetch_fmp(t,dataset,symbol,start,end,statement_limit=job.get('limit',5),period=job.get('period','quarter'))
     if provider=='newsapi':
         return fetch_news(t,job['query'],start,end,job.get('tickers',[]),job.get('max_pages',10))
     if provider=='twinkle':

@@ -2,7 +2,7 @@
 
 Only columns starting with ``f_`` may enter a model. Future execution prices and
 labels remain in the research frame for evaluation, never in that feature list.
-The benchmark's sessions define horizons; suspensions do not shorten them.
+Observed market sessions define horizons; individual or ETF suspensions do not shorten them.
 """
 
 from __future__ import annotations
@@ -13,7 +13,18 @@ import numpy as np
 import pandas as pd
 
 HORIZONS = (1, 5, 20)
-FEATURE_VERSION = "pit-eod-v1"
+FEATURE_VERSION = "pit-eod-v2"
+
+
+def observed_market_sessions(prices):
+    """Observed daily bars establish open sessions, including a suspended ETF's gaps.
+
+    This is not a complete exchange calendar when every supplied feed is missing.
+    Future/preopen issuance still needs the separately verified exchange calendar.
+    """
+    if not prices.ticker.astype(str).eq('0050').any():
+        raise ValueError('0050 benchmark prices are required')
+    return pd.DatetimeIndex(pd.to_datetime(prices.date).dt.normalize().unique(),name='date').sort_values()
 
 
 def _timestamps(values, name, allow_missing=False):
@@ -91,10 +102,10 @@ def point_in_time_join(decisions: pd.DataFrame, events: pd.DataFrame) -> pd.Data
 
 def build_features(prices: pd.DataFrame, external: pd.DataFrame | None = None,
                    mode: str = "postclose") -> pd.DataFrame:
-    """Build past-only EOD factors and 1/5/20 benchmark-session labels.
+    """Build past-only EOD factors and 1/5/20 observed market-session labels.
 
     Postclose decisions use 20:00 Asia/Taipei. Preopen decisions use 08:30 of
-    the next actual benchmark session and anchor on the preceding close. The
+    the next observed market session and anchor on the preceding close. The
     terminal preopen decision is NaT until a verified next session is available;
     it is retained for a caller to set an explicit, verified inference cutoff.
     Late price rows are conservatively omitted, including from rolling history.
@@ -121,9 +132,7 @@ def build_features(prices: pd.DataFrame, external: pd.DataFrame | None = None,
     benchmark = data.loc[data.ticker == "0050"].set_index("date").sort_index()
     if benchmark.empty:
         raise ValueError("0050 benchmark prices are required for the session calendar")
-    calendar = benchmark.index
-    if not data.date.isin(calendar).all():
-        raise ValueError("0050 benchmark calendar does not cover every supplied date")
+    calendar = observed_market_sessions(data)
     eod_times = (calendar.tz_localize("Asia/Taipei") + pd.Timedelta(hours=20)).tz_convert("UTC")
     if mode == "postclose":
         decision_times = eod_times

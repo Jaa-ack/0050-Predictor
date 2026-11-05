@@ -80,6 +80,22 @@ def test_missing_session_marks_execution_unavailable_instead_of_skipping_suspend
     assert pd.isna(prior.trade_return_1)
 
 
+def test_etf_suspension_does_not_remove_stock_sessions_or_fabricate_benchmark_prices():
+    prices=prices_fixture()
+    dates=sorted(prices.date.unique())
+    prices=prices[~((prices.ticker=='0050') & prices.date.isin(dates[26:31]))]
+    frame=build_features(prices)
+    stock=frame[frame.ticker=='2330'].set_index('date')
+    assert stock.loc[dates[25],'label_end_1']==dates[26]
+    assert stock.loc[dates[25],'label_end_5']==dates[30]
+    assert stock.loc[dates[25],'trade_valid_1']
+    assert pd.isna(stock.loc[dates[26],'f_market_return_1'])
+    assert pd.isna(stock.loc[dates[26],'benchmark_adj_close'])
+    preopen=build_features(prices,mode='preopen')
+    decision=preopen[(preopen.ticker=='2330') & (preopen.date==dates[25])].iloc[0]
+    assert decision.decision_ts.tz_convert('Asia/Taipei').date()==pd.Timestamp(dates[26]).date()
+
+
 def test_daily_flat_range_is_not_used_as_future_information_to_select_opening_orders():
     prices = prices_fixture()
     dates = sorted(prices.date.unique())

@@ -205,6 +205,26 @@ def test_passive_benchmark_captures_returns_across_missing_evaluation_dates():
     assert metrics["benchmark_buy_hold"]["total_return"] == pytest.approx(.32)
 
 
+def test_benchmark_halt_keeps_stock_trades_but_withholds_passive_daily_risk():
+    from twquant.research import simulate_portfolio
+    rows=pd.DataFrame({'ticker':['2330']*3,'date':pd.to_datetime(['2025-06-09','2025-06-10','2025-06-11']),
+        'next_open_date':pd.to_datetime(['2025-06-10','2025-06-11','2025-06-12']),
+        'horizon':[1]*3,'probability_up':[.9]*3,'expected_return':[.1]*3,
+        'trade_return_1':[.1]*3,'benchmark_trade_return_1':[.1,np.nan,.1],
+        'benchmark_target_1':np.log([1.1,np.nan,1.1]),'next_open':[100.]*3,
+        'trade_valid_1':[True]*3,'benchmark_adjusted_next_open':[100.,np.nan,120.],
+        'benchmark_end_adj_close_1':[110.,np.nan,132.]})
+    cfg=small_config(commission=0.,slippage=0.,sell_tax=0.,etf_sell_tax=0.)
+    equity,metrics=simulate_portfolio(rows,cfg)
+    assert len(equity)==3
+    assert equity.iloc[1].strategy_return>0
+    assert equity.iloc[1].benchmark_return==0
+    assert pd.isna(equity.iloc[1].benchmark_buy_hold_net)
+    assert metrics['benchmark_unexecutable_dates']==1
+    assert metrics['benchmark_buy_hold']['total_return']==pytest.approx(.32)
+    assert metrics['benchmark_buy_hold']['sharpe'] is None
+
+
 def test_fold_limit_keeps_matured_blocks_instead_of_unobservable_terminal_dates():
     from twquant.research import run_research
     config = small_config(horizons=(20,), min_train_dates=30, calibration_dates=10,

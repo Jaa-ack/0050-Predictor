@@ -31,7 +31,20 @@ class Session:
 
 def transport(handler,tmp_path=None):
     creds=Credentials({k:'example-secret-'+k for k in ['FRED_API_KEY','FMP_API_KEY','NEWS_API_KEY','TWINKLE_API_KEY','FUGLE_API_KEY']})
-    return SourceTransport(creds,raw_dir=tmp_path,session=Session(handler))
+    return SourceTransport(creds,raw_dir=tmp_path,session=Session(handler),min_intervals={'fugle':0})
+
+
+def test_fugle_requests_are_paced_to_the_documented_sixty_per_minute_budget():
+    state={'now':0.,'sleeps':[]}
+    def sleep(seconds):
+        state['sleeps'].append(seconds)
+        state['now']+=seconds
+    t=SourceTransport(Credentials({}),session=Session(lambda *a:Response({})),
+                      clock=lambda:state['now'],sleeper=sleep)
+    for _ in range(3):
+        t.request('fugle','GET','https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/2330')
+    assert len(state['sleeps'])==2
+    assert all(seconds>=1. for seconds in state['sleeps'])
 
 
 def test_transport_redacts_query_credentials_echo_and_rejects_redirects(tmp_path):
@@ -56,6 +69,57 @@ def test_network_exception_never_echoes_secret_url_or_traceback_cause():
     assert e.value.__suppress_context__
 
 
+def test_twinkle_sse_uses_utf8_and_only_protocol_newlines():
+    payload={'jsonrpc':'2.0','id':1,'result':{'instructions':'政府資料\u0085不是行分隔符'}}
+    class SSE:
+        status_code=200
+        headers={'Content-Type':'text/event-stream'}
+        encoding='ISO-8859-1'
+        @property
+        def text(self):
+            body='event: message\r\ndata: '+json.dumps(payload,ensure_ascii=False)+'\r\n\r\n'
+            return body.encode('utf-8').decode(self.encoding)
+    t=transport(lambda *a:SSE())
+    result=t.request('twinkle','POST','https://api.twinkleai.tw/mcp/',json={'id':1})
+    assert result==payload
+
+
+def test_twinkle_notification_accepts_empty_202_without_weakening_rpc_validation():
+    class Empty(Response):
+        def json(self):raise ValueError('empty')
+    t=transport(lambda *a:Empty(None,202,text=''))
+    assert t.request('twinkle','POST','https://api.twinkleai.tw/mcp/',json={'method':'notifications/initialized'})=={}
+
+
+def test_official_futures_csv_is_normalized_with_strict_headers():
+    csv='日期,契約代號,到期月份(週別),最後成交價,交易時段\r\n20261104,TX,202611,30000,一般\r\n'
+    t=transport(lambda *a:Response(None,headers={'Content-Type':'application/octet-stream'},text=csv))
+    result=fetch_public(t,'taifex','futures')
+    assert result.records==[{'日期':'20261104','契約代號':'TX','到期月份(週別)':'202611','最後成交價':'30000','交易時段':'一般'}]
+
+
+def test_non_json_entitlement_error_retains_http_status_without_echoing_body():
+    from twquant.sources import SourceHTTPError
+    class NonJson(Response):
+        def json(self):raise ValueError('not JSON')
+    t=transport(lambda *a:NonJson(None,402,text='Premium query example-secret-FMP_API_KEY'))
+    with pytest.raises(SourceHTTPError) as exc:
+        fetch_fmp(t,'adjusted_prices','QQQ','2026-10-01','2026-10-02')
+    assert exc.value.status_code==402
+    assert 'example-secret' not in str(exc.value)
+
+
+def test_fmp_financial_probe_defaults_to_basic_plan_five_records_and_discloses_cap():
+    def handler(m,u,k):
+        if k['params']['limit']>5:
+            return Response({'Error Message':'limit exceeds subscription'},402)
+        return Response([{'symbol':'TSM','date':'2026-06-30','eps':2}])
+    result=fetch_fmp(transport(handler),'income','TSM','2026-01-01','2026-11-04')
+    assert len(result.records)==1
+    assert result.metadata['record_limit']==5
+    assert result.metadata['complete'] is False
+
+
 def test_fred_downloads_vintages_with_pagination_and_does_not_date_by_period():
     def handler(m,u,k):
         offset=k['params'].get('offset',0)
@@ -63,11 +127,33 @@ def test_fred_downloads_vintages_with_pagination_and_does_not_date_by_period():
     t=transport(handler)
     result=fetch_fred(t,'CPIAUCSL','2024-01-01','2024-04-01')
     assert len(result.records)==2
-    assert t.session.calls[0][2]['params']['realtime_start']=='1776-07-04'
+    assert t.session.calls[0][2]['params']['realtime_start']=='2024-01-01'
     events=events_from_result(result)
     assert len(events)==2
     assert events.published_at.min()>pd.Timestamp('2024-02-10T00:00:00Z')
     assert events.period_end.iloc[0]=='2024-01-01'
+
+
+def test_fred_long_daily_history_bounds_vintage_windows_and_resets_page_offsets():
+    def handler(m,u,k):
+        p=k['params']
+        span=(pd.Timestamp(p['realtime_end'])-pd.Timestamp(p['realtime_start'])).days
+        if span>=2000:
+            return Response({'error_message':'Too many vintage dates'},400)
+        offset=p['offset']
+        day=(pd.Timestamp(p['realtime_start'])+pd.Timedelta(days=offset)).date().isoformat()
+        return Response({'count':2,'observations':[{'date':day,'realtime_start':day,'value':str(offset+1)}]})
+    t=transport(handler)
+    result=fetch_fred(t,'DGS10','2014-01-01','2026-11-04')
+    assert len(result.records)>2
+    params=[call[2]['params'] for call in t.session.calls]
+    assert params[0]['realtime_start']=='2014-01-01'
+    assert params[-1]['realtime_end']=='2026-11-04'
+    windows=list(dict.fromkeys((p['realtime_start'],p['realtime_end']) for p in params))
+    for earlier,later in zip(windows,windows[1:]):
+        assert pd.Timestamp(earlier[1])+pd.Timedelta(days=1)==pd.Timestamp(later[0])
+    assert [p['offset'] for p in params]==[0,1]*len(windows)
+    assert set(events_from_result(result).availability_basis)=={'vintage_day_conservative'}
 
 
 def test_fred_old_period_revision_never_replaces_newest_known_period():
@@ -78,6 +164,17 @@ def test_fred_old_period_revision_never_replaces_newest_known_period():
     events=events_from_result(result)
     assert events.iloc[-1].period_end=='2024-02-01'
     assert events.iloc[-1].value==102
+
+
+def test_fred_future_dated_observation_cannot_become_available_before_its_period():
+    result=SourceResult('fred','VIXCLS','macro',[
+        {'date':'2026-01-16','realtime_start':'2026-01-16','value':'18'},
+        {'date':'2026-01-19','realtime_start':'2026-01-16','value':'18.84'}], '2026-11-05T00:00:00Z')
+    events=events_from_result(result)
+    assert len(events)==2
+    assert events.iloc[-1].period_end=='2026-01-19'
+    assert events.iloc[-1].available_at==pd.Timestamp('2026-01-20T05:00:00Z')
+    assert events.iloc[0].available_at<events.iloc[-1].available_at
 
 
 def candle(symbol='0050',adjusted=False,date='2025-01-02'):

@@ -8,6 +8,7 @@
 
 ```bash
 .venv/bin/python -m twquant sources status
+.venv/bin/python -m twquant sources verify --full
 .venv/bin/python -m twquant secrets audit
 # Key填入本機.env之後，依設定計畫抓取；缺Key的來源會明確列出。
 .venv/bin/python -m twquant --root artifacts/real sources sync --plan configs/source_plan.json
@@ -123,3 +124,5 @@ Python >=3.11；本機驗證環境為 Python 3.14.3／macOS arm64。`requirement
 GitHub 主儲存庫為 [Jaa-ack/0050-Predictor](https://github.com/Jaa-ack/0050-Predictor)。CI 執行 Python 3.11／3.14、前端狀態測試、金鑰／歷史掃描，並產生合成網頁預覽 artifact；Dependabot 每週提出依賴更新 PR，待審核合併。後續已授權變更須更新文件、驗證及 commit，規則見 [AGENTS.md](AGENTS.md) 與 [CONTRIBUTING.md](CONTRIBUTING.md)。尚未選定正式程式碼 LICENSE。
 
 完整說明見 [方法與限制](docs/METHODOLOGY.md)、[最新缺口與驗收順序](docs/PROJECT_STATUS.md)、[操作與故障排查](docs/RUNBOOK.md)、[架構](docs/ARCHITECTURE.md)。
+
+來源實測、修正及手動設定見 [API驗收](docs/API_VERIFICATION.md)；未接入但值得採用的官方資料／套件見 [OPEN_RESOURCES.md](docs/OPEN_RESOURCES.md)。

@@ -138,4 +138,13 @@ def test_settlement_uses_single_adjustment_vintage(tmp_path):
     ledger.append([forecast()])
     p = prices().assign(adj_close=lambda frame: frame.adj_close * 7.0)
     assert ledger.settle(p, "2025-01-03T20:00:00+08:00", "rebased") == 1
+
+
+def test_settlement_keeps_stock_horizon_when_benchmark_is_suspended(tmp_path):
+    ledger=ForecastLedger(tmp_path/'ledger.sqlite')
+    ledger.append([forecast()])
+    p=prices()
+    p=p[~((p.ticker=='0050') & (pd.to_datetime(p.date)==pd.Timestamp('2025-01-03')))]
+    assert ledger.settle(p,'2025-01-03T20:00:00+08:00','etf-suspended')==1
+    assert ledger.forecasts()[0]['label_end_date']=='2025-01-03'
     assert ledger.forecasts()[0]["actual_return"] == pytest.approx(.02)

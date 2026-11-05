@@ -122,6 +122,9 @@ def parser():
     sources=subs.add_parser('sources',help='多來源狀態、擷取、模型特徵匯出與交叉核對')
     source_sub=sources.add_subparsers(dest='source_command',required=True)
     source_sub.add_parser('status')
+    verify=source_sub.add_parser('verify',help='小量唯讀測試Key、端點權限、格式與快照；不覆寫主行情')
+    verify.add_argument('--full',action='store_true',help='逐系列與歷史權限擴充檢查')
+    verify.add_argument('--providers',help='以逗號分隔指定來源；預設全部')
     sync=source_sub.add_parser('sync')
     sync.add_argument('--plan',type=Path,default=Path('configs/source_plan.json'))
     export=source_sub.add_parser('export-events')
@@ -155,6 +158,10 @@ def execute(args):
         from .source_store import SourceStore
         if args.source_command=='status':
             return dict(sources=source_status(load_dotenv()),snapshots=SourceStore(root/'sources').manifests())
+        if args.source_command=='verify':
+            from .source_verification import verify_sources
+            return verify_sources(root,load_dotenv(),full=args.full,
+                providers=args.providers.split(',') if args.providers else None)
         if args.source_command=='sync':
             return sync_sources(root,args.plan,load_dotenv())
         if args.source_command=='export-events':
@@ -251,6 +258,8 @@ def main(argv=None):
         if args.command=='secrets' and args.secret_command=='audit' and not result['passed']:
             return 2
         if args.command=='sources' and args.source_command=='sync' and any(r['status']=='error' for r in result['jobs']):
+            return 2
+        if args.command=='sources' and args.source_command=='verify' and not result['passed']:
             return 2
         return 0
     except (ValueError, FileNotFoundError, RuntimeError) as exc:

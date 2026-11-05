@@ -1,6 +1,6 @@
 # 資料來源整合與仍需提供的資源
 
-查核日期：2026-11-04（Asia/Taipei）。這七項來源足以支援第一階段日線量化研究；仍須逐一驗證帳號方案、資料起訖、發布時間及修正版本，才能認定適合歷史回測。持有 API Key 並不表示所有端點或十年歷史都已開通。
+查核日期：2026-11-05（Asia/Taipei）。這七項來源足以支援第一階段日線量化研究；仍須逐一驗證帳號方案、資料起訖、發布時間及修正版本，才能認定適合歷史回測。持有 API Key 並不表示所有端點或十年歷史都已開通。
 
 ## 各來源的實際分工
 
@@ -14,7 +14,7 @@
 | [Fugle](https://developer.fugle.tw/docs/data/http-api/getting-started/) | 原始與還原日線分開擷取、不到一年分段、ETF 每日持股、法人、集保分散、當日報價／成交／K線快照 | 歷史端點權限、分K起點、ETF成分資料最早日期及資料發布時間；ETF權重按百分比轉為比例，不補造歷史公告時間 |
 | [富邦 Neo API](https://www.fbs.com.tw/TradeAPI/docs/trading/library/python/login/loginAPIKey/) | 官方 SDK 的行情唯讀路徑、優先 `apikey_login`、原始／還原日線及交叉核對用途 | 需身分識別、API Key、當地憑證與密碼、相容 SDK；還原K線需支援該功能的新版SDK。沒有呼叫下單、出入金、庫存或損益介面 |
 
-目前上述私有來源完成程式契約與回歸測試，**尚未使用你的 Key 完成真實連線驗證**。完整使用者權限清單可填入 `configs/source_access.example.json` 的副本；只記錄方案與資料範圍，不填 Key、帳號或身分資料。
+目前已完成多來源本機唯讀實測與修正，提供 `sources verify --full` 重複核對；帳號權限與原始證據只保留於被忽略的本機目錄。部分端點需方案權限，不能以其他可用端點推論全部開通。詳見 [API驗收](API_VERIFICATION.md)。完整使用者權限清單可填入 `configs/source_access.example.json` 的副本；只記錄方案與資料範圍，不填 Key、帳號或身分資料。
 
 Fugle 官方文件列出還原價格及 ETF 持股介面，可能直接補齊初版的還原價格與權重來源缺口；實際方案仍須測試。還原序列會隨後續公司行動向前重算，沒有指定過去時點的還原版本，因此每次下載都須留存。[歷史K線規格](https://developer.fugle.tw/docs/data/http-api/historical/candles/)、[ETF持股規格](https://developer.fugle.tw/docs/data/http-api/ownership/etf-holdings/)
 
@@ -70,7 +70,7 @@ FUBON_PASSWORD=
 
 富邦優先用 API Key，`FUBON_PASSWORD` 可留空；身分及憑證仍依官方SDK要求提供。金鑰應限制為行情用途，設定可用的IP／到期限制；憑證放在本機私人路徑或被忽略的 `.secrets/`，權限0600。[富邦Key權限說明](https://www.fbs.com.tw/TradeAPI/docs/trading/api-key-apply/)
 
-除了Key，本專案還需要：各方案權限／配額及歷史起訖、相容富邦SDK／憑證、核實交易日曆、股票主檔及歷史成分、財務單位字典與公告更正記錄、資料保留／再利用條款，以及後續固定運行與備份的環境。沒有要求你提供帳戶庫存、資金或交易權限。
+除了Key，本專案還需要：各方案權限／配額及歷史起訖、有效富邦憑證／相容環境、核實交易日曆、股票主檔及歷史成分、財務單位字典與公告更正記錄、資料保留／再利用條款，以及後續固定運行與備份的環境。沒有要求你提供帳戶庫存、資金或交易權限。
 
 ## 執行順序
 

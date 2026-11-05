@@ -353,9 +353,10 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
     rows = []
     orders = 0
     unexecutable = 0
+    benchmark_unexecutable = 0
     for anchor, group in p.groupby("date", sort=True):
         benchmark_vals = group.benchmark_trade_return_1.dropna()
-        if benchmark_vals.empty or group.next_open_date.dropna().empty:
+        if group.next_open_date.dropna().empty:
             continue
         valid = (group.trade_return_1.notna() & np.isfinite(group.trade_return_1)
                  & group.next_open.gt(0) & group.next_open_date.notna())
@@ -372,7 +373,11 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
         allocation = weight * len(eligible)
         lot_returns = ((1 + eligible.trade_return_1) * (1 - sell) / (1 + buy) - 1)
         strategy_return = float(weight * lot_returns.sum())
-        benchmark_return = float((1 + benchmark_vals.iloc[0]) * (1 - etf_sell) / (1 + buy) - 1)
+        benchmark_gross=float(benchmark_vals.iloc[0]) if len(benchmark_vals) else np.nan
+        # The overnight-flat ETF strategy stays cash when its opening trade is
+        # unavailable. Stock trades still execute on the observed market day.
+        benchmark_return = float((1 + benchmark_gross) * (1 - etf_sell) / (1 + buy) - 1) if len(benchmark_vals) else 0.
+        benchmark_unexecutable+=int(benchmark_vals.empty)
         # Keep missing/unexecutable stock allocations in cash rather than
         # renormalizing survivors to hide suspensions or missing data.
         equal_weight_return = float((((1 + group.loc[valid, "trade_return_1"]) * (1 - sell)
@@ -380,13 +385,13 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
         orders += 2 * len(eligible)
         unexecutable += int((~valid).sum())
         hold_log = group.get("benchmark_target_1", pd.Series(dtype=float)).dropna()
-        hold_return = float(np.expm1(hold_log.iloc[0])) if len(hold_log) else float(benchmark_vals.iloc[0])
+        hold_return = float(np.expm1(hold_log.iloc[0])) if len(hold_log) else benchmark_gross
         absolute_open = group.get("benchmark_adjusted_next_open", pd.Series(dtype=float)).dropna()
         absolute_close = group.get("benchmark_end_adj_close_1", pd.Series(dtype=float)).dropna()
         rows.append({"date": pd.Timestamp(group.next_open_date.dropna().iloc[0]), "anchor_date": anchor,
                      "strategy_return": strategy_return, "benchmark_return": benchmark_return,
                      "equal_weight_return": equal_weight_return, "benchmark_hold_return": hold_return,
-                     "benchmark_intraday_gross": float(benchmark_vals.iloc[0]),
+                     "benchmark_intraday_gross": benchmark_gross,
                      "benchmark_absolute_open": float(absolute_open.iloc[0]) if len(absolute_open) else np.nan,
                      "benchmark_absolute_close": float(absolute_close.iloc[0]) if len(absolute_close) else np.nan,
                      "exposure": allocation / (1 + buy), "positions": len(eligible),
@@ -399,13 +404,14 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
     # Additional passive ETF reference: buy once at the first executable open,
     # hold through all following overnight sessions, liquidate at the last close.
     gaps = bool((equity.anchor_date.iloc[1:].to_numpy() != equity.date.iloc[:-1].to_numpy()).any())
-    has_absolute_prices = bool(equity.benchmark_absolute_open.gt(0).all()
-                               and equity.benchmark_absolute_close.gt(0).all())
+    has_absolute_prices = bool(equity.benchmark_absolute_open.iloc[0]>0
+                               and equity.benchmark_absolute_close.iloc[-1]>0)
     if has_absolute_prices:
         hold_equity = equity.benchmark_absolute_close.to_numpy() / equity.benchmark_absolute_open.iloc[0] / (1 + buy)
         hold_equity[-1] *= (1 - etf_sell)
         prior = np.r_[1., hold_equity[:-1]]
         hold_returns = hold_equity / prior - 1
+        gaps = gaps or not np.isfinite(hold_equity).all()
     elif not gaps:
         hold_returns = equity.benchmark_hold_return.to_numpy(copy=True)
         hold_returns[0] = (1 + equity.benchmark_intraday_gross.iloc[0]) / (1 + buy) - 1
@@ -416,6 +422,7 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
         hold_equity = np.full(len(equity), np.nan)
     equity["benchmark_buy_hold_net"] = hold_equity
     metrics = {"status": "ok", "orders": orders, "dates": len(equity),
+               "benchmark_unexecutable_dates":benchmark_unexecutable,
                "unexecutable_stock_observations": unexecutable,
                "mean_exposure": float(equity.exposure.mean()), "turnover": float(equity.turnover.sum()),
                "execution": "next_open_to_same_day_close; flat overnight; no multi-day compounding",
@@ -432,6 +439,10 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
             passive.update(annualized_return=None, sharpe=None, max_drawdown=None,
                            reason="evaluation dates have gaps; endpoint total return is valid, daily risk metrics withheld")
         metrics["benchmark_buy_hold"] = passive
+    elif has_absolute_prices and np.isfinite(hold_equity[-1]):
+        metrics['benchmark_buy_hold']=dict(status='total_return_only',total_return=float(hold_equity[-1]-1),
+            annualized_return=None,sharpe=None,max_drawdown=None,
+            reason='missing benchmark valuations; exact endpoint total return retained, daily risk withheld')
     else:
         metrics["benchmark_buy_hold"] = {"status": "unavailable", "total_return": None,
             "annualized_return": None, "sharpe": None, "max_drawdown": None,

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-05
+
+- Added repeatable, credential-safe `sources verify` live checks with immutable local evidence and partial entitlement reporting.
+- Fixed FRED vintage-window limits and future-dated observations, Twinkle UTF-8 SSE/202 responses, official TAIFEX CSV, and non-JSON HTTP entitlement errors.
+- Limited FMP financial snapshots to five records by default, enabled explicitly annual estimates, and paced Fugle requests to its historical-data quota.
+- Fixed ETF suspensions in the market-session calendar, stock-label maturity and benchmark simulation; missing passive valuations withhold daily risk metrics.
+- Validated real multi-source integration locally, prepared an isolated compatible Fubon SDK environment, and documented remaining data/manual setup and open-source options.
+
 ## 0.2.0 — 2026-11-05
 
 - Added a responsive Traditional Chinese research workspace with overview, stock forecasts, backtests, data sources, workflow status and project gaps.

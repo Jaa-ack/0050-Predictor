@@ -1,7 +1,9 @@
 """Read-only source adapters. Network acquisition and model-ready normalization are separate."""
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import csv
 import hashlib
+import io
 import json
 from pathlib import Path
 import re
@@ -71,13 +73,17 @@ class SourceResult:
 
 
 class SourceTransport:
-    def __init__(self, credentials, raw_dir=None, session=None):
+    def __init__(self, credentials, raw_dir=None, session=None,min_intervals=None,clock=None,sleeper=None):
         self.credentials=credentials
         install_secret_filters(credentials)
         self.raw_dir=raw_dir
         self.session=session or requests.Session()
         self.last_headers={}
         self.retrieved_at=now_utc()
+        self.min_intervals={'fugle':1.05,**(min_intervals or {})}
+        self.clock=clock or time.monotonic
+        self.sleeper=sleeper or time.sleep
+        self.last_request={}
 
     def archive(self,provider,dataset,params,payload):
         if self.raw_dir is None:
@@ -104,6 +110,11 @@ class SourceTransport:
         attempts=3 if method=="GET" else 1
         response=None
         for attempt in range(attempts):
+            interval=self.min_intervals.get(provider,0.)
+            remaining=interval-(self.clock()-self.last_request[provider]) if provider in self.last_request else 0.
+            if remaining>0:
+                self.sleeper(remaining)
+            self.last_request[provider]=self.clock()
             try:
                 response=self.session.request(method,url,timeout=(10,40),allow_redirects=False,**kwargs)
             except requests.RequestException:
@@ -117,13 +128,15 @@ class SourceTransport:
             break
         self.retrieved_at=now_utc()
         self.last_headers=dict(response.headers)
-        if response.status_code==204:
+        if response.status_code==204 or (provider=='twinkle' and response.status_code==202 and
+            kwargs.get('json',{}).get('method','').startswith('notifications/')):
             return {}
         try:
             if "text/event-stream" in response.headers.get("Content-Type",""):
+                response.encoding='utf-8'  # SSE is UTF-8, despite requests' text/* Latin-1 default.
                 messages=[]
                 for block in response.text.replace("\r\n","\n").split("\n\n"):
-                    data="\n".join(line[5:].lstrip() for line in block.splitlines() if line.startswith("data:"))
+                    data="\n".join(line[5:].lstrip() for line in block.split('\n') if line.startswith("data:"))
                     if data:
                         messages.append(json.loads(data))
                 expected=kwargs.get("json",{}).get("id")
@@ -131,9 +144,29 @@ class SourceTransport:
                 if not matching:
                     raise ValueError("No matching MCP response")
                 payload=matching[-1]
+            elif (provider=='taifex' and parsed.path=='/v1/DailyMarketReportFut' and response.status_code==200
+                  and not response.text.lstrip().startswith(('[','{'))):
+                body=getattr(response,'content',None)
+                if body is not None:
+                    try:
+                        body=body.decode('utf-8-sig')
+                    except UnicodeDecodeError:
+                        body=body.decode('cp950')
+                else:
+                    body=response.text.lstrip('\ufeff')
+                reader=csv.DictReader(io.StringIO(body))
+                required={'日期','契約代號','到期月份(週別)','最後成交價','交易時段'}
+                if not required<=set(reader.fieldnames or []):
+                    raise ValueError('Official futures CSV schema mismatch')
+                payload=list(reader)
+                if any(None in row or any(value is None for value in row.values()) for row in payload):
+                    raise ValueError('Malformed official futures CSV row')
             else:
                 payload=response.json()
         except (ValueError,TypeError):
+            if response.status_code!=200:
+                self.archive(provider,parsed.path,{},dict(http_status=response.status_code,response_format='unparsed'))
+                raise SourceHTTPError(provider,response.status_code) from None
             raise RuntimeError(f"{provider}: invalid response (HTTP {response.status_code}); payload omitted") from None
         self.archive(provider,parsed.path,kwargs.get("params",kwargs.get("json",{})),payload)
         if response.status_code!=200:
@@ -154,37 +187,44 @@ def fetch_fred(transport, series_id, start, end):
     identifier(series_id)
     list(date_windows(start,end))
     records=[]
-    for _ in range(100):
-        params=dict(series_id=series_id,api_key=transport.credentials.get("FRED_API_KEY").get_secret_value(),
-            file_type="json",observation_start=start,observation_end=end,realtime_start="1776-07-04",
-            realtime_end=end,output_type=1,sort_order="asc",limit=100000,offset=len(records))
-        payload=transport.request("fred","GET","https://api.stlouisfed.org/fred/series/observations",params=params)
-        batch=payload.get("observations")
-        if not isinstance(batch,list):
-            raise RuntimeError("fred: missing observations")
-        records.extend(batch)
-        if len(records)>=int(payload.get("count",len(records))):
-            break
-        if not batch:
-            raise RuntimeError("fred: incomplete pagination")
-    else:
-        raise RuntimeError("fred: pagination limit reached; split the date range")
+    # JSON permits at most 2,000 vintage dates. Bound real-time windows too,
+    # not only observation dates; daily series can otherwise fail even for one month.
+    for first,last in date_windows(start,end,days=1460):
+        offset=0
+        for _ in range(100):
+            params=dict(series_id=series_id,api_key=transport.credentials.get("FRED_API_KEY").get_secret_value(),
+                file_type="json",observation_start=start,observation_end=end,realtime_start=first,
+                realtime_end=last,output_type=1,sort_order="asc",limit=100000,offset=offset)
+            payload=transport.request("fred","GET","https://api.stlouisfed.org/fred/series/observations",params=params)
+            batch=payload.get("observations")
+            if not isinstance(batch,list):
+                raise RuntimeError("fred: missing observations")
+            records.extend(batch)
+            offset+=len(batch)
+            if offset>=int(payload.get("count",offset)):
+                break
+            if not batch:
+                raise RuntimeError("fred: incomplete pagination")
+        else:
+            raise RuntimeError("fred: pagination limit reached; split the date range")
     return _result(transport,"fred",series_id,"macro",records,vintage_mode="all_real_time_periods",
         release_time_precision="date_only",complete=True)
 
 
-def fetch_fmp(transport, dataset, symbol, start, end):
+def fetch_fmp(transport, dataset, symbol, start, end,statement_limit=5,period='quarter'):
     routes={"prices":"historical-price-eod/full","adjusted_prices":"historical-price-eod/dividend-adjusted",
             "income":"income-statement","balance":"balance-sheet-statement",
             "cashflow":"cash-flow-statement","estimates":"analyst-estimates","news":"news/stock"}
     if dataset not in routes:
         raise ValueError("Unsupported FMP dataset")
     identifier(symbol)
+    if isinstance(statement_limit,bool) or not isinstance(statement_limit,int) or not 1<=statement_limit<=1000 or period not in {'quarter','annual'}:
+        raise ValueError('FMP financial limit must be 1..1000 and period quarter/annual')
     params=dict(symbol=symbol,apikey=transport.credentials.get("FMP_API_KEY").get_secret_value())
     if dataset in {"prices","adjusted_prices","news"}:
         params.update({"from":start,"to":end})
     else:
-        params.update(period="quarter",limit=1000)
+        params.update(period=period,limit=statement_limit)
     payload=transport.request("fmp","GET","https://financialmodelingprep.com/stable/"+routes[dataset],params=params)
     if isinstance(payload,dict) and "historical" in payload:
         payload=payload["historical"]
@@ -199,8 +239,9 @@ def fetch_fmp(transport, dataset, symbol, start, end):
     kind="market" if dataset in {"prices","adjusted_prices"} else "news" if dataset=="news" else "financial"
     return _result(transport,"fmp",dataset,kind,payload,symbol=symbol,
         complete=dataset in {"prices","adjusted_prices"},historical_revision_verified=False,
+        record_limit=statement_limit if kind=='financial' else None,financial_period=period if kind=='financial' else None,
         adjustment_source=routes[dataset] if kind=='market' else None,
-        limitation="Statements/estimates are current vendor snapshots, not historical analyst vintages; statements capped at1000, news requires dedicated pagination before claiming complete history.")
+        limitation="Statements/estimates are capped current vendor snapshots, not complete historical analyst vintages; news requires dedicated pagination before claiming complete history.")
 
 
 def fetch_finmind(transport,dataset,symbol,start,end):
@@ -447,14 +488,16 @@ def events_from_result(result):
             if not required<=set(records):
                 raise ValueError("FRED observations lack vintage metadata")
             records["value"]=pd.to_numeric(records.value,errors="coerce")
-            records=records[np.isfinite(records.value)].sort_values(["realtime_start","date"])
+            records=records[np.isfinite(records.value)].copy()
+            # Some daily observations are future-dated relative to their vendor vintage.
+            # Preserve the raw vintage, but withhold the feature until BOTH dates end.
+            records['effective_day']=[max(str(r.realtime_start),str(r.date)) for r in records.itertuples()]
+            records=records.sort_values(['effective_day','realtime_start','date'])
             known={}
-            for version,(vintage,updates) in enumerate(records.groupby("realtime_start",sort=True)):
+            for version,(vintage,updates) in enumerate(records.groupby('effective_day',sort=True)):
                 for record in updates.to_dict("records"):
                     known[record["date"]]=record["value"]
                 latest=max(known)
-                if pd.Timestamp(vintage)<pd.Timestamp(latest):
-                    raise ValueError("FRED vintage precedes observation period")
                 # FRED supplies a vintage DAY, not a release time. Use the NEXT
                 # New York midnight to avoid pretending an 08:30 release was known at00:00.
                 available=(pd.Timestamp(vintage)+pd.Timedelta(days=1)).tz_localize("America/New_York").tz_convert("UTC")

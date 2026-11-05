@@ -231,7 +231,9 @@
       "provider": "fmp",
       "dataset": "estimates",
       "symbol": "TSM",
-      "enabled": true
+      "enabled": true,
+      "period": "annual",
+      "limit": 5
     },
     {
       "id": "news-semiconductor",
@@ -268,6 +270,24 @@
       "enabled": true,
       "start": "2026-10-01",
       "end": "today"
+    },
+    {
+      "id": "fred-nasdaq-composite",
+      "provider": "fred",
+      "dataset": "NASDAQCOM",
+      "enabled": false,
+      "start": "2014-01-01",
+      "end": "today",
+      "note": "Optional index factor, not QQQ/SOXX ETF. Nasdaq copyright/use conditions and release delay must be reviewed."
+    },
+    {
+      "id": "fred-semiconductor",
+      "provider": "fred",
+      "dataset": "NASDAQSOX",
+      "enabled": false,
+      "start": "2014-01-01",
+      "end": "today",
+      "note": "Optional index factor, not QQQ/SOXX ETF. Nasdaq copyright/use conditions and release delay must be reviewed."
     }
   ]
 }

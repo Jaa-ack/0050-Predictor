@@ -146,9 +146,8 @@ class ForecastLedger:
         p = p[p.available_at <= cutoff]
         if p.duplicated(["ticker", "date"]).any():
             raise ValueError("Settlement prices contain duplicate ticker/date rows")
-        sessions = sorted(p.loc[p.ticker == "0050", "date"].unique())
-        if not sessions:
-            raise ValueError("0050 is required as the observed trading-session calendar")
+        from .features import observed_market_sessions
+        sessions = observed_market_sessions(p)
         lookup = p.set_index(["ticker", "date"])
         planned = []
         for record in pending:
