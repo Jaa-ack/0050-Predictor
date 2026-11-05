@@ -34,3 +34,13 @@ def test_source_archive_redacts_snapshots_and_export_is_pit_ready(tmp_path):
 def test_source_snapshot_identifiers_do_not_escape_root(tmp_path):
     with pytest.raises(ValueError,match='snapshot'):
         SourceStore(tmp_path).read('../../elsewhere')
+
+
+def test_unchanged_observation_does_not_reset_receipt_age_but_reversions_survive(tmp_path):
+    store=SourceStore(tmp_path/'sources')
+    for stamp,value in [('2026-11-01T00:00Z',1),('2026-11-02T00:00Z',1),('2026-11-03T00:00Z',2),('2026-11-04T00:00Z',1)]:
+        store.write(SourceResult('finmind','TaiwanStockMonthRevenue','financial',
+            [{'stock_id':'2330','date':'2026-10-01','revenue':value}],stamp,{'symbol':'2330'}))
+    events=store.export_events(tmp_path/'events.csv')
+    assert events.value.tolist()==[1,2,1]
+    assert events.available_at.iloc[0]==pd.Timestamp('2026-11-01T00:00Z')

@@ -13,10 +13,11 @@ from .source_store import SourceStore
 from .sources import (SourceTransport,fetch_fred,fetch_fmp,fetch_finmind,fetch_fugle,fetch_fugle_prices,
                       fetch_news,fetch_fubon_prices,fetch_public,TwinkleClient)
 from .workflows import write_json
+from .public_sources import fetch_tdcc,fetch_gdelt
 
 REQUIRED={"finmind":["FINMIND_TOKEN"],"fred":["FRED_API_KEY"],"fmp":["FMP_API_KEY"],
           "newsapi":["NEWS_API_KEY"],"twinkle":["TWINKLE_API_KEY"],"fugle":["FUGLE_API_KEY"],
-          "fubon":["FUBON_PERSONAL_ID","FUBON_CERT_PATH"],"twse":[],"taifex":[]}
+          "fubon":["FUBON_PERSONAL_ID","FUBON_CERT_PATH"],"twse":[],"taifex":[],"tdcc":[],"gdelt":[]}
 
 
 def source_status(credentials):
@@ -42,6 +43,10 @@ def _execute_job(t,job):
     if end=='today':
         end=pd.Timestamp.now(tz='Asia/Taipei').date().isoformat()
     symbol=job.get('symbol','2330')
+    if provider=='tdcc' and dataset=='distribution':
+        return fetch_tdcc(t,job.get('tickers',[]))
+    if provider=='gdelt' and dataset=='gkg':
+        return fetch_gdelt(t,job.get('terms',[]),job.get('max_records',100))
     if provider=='fred':
         return fetch_fred(t,dataset,start,end)
     if provider=='fmp':

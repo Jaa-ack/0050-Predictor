@@ -2,6 +2,10 @@
 
 ## Unreleased — 2026-11-05
 
+- Added owner-only local PKCS#12 certificate import, SDK certificate permission checks, and publication-audit coverage for ignored versus force-tracked credentials.
+- Integrated free TWSE material disclosures and annual calendar candidates, the current TDCC OpenAPI ownership snapshot, and bounded GDELT GKG archive acquisition with explicit metadata-only coverage.
+- Added a keyless acquisition plan, document/version exports and numeric ownership events; unchanged observations retain their first receipt while corrections and reversions survive.
+- Added TDCC/GDELT web source cards and a dynamic provider count, plus current pricing, licensing and manual-setup guidance. Unverified annual calendars cannot be activated directly.
 - Added repeatable, credential-safe `sources verify` live checks with immutable local evidence and partial entitlement reporting.
 - Fixed FRED vintage-window limits and future-dated observations, Twinkle UTF-8 SSE/202 responses, official TAIFEX CSV, and non-JSON HTTP entitlement errors.
 - Limited FMP financial snapshots to five records by default, enabled explicitly annual estimates, and paced Fugle requests to its historical-data quota.

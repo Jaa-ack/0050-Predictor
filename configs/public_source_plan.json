@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "notes": "Keyless official snapshots and one latest GDELT metadata batch; not complete news history or verified future calendar.",
+  "jobs": [
+    {
+      "id": "twse-prices",
+      "provider": "twse",
+      "dataset": "prices",
+      "enabled": true
+    },
+    {
+      "id": "twse-companies",
+      "provider": "twse",
+      "dataset": "companies",
+      "enabled": true
+    },
+    {
+      "id": "twse-revenue",
+      "provider": "twse",
+      "dataset": "revenue",
+      "enabled": true
+    },
+    {
+      "id": "twse-announcements",
+      "provider": "twse",
+      "dataset": "announcements",
+      "enabled": true
+    },
+    {
+      "id": "twse-calendar",
+      "provider": "twse",
+      "dataset": "calendar",
+      "enabled": true
+    },
+    {
+      "id": "taifex-futures",
+      "provider": "taifex",
+      "dataset": "futures",
+      "enabled": true
+    },
+    {
+      "id": "tdcc-distribution",
+      "provider": "tdcc",
+      "dataset": "distribution",
+      "enabled": true,
+      "tickers": [
+        "0050",
+        "2330",
+        "2454",
+        "2317",
+        "2308",
+        "3711",
+        "1303",
+        "2383",
+        "2881",
+        "2891",
+        "3037"
+      ]
+    },
+    {
+      "id": "gdelt-latest-gkg",
+      "provider": "gdelt",
+      "dataset": "gkg",
+      "enabled": true,
+      "terms": [
+        "tsmc",
+        "nvidia",
+        "semiconductor"
+      ],
+      "max_records": 100
+    }
+  ]
+}

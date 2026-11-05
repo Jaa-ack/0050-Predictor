@@ -288,6 +288,49 @@
       "start": "2014-01-01",
       "end": "today",
       "note": "Optional index factor, not QQQ/SOXX ETF. Nasdaq copyright/use conditions and release delay must be reviewed."
+    },
+    {
+      "id": "twse-announcements",
+      "provider": "twse",
+      "dataset": "announcements",
+      "enabled": true
+    },
+    {
+      "id": "twse-calendar",
+      "provider": "twse",
+      "dataset": "calendar",
+      "enabled": true
+    },
+    {
+      "id": "tdcc-distribution",
+      "provider": "tdcc",
+      "dataset": "distribution",
+      "enabled": true,
+      "tickers": [
+        "0050",
+        "2330",
+        "2454",
+        "2317",
+        "2308",
+        "3711",
+        "1303",
+        "2383",
+        "2881",
+        "2891",
+        "3037"
+      ]
+    },
+    {
+      "id": "gdelt-latest-gkg",
+      "provider": "gdelt",
+      "dataset": "gkg",
+      "enabled": true,
+      "terms": [
+        "tsmc",
+        "nvidia",
+        "semiconductor"
+      ],
+      "max_records": 100
     }
   ]
 }

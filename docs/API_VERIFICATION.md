@@ -51,3 +51,9 @@ artifacts/fubon-venv/bin/python -m twquant --root artifacts/fubon-verification s
 本次另在隔離root做過多來源下載、事件匯出、特徵、歷史研究及paper預測實測。這能發現單元測試未涵蓋的供應商格式、方案及停牌案例；可行性仍由真實樣本外、封存測試、PIT品質與連續影子紀錄判斷。歷史重播的到期結算不計入及時逐日紀錄。
 
 還需要的資料／工程項目見 [PROJECT_STATUS.md](PROJECT_STATUS.md)，值得接入但尚未接入的來源與套件見 [OPEN_RESOURCES.md](OPEN_RESOURCES.md)。
+
+## 免費來源與憑證補強
+
+新增`configs/public_source_plan.json`，八個免費工作（TWSE行情／公司／營收／公告／日曆、TAIFEX、TDCC、GDELT）已實際同步成功。空的GDELT關鍵字批次可表示正常的0匹配，不視為憑證失效；`verify`會分開回報空批次、格式通過與模型映射狀態，不能視為完整新聞涵蓋。
+
+年度日曆只能匯出候選，必須另核實；TDCC按實際取得時間生成數值事件。文件與數值觀測連續重抓相同內容不重設首次收件，更正及稍後回復原值仍保留。新來源需累積足夠歷史、重新研究及校準，不能把本次成功請求當成樣本外優勢。富邦憑證安全匯入與各服務現行費用見[CERTIFICATES_AND_COSTS.md](CERTIFICATES_AND_COSTS.md)。

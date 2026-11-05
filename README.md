@@ -2,9 +2,20 @@
 
 這是一套能在本機執行的資料 → 特徵 → 歷史驗證 → 預測 → 到期評分／校準系統。第一版以日線為核心，提供十檔股票的 1、5、20 交易日方向機率、中央報酬估計、80% 殘差區間及獨立基本面估值。
 
-**目前已完成工程流程與多來源連接器，尚未證明真實市場預測優勢。** `demo` 使用合成資料，不能用示範績效判定投資可行性。可選 FinMind、Fugle 或富邦提供還原行情，並接入 FRED、FMP、News API、Twinkle；實際私人帳號權限仍待本機Key設定後確認。證交所及期交所四份公開快照已實際下載。
+**目前已完成工程流程與多來源連接器，尚未證明真實市場預測優勢。** `demo` 使用合成資料，不能用示範績效判定投資可行性。可選 FinMind、Fugle 或富邦提供還原行情，並接入 FRED、FMP、News API、Twinkle。已實測部分帳號與方案限制；富邦仍缺有效憑證。另有無需Key的TWSE、TAIFEX、TDCC及GDELT接入計畫，保留實際取得時間及資料邊界。
 
 金鑰僅存本機私人 `.env`（0600）或環境變數；可提交的 `.env.example` 保持空白。請先讀 [網頁操作指南](docs/WEB_GUIDE.md)、[來源與Key設定](docs/DATA_SOURCES.md)、[完整專案剩餘項目](docs/PROJECT_STATUS.md)、[Key保護與開源檢查](docs/SECRETS.md)。
+
+富邦`.p12`／`.pfx`可透過`secrets import-cert --from /absolute/path/exported.p12`安全複製至本機私人目錄；API費用、免費替代與人工設定見[憑證及資源指南](docs/CERTIFICATES_AND_COSTS.md)。免費資料可直接執行：
+
+```bash
+.venv/bin/python -m twquant --root artifacts/public-live sources sync --plan configs/public_source_plan.json
+.venv/bin/python -m twquant --root artifacts/public-live sources export-events
+.venv/bin/python -m twquant --root artifacts/public-live sources export-documents
+.venv/bin/python -m twquant --root artifacts/public-live sources export-calendar --year 2026
+```
+
+年度日曆匯出是待核實候選，不能直接啟用。GDELT僅取得最新15分鐘批次的新聞中繼資料，不是全天新聞或完整文章。沒有自動安裝背景收集排程。
 
 ```bash
 .venv/bin/python -m twquant sources status

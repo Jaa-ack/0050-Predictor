@@ -50,3 +50,12 @@ def test_price_probe_validates_snapshot_without_replacing_primary_history(tmp_pa
     assert price['model_prices'] is True
     assert marker.read_text()=='existing primary snapshot'
     assert any(x['status']=='empty' for x in result['checks'])
+
+
+def test_empty_public_news_batch_is_distinguished_from_api_failure(tmp_path,monkeypatch):
+    from twquant import source_verification as module
+    monkeypatch.setattr(module,'fetch_gdelt',lambda *a:SourceResult('gdelt','gkg','news',[],
+        '2026-11-05T00:00:00Z',{'complete':True}))
+    result=module.verify_sources(tmp_path,Credentials({}),providers=['gdelt'])
+    assert result['providers'][0]['status']=='empty'
+    assert result['checks'][0]['schema_validated'] is True

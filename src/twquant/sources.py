@@ -20,12 +20,14 @@ from .data import validate_prices
 
 HOSTS={"fred":"api.stlouisfed.org","fmp":"financialmodelingprep.com","newsapi":"newsapi.org",
        "twinkle":"api.twinkleai.tw","fugle":"api.fugle.tw","finmind":"api.finmindtrade.com",
-       "twse":"openapi.twse.com.tw","taifex":"openapi.taifex.com.tw"}
+       "twse":"openapi.twse.com.tw","taifex":"openapi.taifex.com.tw","tdcc":"openapi.tdcc.com.tw"}
 PUBLIC_ROUTES={
     ("twse","prices"):"https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
     ("twse","companies"):"https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
     ("twse","revenue"):"https://openapi.twse.com.tw/v1/opendata/t187ap05_L",
     ("taifex","futures"):"https://openapi.taifex.com.tw/v1/DailyMarketReportFut",
+    ('twse','announcements'):'https://openapi.twse.com.tw/v1/opendata/t187ap04_L',
+    ('twse','calendar'):'https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule',
 }
 
 
@@ -429,13 +431,11 @@ def fetch_fubon_prices(transport, tickers, start, end, sdk=None):
         login_key="FUBON_API_KEY" if c.status()["FUBON_API_KEY"] else "FUBON_PASSWORD"
         for key in ("FUBON_PERSONAL_ID",login_key,"FUBON_CERT_PATH"):
             c.get(key)
-        cert=Path(c.get("FUBON_CERT_PATH").get_secret_value()).expanduser()
-        if not cert.is_file() or cert.is_symlink():
-            raise ValueError("Fubon certificate must be a local regular file")
-        if cert.stat().st_mode&0o077:
-            raise ValueError("Fubon certificate requires owner-only permissions: chmod 0600")
+        from .credentials import private_certificate_path
+        cert=private_certificate_path(c.get('FUBON_CERT_PATH').get_secret_value())
         sdk=FubonSDK()
         values=[c.get(k).get_secret_value() for k in ("FUBON_PERSONAL_ID",login_key,"FUBON_CERT_PATH")]
+        values[2]=str(cert)
         if c.status()["FUBON_CERT_PASSWORD"]:
             values.append(c.get("FUBON_CERT_PASSWORD").get_secret_value())
         try:
@@ -464,6 +464,9 @@ def fetch_public(transport, provider, dataset):
     if (provider,dataset) not in PUBLIC_ROUTES:
         raise ValueError("Unsupported official public dataset")
     payload=transport.request(provider,"GET",PUBLIC_ROUTES[(provider,dataset)])
+    if provider=='twse' and dataset in {'announcements','calendar'}:
+        from .public_sources import normalize_announcements,normalize_calendar
+        return (normalize_announcements if dataset=='announcements' else normalize_calendar)(payload,transport.retrieved_at)
     return _result(transport,provider,dataset,"official_snapshot",payload,
                    availability_basis="observed_retrieval_only",historical=False,complete=True)
 
@@ -481,7 +484,13 @@ def _event(result,feature,value,period,published,available,ticker="*",version=0,
 def events_from_result(result):
     """Convert only defined numeric schemas, never invent sentiment or announcement times."""
     rows=[]
-    if result.provider=="fred":
+    if result.provider=='tdcc' and result.dataset=='distribution':
+        for record in result.records:
+            if not 1<=record['band']<=15:continue
+            for metric in ('ratio','holders'):
+                rows.append(_event(result,f'tdcc_band_{record["band"]}_{metric}',record[metric],record['date'],
+                    result.retrieved_at,result.retrieved_at,ticker=record['ticker']))
+    elif result.provider=="fred":
         records=pd.DataFrame(result.records)
         if not records.empty:
             required={"date","realtime_start","value"}

@@ -15,11 +15,16 @@ from .source_workflows import source_status
 from .sources import (SourceTransport,SourceHTTPError,fetch_fred,fetch_fmp,fetch_finmind,fetch_fugle,
     fetch_fugle_prices,fetch_fubon_prices,fetch_news,fetch_public,TwinkleClient,events_from_result)
 from .workflows import write_json
+from .public_sources import fetch_tdcc,fetch_gdelt
 
 
 def _probes(provider,start,end,full):
     jobs=[]
-    if provider=='finmind':
+    if provider=='tdcc':
+        jobs.append(('distribution',lambda t:fetch_tdcc(t,['2330','0050'])))
+    elif provider=='gdelt':
+        jobs.append(('latest-gkg',lambda t:fetch_gdelt(t,['tsmc','nvidia','semiconductor'],25)))
+    elif provider=='finmind':
         datasets=['TaiwanStockPrice','TaiwanStockPriceAdj','TaiwanStockInstitutionalInvestorsBuySell','TaiwanStockFinancialStatements']
         if full:datasets+=['TaiwanStockBalanceSheet','TaiwanStockCashFlowsStatement','TaiwanStockMonthRevenue']
         for dataset in datasets:
@@ -43,7 +48,7 @@ def _probes(provider,start,end,full):
     elif provider=='twinkle':
         jobs.append(('industry-discovery',lambda t:TwinkleClient(t).call('tw_search_datasets',{'query':'半導體','limit':2})))
     elif provider in {'twse','taifex'}:
-        for dataset in (['prices','companies','revenue'] if provider=='twse' else ['futures']):
+        for dataset in (['prices','companies','revenue','announcements','calendar'] if provider=='twse' else ['futures']):
             jobs.append((dataset,lambda t,d=dataset:fetch_public(t,provider,d)))
     elif provider=='fubon':
         jobs.append(('paired-prices',lambda t:fetch_fubon_prices(t,['0050'],start,end)))
@@ -111,6 +116,7 @@ def verify_sources(root,credentials,full=False,providers=None):
                     dates=[str(r['date']) for r in data.records if r.get('date')]
                     if dates:row.update(date_min=min(dates),date_max=max(dates))
                     if data.metadata.get('record_limit'):row['record_limit']=data.metadata['record_limit']
+                row['schema_validated']=True
                 row['status']='passed' if row['records'] else 'empty'
                 if provider=='fubon':row['login_attempted']=True
             except Exception as exc:
@@ -126,7 +132,8 @@ def verify_sources(root,credentials,full=False,providers=None):
         own=[row for row in checks if row['provider']==provider]
         passed=sum(row['status']=='passed' for row in own)
         summaries.append(dict(provider=provider,passed=passed,total=len(own),
-            status='passed' if passed==len(own) else 'partial' if passed else 'blocked' if all(r['status']=='blocked' for r in own) else 'failed'))
+            status='passed' if passed==len(own) else 'partial' if passed else 'blocked' if all(r['status']=='blocked' for r in own)
+                else 'empty' if all(r['status']=='empty' for r in own) else 'failed'))
     result=redact(dict(run_id=run_id,checked_at=datetime.now(timezone.utc).isoformat(),
         passed=all(row['status']=='passed' for row in checks),full=full,providers=summaries,checks=checks,
         scope='Bounded read-only transport, schema and snapshot checks; not proof of complete historical coverage or profitable forecasts.',

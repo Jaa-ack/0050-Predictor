@@ -24,7 +24,7 @@ News API 官方開發方案有24小時延遲、較短歷史範圍及開發用途
 
 ## 已接入並實際下載的官方公開資料
 
-以下四個介面已透過 `sources sync` 實際取得並封存。它們提供當期快照，不能代替十年還原行情或歷史公告版本。
+最初四個介面已透過 `sources sync` 實際取得並封存。它們提供當期快照，不能代替十年還原行情或歷史公告版本；下表保留該次筆數，後續更新以各工作目錄的不可覆寫快照為準。
 
 | 來源 | 端點 | 本次留存筆數 |
 |---|---|---:|
@@ -35,6 +35,17 @@ News API 官方開發方案有24小時延遲、較短歷史範圍及開發用途
 
 原始回應與檢查碼位於 `artifacts/real/sources/raw/`；資料快照、來源及擷取時間位於 `sources/snapshots/`；本次結果見 `sources/sync_report.json`。未向主價格表填入未還原的交易所行情。
 
+2026-11-05後續加入四個免費工作，並與上述四個一併完成八工作實測，計畫為`configs/public_source_plan.json`。最新實測在`artifacts/public-live/sources/`，沒有Key、訂閱或自動下單需求：
+
+| 來源 | 本次取得／可匯出 | 限制 |
+|---|---|---|
+| [TWSE重大訊息](https://openapi.twse.com.tw/v1/opendata/t187ap04_L) | 225份公告，使用發言日期／時間，保存實際收件與內容版本 | 不是全部金融新聞；今天收到的舊公告不回填為當時可用 |
+| [TWSE年度開休市](https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule) | 27事件，365日候選表 | `verified=false`，需核實臨時休市及歷年，禁止直接啟用 |
+| [TDCC官方OpenAPI](https://openapi.tdcc.com.tw/v1/opendata/1-5) | 11標的、187級距記錄；普通級距匯出330筆／30種數值事件 | 最新快照；16更正、17總計不入模型；不把週資料每日重抓當成新訊號 |
+| [GDELT GKG](https://gdeltproject.org/data.html) | 最新15分鐘批次完整校驗與有界下載；本批4筆關鍵字相關中繼資料 | 不是全天覆蓋，可能0筆；沒有原文標題／全文／發布時間，不捏造情緒；DOC API超時時採官方檔案通道 |
+
+公告與TDCC官方資料有[政府開放資料授權](https://data.gov.tw/dataset/18415)、[集保資料集](https://data.gov.tw/dataset/11452)。GDELT中繼資料不代表取得媒體全文重散布權。所有外部來源仍可能超時或改版。操作、費用及人工替代見[CERTIFICATES_AND_COSTS.md](CERTIFICATES_AND_COSTS.md)。
+
 ## 其他已整理的官方入口
 
 下列來源先列入資料目錄及驗收清單，**尚未全部建立自動爬取器**。網站可瀏覽不等於有穩定歷史API；優先使用已授權供應商或正式開放資料。
@@ -43,7 +54,7 @@ News API 官方開發方案有24小時延遲、較短歷史範圍及開發用途
 |---|---|
 | [公開資訊觀測站 MOPS](https://mops.twse.com.tw/) | 財報、月營收、重大訊息的原公告及更正佐證；需保留原始公告，補齊歷史可用時間 |
 | [元大0050持股](https://www.yuantaetfs.com/product/detail/0050/ratio) | 核對最新權重；每日保存以逐步建立自己的持股檔，不能把最新名單回填過去 |
-| [臺灣集保股權分散表](https://www.tdcc.com.tw/portal/zh/smWeb/qryStock) | 官方分散資料核對；可先經 Fugle／FinMind 授權端點取得，再對齊統計及發布日 |
+| [臺灣集保股權分散表](https://www.tdcc.com.tw/portal/zh/smWeb/qryStock) | 最新官方OpenAPI已接入；更早歷史、發布時點及供應商統計差異仍須核對 |
 | [中央銀行](https://www.cbc.gov.tw/) | 臺灣利率、匯率、貨幣與外匯統計；FRED匯率為特定來源及頻率，不能當即時USD/TWD |
 | [主計總處統計資訊網](https://www.stat.gov.tw/) | 臺灣GDP、CPI、就業及發布日程 |
 | [經濟部](https://www.moea.gov.tw/) | 外銷訂單、工業生產、產業統計；由 Twinkle 搜尋核對資料集ID後再建數值映射 |

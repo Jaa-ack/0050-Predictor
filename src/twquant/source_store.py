@@ -52,7 +52,37 @@ class SourceStore:
 
     @staticmethod
     def _has_mapping(provider,dataset,kind):
-        return provider in {'fred','finmind'} or provider=='fmp' and (dataset in {'prices','adjusted_prices'} or kind=='financial' and dataset!='estimates')
+        return provider in {'fred','finmind'} or provider=='tdcc' and dataset=='distribution' or provider=='fmp' and (dataset in {'prices','adjusted_prices'} or kind=='financial' and dataset!='estimates')
+
+    def export_documents(self,path):
+        rows=[]
+        last_content={}
+        for manifest in self.manifests():
+            if manifest['kind']!='news':continue
+            result=self.read(manifest['snapshot_id'])
+            for record in result.records:
+                if not {'document_id','available_at'}<=set(record):continue
+                content={key:value for key,value in record.items() if key not in {'available_at','retrieved_at'}}
+                content_hash=hashlib.sha256(json.dumps(content,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+                identity=(result.provider,record['document_id'])
+                if last_content.get(identity)==content_hash:continue
+                last_content[identity]=content_hash
+                rows.append({**record,'provider':result.provider,'source_snapshot_id':manifest['snapshot_id'],
+                             'content_sha256':content_hash})
+        rows.sort(key=lambda row:row['available_at'])
+        path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
+        with path.open('w',encoding='utf-8') as handle:
+            for row in rows:handle.write(json.dumps(row,ensure_ascii=False,default=str)+'\n')
+        return rows
+
+    def export_calendar(self,path,year):
+        from .public_sources import calendar_candidate
+        matches=[row for row in self.manifests() if row['provider']=='twse' and row['dataset']=='calendar']
+        if not matches:raise ValueError('Sync the official TWSE calendar snapshot first')
+        frame=calendar_candidate(self.read(matches[-1]['snapshot_id']),year)
+        path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
+        frame.to_csv(path,index=False)
+        return frame
 
     def export_events(self,path):
         frames=[]
@@ -70,6 +100,10 @@ class SourceStore:
         conflicting=combined.groupby(['ticker','feature','available_at'])['value'].nunique()
         if conflicting.gt(1).any():
             raise ValueError('Conflicting event vintages at same availability time; reconcile source versions before export')
+        # Re-fetching an unchanged observation must not reset its receipt age.
+        # Compare consecutive versions so a later reversion remains observable.
+        previous=combined.groupby(['source','ticker','feature','period_end'],dropna=False)['value'].shift()
+        combined=combined[combined.value.ne(previous)].reset_index(drop=True)
         path=Path(path)
         path.parent.mkdir(parents=True,exist_ok=True)
         combined.to_csv(path,index=False)

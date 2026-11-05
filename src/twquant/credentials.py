@@ -76,6 +76,65 @@ def initialize_credentials(path=Path(".env")):
     return True
 
 
+def prepare_certificate_directory(project_dir=Path('.')):
+    """Create a local private vault; never traverse a pre-existing symlink."""
+    root=Path(project_dir).resolve()
+    for folder in (root/'.secrets',root/'.secrets/fubon'):
+        if folder.is_symlink():
+            raise ValueError('Private certificate directory must not be a symlink')
+        folder.mkdir(mode=0o700,exist_ok=True)
+        info=folder.stat()
+        if not stat.S_ISDIR(info.st_mode) or (os.name=='posix' and info.st_uid!=os.getuid()):
+            raise ValueError('Private certificate directory must belong to this user')
+        if os.name=='posix':folder.chmod(0o700)
+    return root/'.secrets/fubon'
+
+
+def private_certificate_path(path):
+    path=Path(path).expanduser()
+    if path.is_symlink() or any(parent.is_symlink() for parent in path.parents):
+        raise ValueError('Fubon certificate path must not contain a symlink')
+    try:
+        info=path.stat()
+    except OSError:
+        raise ValueError('Fubon certificate must exist as a local regular file') from None
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError('Fubon certificate must be a local regular file')
+    if os.name=='posix' and (info.st_mode&0o077 or info.st_uid!=os.getuid()):
+        raise ValueError('Fubon certificate requires owner-only permissions: chmod 0600')
+    if info.st_size==0:raise ValueError('Certificate file is empty')
+    return path.resolve()
+
+
+def import_certificate(source,project_dir=Path('.')):
+    """Copy a user-selected PKCS#12 file privately. Does not parse passwords or log in."""
+    source=Path(source).expanduser()
+    if source.suffix.lower() not in {'.p12','.pfx'}:
+        raise ValueError('Choose the broker-exported .p12 or .pfx file')
+    if source.is_symlink():raise ValueError('Certificate source must not be a symlink')
+    fd=os.open(source,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0))
+    with os.fdopen(fd,'rb') as handle:
+        info=os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size==0 or info.st_size>2_000_000:
+            raise ValueError('Certificate source is empty or not a small regular file')
+        if os.name=='posix' and info.st_uid!=os.getuid():
+            raise ValueError('Certificate source must belong to this user')
+        body=handle.read(2_000_001)
+    folder=prepare_certificate_directory(project_dir)
+    destination=folder/('client'+source.suffix.lower())
+    try:
+        fd=os.open(destination,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o600)
+    except FileExistsError:
+        raise ValueError('Private certificate already exists; never overwrite it automatically') from None
+    try:
+        with os.fdopen(fd,'wb') as handle:
+            handle.write(body)
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
+    return private_certificate_path(destination)
+
+
 def redact(value, secrets=()):
     sensitive={"token","apikey","apisecret","authorization","password","secret","personalid",
                "certpath","certificate","certpassword","mcpsessionid","xapikey","cookie","setcookie"}

@@ -53,3 +53,19 @@ def test_git_force_added_runtime_data_is_blocked_even_when_binary(tmp_path):
     result=audit_repository(tmp_path)
     assert not result['passed']
     assert any(f['rule']=='tracked_runtime_artifact' for f in result['findings'])
+
+
+def test_private_certificate_directory_is_excluded_but_force_added_cert_is_blocked(tmp_path):
+    import subprocess
+    subprocess.run(['git','init','-q',str(tmp_path)],check=True,capture_output=True)
+    private=tmp_path/'.secrets/fubon'
+    private.mkdir(parents=True)
+    cert=private/'client.p12'
+    cert.write_bytes(b'\x30\x82\x00\xff')
+    cert.chmod(0o600)
+    (tmp_path/'.gitignore').write_text('.secrets/\n*.p12\n')
+    assert audit_repository(tmp_path)['passed']
+    subprocess.run(['git','add','--force','.secrets/fubon/client.p12'],cwd=tmp_path,check=True,capture_output=True)
+    result=audit_repository(tmp_path)
+    assert not result['passed']
+    assert any(x['rule']=='private_credential_file' for x in result['findings'])

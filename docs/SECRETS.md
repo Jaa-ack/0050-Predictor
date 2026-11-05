@@ -6,6 +6,7 @@
 
 - `.env.example` 可以提交，值保持空白；`.env`、`.env.*`、私人憑證、副本與日誌由 `.gitignore` 排除。
 - `.env`由程式以0600建立；讀取時拒絕symlink、其他擁有者或群組／其他人可讀的檔案。已存在檔案不會被初始化命令覆寫。
+- 富邦憑證以`secrets import-cert --from /absolute/path/exported.p12`複製至`.secrets/fubon/client.p12`（亦支援.pfx），資料夾0700／檔案0600，不覆寫既有檔；匯入不等於已驗證PKCS#12密碼、效期或登入。將私人.env的`FUBON_CERT_PATH`設為複本絕對路徑；原始下載檔與備份也需保護，詳見[CERTIFICATES_AND_COSTS.md](CERTIFICATES_AND_COSTS.md)。
 - 環境變數優先於.env；值包成 Pydantic `SecretStr`，普通 `repr`／`str` 只顯示遮罩，不能直接序列化為JSON。
 - Key只在伺服端網路／SDK邊界解封。前端與 `/api/sources` 只收到設定狀態，不會拿到Key。
 - 本機.env是**受作業系統權限保護的明文檔**，不是加密保險箱。正式部署應由OS Keychain或雲端Secret Manager注入環境，啟用磁碟加密；此版未實作遠端Secret Manager連接器，也不把「Base64編碼」視為加密。
@@ -32,6 +33,8 @@ pre-commit run --all-files
 ```
 
 內建掃描器只輸出檔案／行號／規則，**不顯示匹配到的秘密**；會檢查已被強制加入Git的.env，新增ignore規則不能掩蓋已追蹤的檔案。它是工作目錄的檢查，不代替完整Git歷史掃描。
+
+未追蹤的`.secrets/`與`credentials/`私人檔案不屬於發布集合；被強制追蹤的憑證仍會阻擋。Hosting管理工具回應可能包含存取權杖或簽名網址，須先採明確欄位允許清單，不能整份輸出到聊天或日誌。
 
 掃描器也拒絕已追蹤的資料／產物目錄、模型與資料庫，即使二進位檔無法以文字掃描。提交 hook 使用專案 venv 執行，不需要把真實Key寫進CI。線上靜態匯出只接受合成行情及預測，移除機器路徑與來源設定，所有操作按鈕停用。本機寫入任務限定固定動作、工作區、同源及 session nonce，單一任務執行；這不是可公開綁定的遠端管理服務。
 

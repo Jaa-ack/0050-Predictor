@@ -6,7 +6,7 @@ import subprocess
 
 from .credentials import Credentials
 
-EXCLUDED={'.git','.venv','__pycache__','.pytest_cache','.playwright-cli','artifacts','output','data','build','dist'}
+EXCLUDED={'.git','.venv','__pycache__','.pytest_cache','.playwright-cli','artifacts','output','data','build','dist','.secrets','credentials'}
 PRIVATE_SUFFIXES={'.pfx','.p12','.pem','.key','.cer','.crt'}
 RUNTIME_ROOTS={'artifacts','data','output','.venv','build','dist','credentials','.secrets'}
 RUNTIME_SUFFIXES={'.joblib','.parquet','.sqlite','.sqlite3','.db','.pkl','.pickle'}

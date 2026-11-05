@@ -117,6 +117,8 @@ def parser():
     credentials=subs.add_parser('secrets',help='建立私人金鑰欄位或執行開源前洩密檢查')
     credential_sub=credentials.add_subparsers(dest='secret_command',required=True)
     credential_sub.add_parser('init')
+    cert=credential_sub.add_parser('import-cert',help='安全複製本機.p12/.pfx至私人目錄；不登入、不覆寫')
+    cert.add_argument('--from',dest='certificate_source',type=Path,required=True)
     audit=credential_sub.add_parser('audit')
     audit.add_argument('--repo',type=Path,default=Path('.'))
     sources=subs.add_parser('sources',help='多來源狀態、擷取、模型特徵匯出與交叉核對')
@@ -129,6 +131,11 @@ def parser():
     sync.add_argument('--plan',type=Path,default=Path('configs/source_plan.json'))
     export=source_sub.add_parser('export-events')
     export.add_argument('--out',type=Path)
+    documents=source_sub.add_parser('export-documents',help='去重匯出新聞／公告與內容修正版本')
+    documents.add_argument('--out',type=Path)
+    calendar_export=source_sub.add_parser('export-calendar',help='匯出待核實年度日曆；不自動啟用')
+    calendar_export.add_argument('--year',type=int,default=int(now_taipei()[:4]))
+    calendar_export.add_argument('--out',type=Path)
     compare=source_sub.add_parser('reconcile')
     compare.add_argument('--left',choices=['finmind','fugle','fubon'],required=True)
     compare.add_argument('--right',choices=['finmind','fugle','fubon'],required=True)
@@ -148,6 +155,11 @@ def execute(args):
         from .web_export import export_dashboard
         return export_dashboard(root,args.out)
     if args.command=='secrets':
+        if args.secret_command=='import-cert':
+            from .credentials import import_certificate
+            import_certificate(args.certificate_source)
+            return dict(imported=True,directory='.secrets/fubon',permissions='directory0700/file0600',
+                env_field='FUBON_CERT_PATH',login_attempted=False,credential_values_exposed=False)
         if args.secret_command=='init':
             from .credentials import initialize_credentials
             return dict(created=initialize_credentials(),file='.env',required_permissions='0600',secret_values_exposed=False)
@@ -168,6 +180,14 @@ def execute(args):
             out=args.out or root/'sources'/'events.csv'
             frame=SourceStore(root/'sources').export_events(out)
             return dict(rows=len(frame),features=frame.feature.nunique(),output=str(out))
+        if args.source_command=='export-documents':
+            out=args.out or root/'sources/documents.jsonl'
+            rows=SourceStore(root/'sources').export_documents(out)
+            return dict(documents=len(rows),output=str(out),raw_news_not_sentiment=True)
+        if args.source_command=='export-calendar':
+            out=args.out or root/'sources/calendar_candidates.csv'
+            rows=SourceStore(root/'sources').export_calendar(out,args.year)
+            return dict(days=len(rows),output=str(out),verified=False,automatic_activation=False)
         if args.source_command=='reconcile':
             return reconcile_prices(PriceStore(root/'source_prices'/args.left).read_prices(),PriceStore(root/'source_prices'/args.right).read_prices())
     if args.command == "ingest":
@@ -209,6 +229,8 @@ def execute(args):
         cal = pd.read_csv(args.csv, dtype={"date":str})
         if not {"date","is_open","source"} <= set(cal):
             raise ValueError("Calendar requires date,is_open,source")
+        if 'verified' in cal and not cal.verified.astype(str).str.lower().isin(['true','1']).all():
+            raise ValueError('Candidate calendar is not verified; reconcile official schedule and emergency closures first')
         if cal.date.duplicated().any() or cal.source.isna().any():
             raise ValueError("Calendar must have unique dates and nonempty sources")
         pd.to_datetime(cal.date, errors="raise")
