@@ -10,6 +10,8 @@
 
 [架構、工程完成比例與正式驗收邊界](docs/SYSTEM_READINESS.md)將第一階段工程、資料完整性及模型可行性分開列示；可執行流程不等於已通過正式上線。
 
+[優化順序與驗收方法](docs/OPTIMIZATION_PLAN.md)列出基準／機率校準、可成交目標、因子消融、歷史版本、執行環境及每日營運的下一步；建議項目尚未全部實作。
+
 富邦`.p12`／`.pfx`可透過`secrets import-cert --from /absolute/path/exported.p12`安全複製至本機私人目錄；API費用、免費替代與人工設定見[憑證及資源指南](docs/CERTIFICATES_AND_COSTS.md)。免費資料可直接執行：
 
 ```bash

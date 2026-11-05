@@ -2,6 +2,7 @@
 
 ## Unreleased — 2026-11-05
 
+- Documented feasibility diagnostics and an ordered optimization plan covering constant/directional baselines, calibration, executable-return targets, factor ablations and live-operation gaps; preserved the frozen models and private research evidence.
 - Fixed FRED real-time end dates in Taiwan mornings to respect the provider's St. Louis calendar day; retained the requested and effective bounds.
 - Separated Fubon login rejections from market-data initialization errors using fixed diagnostic codes without exposing SDK account results.
 - Protected native SDK rotating logs with a private directory and publication exclusions; force-tracked logs remain blocked by the audit.
