@@ -1,0 +1,5 @@
+# Template only. Not installed automatically.
+# Scheduler's own timezone must be Asia/Taipei; TZ here also controls subprocesses.
+TZ=Asia/Taipei
+# Replace paths; on holidays the data/session checks may skip or reject prediction.
+# 15 20 * * 1-5 /bin/bash "/absolute/path/0050 Predict/scripts/daily.sh" >> "/absolute/path/twquant-daily.log" 2>&1

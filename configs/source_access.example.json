@@ -1,0 +1,11 @@
+{
+  "verification_date": null,
+  "finmind":{"plan":null,"adjusted_prices":null,"historical_start":null,"requests_per_hour":null},
+  "fred":{"registered_key":null,"vintage_access_tested":null},
+  "fmp":{"plan":null,"history_years":null,"markets_and_symbols":[],"analyst_estimate_vintages":null},
+  "newsapi":{"plan":null,"delay_hours":null,"history_years":null,"production_allowed":null},
+  "fugle":{"plan":null,"adjusted_daily":null,"ownership_etf_holdings":null,"oldest_holdings_date":null,"intraday_history_start":null},
+  "twinkle":{"plan":null,"confirmed_tool_ids":[],"data_licenses":[]},
+  "fubon":{"sdk_version":null,"api_key_market_data_only":null,"certificate_expiry":null,"python_os_compatible":null},
+  "note":"Metadata only. NEVER store credential values or account identifiers here. null means unverified, not unavailable."
+}

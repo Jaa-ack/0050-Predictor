@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "twquant-0050"
+version = "0.2.0"
+description = "Point-in-time Taiwan equity research, walk-forward validation and daily paper forecasts"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=2.2,<3", "pandas>=2.2,<4", "scipy>=1.15,<2",
+  "scikit-learn>=1.7,<2", "pyarrow>=20,<25", "duckdb>=1.3,<2",
+  "requests>=2.32,<3", "joblib>=1.4,<2", "fastapi>=0.115,<1", "uvicorn>=0.30,<1", "pydantic>=2.9,<3"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "httpx>=0.28,<1"]
+publish = ["pre-commit>=4,<5", "build>=1.2,<2"]
+lightgbm = ["lightgbm>=4.6,<5"]
+
+[project.scripts]
+twquant = "twquant.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+twquant = ["static/*.html", "static/*.css", "static/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = ["error::RuntimeWarning"]

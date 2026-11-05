@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.git
+.venv
+.secrets
+credentials
+artifacts
+data
+output
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+*.log

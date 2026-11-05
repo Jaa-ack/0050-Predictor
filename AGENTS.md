@@ -1,0 +1,16 @@
+# Project working rules
+
+These rules preserve the user's requirements for this repository and future updates.
+
+- Build an executable, evidence-based 0050 research system. Synthetic demonstrations must remain clearly distinguished from real historical or live evidence.
+- The canonical GitHub repository is `https://github.com/Jaa-ack/0050-Predictor.git`.
+- For substantive work the user authorizes, implement and verify it, update relevant documentation and `CHANGELOG.md`, make a descriptive commit, and push to the canonical repository. Preserve existing history; never force-push or discard unrelated changes. Use a requested branch/PR workflow when the user specifies one.
+- Before committing or pushing, run the relevant Python tests, `node --test tests/web_state.test.mjs` for frontend behavior, and `python -m twquant secrets audit`. Review the staged file list and ensure no runtime/private artifacts are tracked.
+- Never print, commit, upload, or embed real credentials. Keep `.env`, certificates, raw/provider data, local logs, model binaries and runtime databases out of Git and deployment archives. The tracked `.env.example` must contain blank values only.
+- Credential values are read only by server-side code. The web interface may display configuration presence, never the values. No web form accepts provider keys.
+- Local workflow actions must use a fixed action allowlist, trusted workspace paths, same-origin/nonce protection and single-job execution. Never expose a shell command, arbitrary path or trading action through the web.
+- Online static previews contain only synthetic snapshots and have workflow execution disabled. The Python/FastAPI app performs actual acquisition, research and paper forecasting locally. Do not describe a static preview as a running prediction backend.
+- For Sites updates, reuse the project identity under the existing local preview checkout (`artifacts/site-preview/.openai/hosting.json` or the source helper's returned checkout). Read the Sites skill and preserve its audience. Do not register a duplicate Site.
+- Update the hosted preview after authorized frontend changes when hosting tools are available. Preserve the exact correspondence between the committed source, generated synthetic snapshot and deployment archive.
+- Do not automatically enable real-data schedules, spend on subscriptions, run broker orders or publish provider data. Key setup, live-data validation and trading authorization are separate.
+- The user's request to keep the repository updated applies to future authorized changes. Do not claim continuous unattended maintenance without a configured automation. Dependency-update PR configuration is provided separately.

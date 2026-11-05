@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#142923">
+  <meta name="description" content="0050 多因子研究工作台：歷史回測、股價預測、資料來源與逐日校準。">
+  <title>0050 Research · 多因子研究工作台</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./assets/app.css">
+  <script type="module" src="./assets/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳至主要內容</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主要導覽">
+      <a class="brand" href="#overview" aria-label="0050 Research 首頁">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span><strong>0050<span class="brand-dot">.</span></strong><small>RESEARCH WORKSPACE</small></span>
+      </a>
+      <div class="sidebar-caption">研究工作台 <span>WORKSPACE</span></div>
+      <nav class="nav" id="navigation">
+        <a href="#overview" data-page="overview"><span data-icon="overview"></span>研究總覽<span class="nav-arrow">↗</span></a>
+        <a href="#forecasts" data-page="forecasts"><span data-icon="forecast"></span>個股預測</a>
+        <a href="#backtests" data-page="backtests"><span data-icon="chart"></span>歷史回測</a>
+        <a href="#sources" data-page="sources"><span data-icon="database"></span>資料來源<span class="nav-count">09</span></a>
+        <a href="#workflows" data-page="workflows"><span data-icon="workflow"></span>工作流程</a>
+        <a href="#gaps" data-page="gaps"><span data-icon="check"></span>待完成項目</a>
+      </nav>
+      <div class="sidebar-method"><span class="eyebrow">RESEARCH PROCESS</span><div class="process-line"><i></i><span>歷史資料驗證</span></div><div class="process-line"><i></i><span>樣本外回測</span></div><div class="process-line"><i></i><span>逐日預測與校準</span></div><a href="https://github.com/Jaa-ack/0050-Predictor/blob/main/docs/METHODOLOGY.md" target="_blank" rel="noopener noreferrer">了解研究方法 <span>↗</span></a></div>
+      <div class="sidebar-bottom"><div class="connection"><span class="status-dot"></span><span id="connection-label">連線中</span></div><div class="sidebar-version">v0.2.0 <span>Asia / Taipei</span></div></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="breadcrumb"><span class="breadcrumb-home" data-icon="grid"></span><span>工作台</span><span class="slash">/</span><strong id="breadcrumb-title">研究總覽</strong></div>
+        <div class="topbar-actions"><span class="local-clock" id="local-clock">Asia / Taipei</span><span class="topbar-divider"></span><label class="workspace-picker"><span class="status-dot"></span><select id="workspace-select" aria-label="選擇資料工作區"><option value="demo">示範工作區</option></select></label><a class="icon-button github-link" id="github-link" href="https://github.com/Jaa-ack/0050-Predictor" target="_blank" rel="noopener noreferrer" aria-label="開啟 GitHub 專案"><span data-icon="github"></span></a></div>
+      </header>
+      <main id="main" tabindex="-1">
+        <div class="page-heading"><div><div class="eyebrow">TAIWAN EQUITY · MULTI-FACTOR RESEARCH</div><h1 id="page-title">研究總覽</h1><p id="page-subtitle">從資料驗證到預測校準，讓每一次研究都有依據。</p></div><div class="heading-actions"><span class="updated-label" id="updated-label">正在載入研究結果</span><button class="button button-secondary" id="refresh-button"><span data-icon="refresh"></span><span>重新整理</span></button></div></div>
+        <div id="environment-banner" class="environment-banner" role="status"><span class="banner-icon" data-icon="flask"></span><div><strong>正在連接研究工作區</strong><span>讀取回測、預測與資料來源狀態…</span></div></div>
+        <div id="error-banner" class="error-banner" role="alert" hidden></div>
+        <div id="page-content" aria-live="polite"><div class="loading-state"><span class="spinner"></span>正在載入研究資料</div></div>
+        <footer class="footer"><span>0050 Research <span class="footer-dot">·</span> 多因子預測與估值研究</span><span>歷史結果不代表未來表現 <span class="footer-dot">·</span> 僅供研究與影子驗證</span></footer>
+      </main>
+    </div>
+  </div>
+  <dialog id="stock-dialog" aria-labelledby="stock-dialog-title"><div class="dialog-top"><span class="eyebrow">STOCK RESEARCH</span><button class="icon-button" id="close-dialog" aria-label="關閉個股詳情">×</button></div><div id="stock-dialog-content"></div></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

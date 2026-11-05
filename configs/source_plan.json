@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "price_provider": "fugle",
+  "notes": "Explicit read-only acquisition. Missing credentials are reported, not replaced by synthetic data. Financial snapshots are observed now, not historical PIT statements.",
+  "jobs": [
+    {
+      "id": "twse-prices",
+      "provider": "twse",
+      "dataset": "prices",
+      "enabled": true
+    },
+    {
+      "id": "twse-companies",
+      "provider": "twse",
+      "dataset": "companies",
+      "enabled": true
+    },
+    {
+      "id": "twse-revenue",
+      "provider": "twse",
+      "dataset": "revenue",
+      "enabled": true
+    },
+    {
+      "id": "taifex-futures",
+      "provider": "taifex",
+      "dataset": "futures",
+      "enabled": true
+    },
+    {
+      "id": "fugle-daily",
+      "provider": "fugle",
+      "dataset": "prices",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today",
+      "tickers": [
+        "2330",
+        "2454",
+        "2317",
+        "2308",
+        "3711",
+        "1303",
+        "2383",
+        "2881",
+        "2891",
+        "3037",
+        "0050"
+      ]
+    },
+    {
+      "id": "fugle-etf-holdings",
+      "provider": "fugle",
+      "dataset": "holdings",
+      "symbol": "0050",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fugle-institutional-2330",
+      "provider": "fugle",
+      "dataset": "institutional",
+      "symbol": "2330",
+      "enabled": true,
+      "start": "2026-01-01",
+      "end": "today"
+    },
+    {
+      "id": "finmind-institutional-2330",
+      "provider": "finmind",
+      "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
+      "symbol": "2330",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "finmind-statements-2330",
+      "provider": "finmind",
+      "dataset": "TaiwanStockFinancialStatements",
+      "symbol": "2330",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "finmind-revenue-2330",
+      "provider": "finmind",
+      "dataset": "TaiwanStockMonthRevenue",
+      "symbol": "2330",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fred-gdp",
+      "provider": "fred",
+      "dataset": "GDP",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fred-cpi",
+      "provider": "fred",
+      "dataset": "CPIAUCSL",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fred-pce",
+      "provider": "fred",
+      "dataset": "PCEPI",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fred-unemployment",
+      "provider": "fred",
+      "dataset": "UNRATE",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fred-payrolls",
+      "provider": "fred",
+      "dataset": "PAYEMS",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fred-policy-rate",
+      "provider": "fred",
+      "dataset": "FEDFUNDS",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fred-treasury10y",
+      "provider": "fred",
+      "dataset": "DGS10",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fred-treasury2y",
+      "provider": "fred",
+      "dataset": "DGS2",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fred-money",
+      "provider": "fred",
+      "dataset": "M2SL",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fred-vix",
+      "provider": "fred",
+      "dataset": "VIXCLS",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fred-usdtwd",
+      "provider": "fred",
+      "dataset": "DEXTAUS",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fmp-spy",
+      "provider": "fmp",
+      "dataset": "adjusted_prices",
+      "symbol": "SPY",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fmp-qqq",
+      "provider": "fmp",
+      "dataset": "adjusted_prices",
+      "symbol": "QQQ",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fmp-soxx",
+      "provider": "fmp",
+      "dataset": "adjusted_prices",
+      "symbol": "SOXX",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fmp-tsm",
+      "provider": "fmp",
+      "dataset": "adjusted_prices",
+      "symbol": "TSM",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fmp-nvda",
+      "provider": "fmp",
+      "dataset": "adjusted_prices",
+      "symbol": "NVDA",
+      "enabled": true,
+      "start": "2014-01-01",
+      "end": "today"
+    },
+    {
+      "id": "fmp-estimates-tsm",
+      "provider": "fmp",
+      "dataset": "estimates",
+      "symbol": "TSM",
+      "enabled": true
+    },
+    {
+      "id": "news-semiconductor",
+      "provider": "newsapi",
+      "dataset": "everything",
+      "query": "TSMC OR MediaTek OR semiconductor",
+      "tickers": [
+        "2330",
+        "2454"
+      ],
+      "enabled": true,
+      "start": "2026-11-01",
+      "end": "today",
+      "max_pages": 5
+    },
+    {
+      "id": "twinkle-industry-discovery",
+      "provider": "twinkle",
+      "dataset": "tw_search_datasets",
+      "arguments": {
+        "query": "臺灣 出口 半導體 工業生產",
+        "limit": 10
+      },
+      "enabled": true
+    },
+    {
+      "id": "fubon-crosscheck",
+      "provider": "fubon",
+      "dataset": "prices",
+      "tickers": [
+        "0050",
+        "2330"
+      ],
+      "enabled": true,
+      "start": "2026-10-01",
+      "end": "today"
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "timezone": "Asia/Taipei",
+  "daily_volume_unit": "shares",
+  "finmind": {
+    "endpoint": "https://api.finmindtrade.com/api/v4/data",
+    "token_environment_variable": "FINMIND_TOKEN",
+    "datasets": [
+      "TaiwanStockPrice",
+      "TaiwanStockPriceAdj"
+    ],
+    "adjusted_data_access": "TaiwanStockPriceAdj requires a permitted FinMind membership; verify current account entitlement",
+    "availability_basis": "reconstructed_eod",
+    "historical_available_at_convention": "20:00 Asia/Taipei on the trade date, an assumed research cutoff rather than observed historical receipt",
+    "official_documentation": "https://finmind.github.io/tutor/TaiwanMarket/Technical/",
+    "timeout_seconds": 30,
+    "max_network_attempts": 3
+  },
+  "csv": {
+    "required_columns": [
+      "ticker",
+      "date",
+      "open",
+      "high",
+      "low",
+      "close",
+      "adj_close",
+      "volume",
+      "available_at"
+    ],
+    "optional_columns": [
+      "source",
+      "adjustment_source",
+      "availability_basis"
+    ],
+    "timestamps": "available_at requires an explicit UTC offset or Z",
+    "adjustments": "adj_close must come from verified corporate-action or total-return adjustments; raw close is never substituted automatically"
+  },
+  "demo": {
+    "source": "synthetic_demo",
+    "last_session": "2025-12-31",
+    "calendar": "synthetic weekdays, not a validated TWSE holiday calendar",
+    "evidence_scope": "Pipeline smoke testing only; cannot establish investment feasibility"
+  },
+  "universe": {
+    "path": "configs/universe.csv",
+    "verification_status": "User-provided 2026-11-02 snapshot; independently verify before live use",
+    "historical_membership": "Not provided. A fixed target universe is not a historical top-ten membership backtest."
+  },
+  "multi_source": {
+    "plan": "configs/source_plan.json",
+    "private_credentials": ".env (owner-only0600,never commit)",
+    "credential_template": ".env.example",
+    "access_metadata_template": "configs/source_access.example.json",
+    "adapters": [
+      "finmind",
+      "fred",
+      "fmp",
+      "newsapi",
+      "twinkle",
+      "fugle",
+      "fubon",
+      "twse",
+      "taifex"
+    ],
+    "default_adjusted_price_provider": "fugle",
+    "private_live_authentication": "pending_local_keys",
+    "documentation": "docs/DATA_SOURCES.md",
+    "status_documentation": "docs/PROJECT_STATUS.md"
+  }
+}

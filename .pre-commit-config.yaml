@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: twquant-secrets
+        name: Check publication files for private credentials
+        entry: bash scripts/check-secrets.sh
+        language: system
+        pass_filenames: false
+        always_run: true

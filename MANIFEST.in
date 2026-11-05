@@ -1,0 +1,10 @@
+global-exclude .env .env.* *.pfx *.p12 *.pem *.key *.cer *.crt *.log
+prune artifacts
+prune data
+prune output
+prune credentials
+prune .secrets
+include .env.example
+include README.md
+recursive-include configs *.json *.csv *.example
+recursive-include docs *.md

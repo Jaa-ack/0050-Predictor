@@ -1,0 +1,15 @@
+{
+  "min_train_dates": 252,
+  "calibration_dates": 63,
+  "test_dates": 63,
+  "max_folds": 5,
+  "embargo_dates": 1,
+  "commission": 0.001425,
+  "sell_tax": 0.003,
+  "slippage": 0.001,
+  "max_positions": 5,
+  "max_weight": 0.2,
+  "min_probability": 0.55,
+  "min_expected_return": 0.0,
+  "random_state": 42
+}
