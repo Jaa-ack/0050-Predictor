@@ -9,9 +9,13 @@
 - Playwright實測六頁導覽、20日期間、中文搜尋、個股價格與因子視窗、曲線圖例、9來源、工作區、P0篩選及本機demo任務完成。
 - 390px手機版頁面寬度等於視窗寬度，個股視窗可操作；瀏覽器Console為0 errors／0 warnings。截圖只保留於被忽略的 `output/playwright/`。
 - 新增API固定工作區／任務、nonce／同源、單工作執行、輸出遮罩及合成匯出回歸測試；內建稽核拒絕被強制加入Git的.env與二進位模型。
-- Gitleaks 8.30.1官方發行檔經SHA256核對，對80份待發布檔案掃描：no leaks found。Git歷史及GitHub CI結果於實際提交後追加。
+- Gitleaks 8.30.1官方發行檔經SHA256核對，對80份待發布檔案及首次提交完整Git歷史掃描：no leaks found。公開Git只追蹤空白 `.env.example`，不含私人.env、模型、資料庫或artifacts。
 - 線上預覽僅含合成快照，運算按鈕停用；不將部署成功解讀成真實市場模型已通過。
 - 靜態版瀏覽器驗證通過：個股與歷史圖表可讀、六個任務停用、沒有請求本機API。部署工具已回報 `succeeded`，網址為 <https://tw0050-research-lab.jaaack1203.chatgpt.site>，維持擁有者私人存取。
+
+GitHub首次發布commit為 [`791d3fa`](https://github.com/Jaa-ack/0050-Predictor/commit/791d3fa76a64de901138667ce86d9f88a86c3634)。[Python 3.11／3.14與前端測試CI](https://github.com/Jaa-ack/0050-Predictor/actions/runs/41940834572)、[金鑰與完整歷史掃描CI](https://github.com/Jaa-ack/0050-Predictor/actions/runs/41940834552)均通過。Dependabot已實際建立依賴更新PR，等待維護者審核；沒有自動合併。
+
+[合成預覽建置CI](https://github.com/Jaa-ack/0050-Predictor/actions/runs/41940834565)亦通過，產生 `synthetic-web-preview` artifact（149,036 bytes，保存7日）。託管頁面與GitHub產物均不包含真實來源資料。
 
 ## 多來源與開源保護增補
 

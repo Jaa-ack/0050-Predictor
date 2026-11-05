@@ -6,6 +6,7 @@
 - Added server-allowlisted workspaces, price history, research-run history and bounded local workflow actions protected by a session nonce and same-origin checks.
 - Added a synthetic-only static web export for hosted previews; private keys, real provider data, raw files and model binaries are excluded.
 - Prepared GitHub test/security workflows, dependency-update PR configuration, contribution guidance and persistent update rules.
+- Published the canonical GitHub repository and private synthetic preview; verified Python 3.11/3.14 CI, frontend checks and full-history secret scanning.
 
 ## 0.1.0 — 2026-11-04
 
