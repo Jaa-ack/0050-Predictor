@@ -57,3 +57,21 @@ def test_job_failure_reports_safe_error_and_releases_busy_state(tmp_path):
     assert wait_finished(manager)['status']=='failed'
     manager.submit('research','real')
     assert wait_finished(manager)['status']=='failed'
+
+
+def test_web_prediction_includes_only_configured_available_transfer_assets(tmp_path):
+    import json
+    from twquant.data import PriceStore
+    from twquant.demo import make_demo_prices
+    root=tmp_path/'real';p=make_demo_prices(5)
+    PriceStore(root/'data').write_prices(p)
+    (root/'current.json').write_text(json.dumps({'run_id':'test'}))
+    folder=root/'runs'/'test';folder.mkdir(parents=True)
+    (folder/'report.json').write_text(json.dumps({'provenance':{'config':{'evaluation_tickers':['0050','1216','IX0001']}}}))
+    manager=JobManager({'real':root},tmp_path,Credentials({}))
+    argv=manager._argv('predict','real')
+    selected=argv[argv.index('--tickers')+1].split(',')
+    assert '0050' in selected
+    assert '1216' not in selected
+    assert 'IX0001' not in selected
+    assert '2330' in selected

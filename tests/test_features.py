@@ -89,7 +89,8 @@ def test_etf_suspension_does_not_remove_stock_sessions_or_fabricate_benchmark_pr
     assert stock.loc[dates[25],'label_end_1']==dates[26]
     assert stock.loc[dates[25],'label_end_5']==dates[30]
     assert stock.loc[dates[25],'trade_valid_1']
-    assert pd.isna(stock.loc[dates[26],'f_market_return_1'])
+    # Core-ten market context remains available when only the test ETF halts.
+    assert np.isfinite(stock.loc[dates[26],'f_market_return_1'])
     assert pd.isna(stock.loc[dates[26],'benchmark_adj_close'])
     preopen=build_features(prices,mode='preopen')
     decision=preopen[(preopen.ticker=='2330') & (preopen.date==dates[25])].iloc[0]

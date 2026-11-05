@@ -11,5 +11,15 @@
   "max_weight": 0.2,
   "min_probability": 0.55,
   "min_expected_return": 0.0,
-  "random_state": 42
+  "random_state": 42,
+  "evaluation_tickers": [
+    "0050",
+    "1216",
+    "2002",
+    "2412",
+    "IX0001"
+  ],
+  "feature_profile": "portable_all",
+  "training_window_dates": 756,
+  "calibration_policy": "chronological_shrinkage"
 }

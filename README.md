@@ -2,7 +2,7 @@
 
 這是一套能在本機執行的資料 → 特徵 → 歷史驗證 → 預測 → 到期評分／校準系統。第一版以日線為核心，提供十檔股票的 1、5、20 交易日方向機率、中央報酬估計、80% 殘差區間及獨立基本面估值。
 
-**目前已完成工程流程與多來源連接器，尚未證明真實市場預測優勢。** `demo` 使用合成資料，不能用示範績效判定投資可行性。可選 FinMind、Fugle 或富邦提供還原行情，並接入 FRED、FMP、News API、Twinkle。已實測部分帳號與方案限制；富邦仍缺有效憑證。另有無需Key的TWSE、TAIFEX、TDCC及GDELT接入計畫，保留實際取得時間及資料邊界。
+**目前已完成工程流程與多來源連接器，尚未證明真實市場預測優勢。** `demo` 使用合成資料，不能用示範績效判定投資可行性。可選 FinMind、Fugle 或富邦提供還原行情，並接入 FRED、FMP、News API、Twinkle。已實測部分帳號與方案限制；富邦需在相容的官方SDK環境使用私人憑證。另有無需Key的TWSE、TAIFEX、TDCC及GDELT接入計畫，保留實際取得時間及資料邊界。
 
 金鑰僅存本機私人 `.env`（0600）或環境變數；可提交的 `.env.example` 保持空白。請先讀 [網頁操作指南](docs/WEB_GUIDE.md)、[來源與Key設定](docs/DATA_SOURCES.md)、[完整專案剩餘項目](docs/PROJECT_STATUS.md)、[Key保護與開源檢查](docs/SECRETS.md)。
 
@@ -31,6 +31,8 @@
 .venv/bin/python -m twquant --root artifacts/real sources sync --plan configs/source_plan.json
 .venv/bin/python -m twquant --root artifacts/real sources export-events
 ```
+
+固定訓練十檔、0050／1216／2002／2412／TAIEX同模型測試與優化操作，見[固定十檔研究協定](docs/FIXED_TEN_PROTOCOL.md)。不將測試標的加入訓練；只有真實未來紀錄可作逐日驗證。
 
 ## 啟動
 

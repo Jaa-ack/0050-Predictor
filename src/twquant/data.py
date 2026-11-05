@@ -60,7 +60,8 @@ def validate_prices(prices: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("duplicate ticker/date price rows")
     for column in ("open", "high", "low", "close", "adj_close", "volume"):
         values = pd.to_numeric(out[column], errors="coerce")
-        if not np.isfinite(values.to_numpy(dtype=float)).all():
+        index_missing = (out.ticker.str.startswith(("IX", "IR")) & out.get("asset_class", pd.Series("", index=out.index)).eq("index") & values.isna()) if column == "volume" else pd.Series(False, index=out.index)
+        if not (np.isfinite(values.to_numpy(dtype=float)) | index_missing).all():
             raise ValueError(f"{column} contains missing or non-finite values")
         if (values.lt(0) if column == "volume" else values.le(0)).any():
             raise ValueError(f"{column} must be {'nonnegative' if column == 'volume' else 'positive'}")

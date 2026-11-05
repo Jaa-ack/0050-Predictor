@@ -178,3 +178,15 @@ def test_legacy_finmind_archive_redacts_url_encoded_echo(monkeypatch,tmp_path):
     monkeypatch.setattr('requests.get',fake_get)
     ingest_finmind(['0050'],'2025-01-02','2025-01-03',token=token,raw_dir=tmp_path)
     assert all(quote(token,safe='') not in p.read_text() for p in tmp_path.glob('*.json'))
+
+
+def test_index_may_preserve_unknown_volume_but_equity_volume_remains_required():
+    import numpy as np
+    from twquant.demo import make_demo_prices
+    from twquant.data import validate_prices
+    p=make_demo_prices(5).query('ticker == "2330"').copy()
+    p['ticker']='IX0001';p['asset_class']='index';p['volume']=np.nan
+    assert validate_prices(p).volume.isna().all()
+    p['ticker']='2330';p['asset_class']='equity'
+    with pytest.raises(ValueError,match='volume'):
+        validate_prices(p)

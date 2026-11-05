@@ -48,7 +48,14 @@ class JobManager:
                 cutoff=PriceStore(root/'data').read_prices().available_at.max().isoformat()
             args=base+[action,'--as-of',cutoff]
             if action=='predict':
-                args+=['--paper']
+                from .data import PriceStore
+                from .workflows import current_report
+                from .universe import TRAINING_TICKERS
+                available=set(PriceStore(root/'data').read_prices().ticker)
+                report=current_report(root)
+                configured=report.get('provenance',{}).get('config',{}).get('evaluation_tickers',[])
+                targets=[t for t in dict.fromkeys([*TRAINING_TICKERS,*configured]) if t in available]
+                args+=['--paper','--tickers',','.join(targets)]
                 events=root/'sources'/'events.csv'
                 if events.exists():
                     args+=['--events',str(events)]

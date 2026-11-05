@@ -11,11 +11,11 @@ GITHUB_URL='https://github.com/Jaa-ack/0050-Predictor'
 GAPS=[
     dict(id='data-access',priority='P0',category='資料',title='驗證私人來源與長期還原行情',status='pending',description='完成七個來源的Key、端點權限、配額及十年基準歷史核對。',acceptance='逐來源記錄實際起訖、缺漏率、權限與還原規則。'),
     dict(id='pit',priority='P0',category='資料',title='補齊歷史公告與修正版本',status='pending',description='今天下載的財報與分析師預期不能回填過去，需原發布及可用時間。',acceptance='通過延遲公告、同日更正及跨市場時區案例。'),
-    dict(id='membership',priority='P0',category='資料',title='歷史成分股與交易日曆',status='partial',description='已有持股下載，仍需確認歷史涵蓋、公告與生效日期及臨時休市。',acceptance='保存當時股票池，區分固定十檔與歷史前十大策略。'),
+    dict(id='membership',priority='P0',category='資料',title='交易日曆與公司行動版本',status='partial',description='主研究固定使用者選定十檔；仍需驗證臨時休市與當時還原版本。動態ETF成分為另案。',acceptance='固定名單不變，核對實際市場日期；另做動態前十大策略才需要歷史成分。'),
     dict(id='fundamentals',priority='P0',category='估值',title='財務單位與估值自動供料',status='partial',description='DCF與金融P/B已實作，尚需TTM、金額、股數及產業科目映射。',acceptance='核對真實公告、每股估值、幣別與情境假設。'),
     dict(id='overnight',priority='P0',category='因子',title='夜盤合約與跨市場對齊',status='pending',description='驗證歷史分K、日夜盤、換月與08:30／20:00資料截止。',acceptance='保留實際合約，避免跨決策時間的未來資訊。'),
     dict(id='events',priority='P1',category='因子',title='新聞及政府資料事件模型',status='partial',description='已能保存去重，實體、事件、情緒及意外程度仍待驗證。',acceptance='提供歷史標註與消融實驗。'),
-    dict(id='validation',priority='P1',category='驗證',title='真實樣本外與封存測試',status='pending',description='合成資料已驗證流程，真實投資優勢尚待證明。',acceptance='凍結程序，完成保留期、成本壓力及時間區塊抽樣。'),
+    dict(id='validation',priority='P1',category='驗證',title='真實樣本外與封存測試',status='pending',description='支援真實歷史、同模型跨標的與日期區塊檢查；成本後穩定優勢仍須證明。',acceptance='凍結程序，完成保留期、成本壓力及時間區塊抽樣。'),
     dict(id='paper',priority='P1',category='驗證',title='累積真實每日影子紀錄',status='pending',description='歷史重播不計入真實逐日證據。',acceptance='至少60個交易日與500筆成熟一日預測。'),
     dict(id='operations',priority='P1',category='營運',title='正式排程、告警與復原',status='pending',description='本機操作已具備，正式背景排程及備份演練仍待設定。',acceptance='驗證中斷、復原與回滾，不自動下單。'),
     dict(id='advanced',priority='P2',category='模型',title='以增益決定進階模型',status='pending',description='目前為線性基準與提升樹；市場alpha、條件分位數及SHAP尚待加入。',acceptance='相同成本與切分下，取得穩定樣本外增益。')
@@ -91,4 +91,4 @@ class DashboardData:
 
     @staticmethod
     def gaps():
-        return dict(items=GAPS,docs=[dict(label=label,url=GITHUB_URL+'/blob/main/'+path) for label,path in [('完整缺口清單','docs/PROJECT_STATUS.md'),('資料來源設定','docs/DATA_SOURCES.md'),('金鑰保護','docs/SECRETS.md'),('研究方法','docs/METHODOLOGY.md')]])
+        return dict(items=GAPS,docs=[dict(label=label,url=GITHUB_URL+'/blob/main/'+path) for label,path in [('固定十檔協定','docs/FIXED_TEN_PROTOCOL.md'),('完整缺口清單','docs/PROJECT_STATUS.md'),('資料來源設定','docs/DATA_SOURCES.md'),('金鑰保護','docs/SECRETS.md'),('研究方法','docs/METHODOLOGY.md')]])

@@ -1,4 +1,4 @@
-export const names = {'2330':'台積電','2454':'聯發科','2317':'鴻海','2308':'台達電','3711':'日月光投控','1303':'南亞','2383':'台光電','2881':'富邦金','2891':'中信金','3037':'欣興','0050':'元大台灣50'};
+export const names = {'2330':'台積電','2454':'聯發科','2317':'鴻海','2308':'台達電','3711':'日月光投控','1303':'南亞','2383':'台光電','2881':'富邦金','2891':'中信金','3037':'欣興','0050':'元大台灣50','1216':'統一','2002':'中鋼','2412':'中華電','IX0001':'TAIEX 加權指數'};
 export const finite = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
 export const percent = (value,digits=2) => finite(value) ? `${(Number(value)*100).toFixed(digits)}%` : '—';
 export const decimal = (value,digits=4) => finite(value) ? Number(value).toLocaleString('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits}) : '—';
@@ -61,4 +61,12 @@ export function lineGeometry(rows,keys,{width=800,height=280,left=52,right=18,to
     paths[key]=path.trim();
   }
   return {paths,min,max,x,y,width,height,left,right,top,bottom};
+}
+
+export function transferRows(report,horizon,sample='development') {
+  const source=sample==='holdout'?holdoutMetrics(report):report?.metrics;
+  return Object.entries(source?.transfer||{}).flatMap(([ticker,group])=>{
+    const metrics=group.by_horizon?.[String(horizon)];
+    return metrics?[{ticker,tradable:group.tradable,...metrics}]:[];
+  }).sort((a,b)=>a.ticker.localeCompare(b.ticker));
 }

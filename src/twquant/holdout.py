@@ -6,7 +6,7 @@ optimizer has never inspected those dates; its protocol reports that limitation.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 from typing import Any
@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .research import ResearchConfig, TrainedModel, _horizon_metrics, _validate, simulate_portfolio, train_latest
+from .research import ResearchConfig, TrainedModel, _horizon_metrics, _validate, simulate_portfolio, train_latest, predict_evaluation, transfer_metrics
 
 
 @dataclass
@@ -26,6 +26,7 @@ class HoldoutResult:
     protocol: dict[str, Any]
     equity: pd.DataFrame
     folds: pd.DataFrame
+    transfer_predictions: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def _aware(values, name):
@@ -82,10 +83,17 @@ def evaluate_holdout(frame: pd.DataFrame, feature_cols: list[str], config: Resea
         price_receipts = _aware(frame.available_at, "available_at")
         if price_receipts.notna().any():
             evaluation_cutoff = max(evaluation_cutoff, price_receipts.max())
-    output, folds = [], []
+    evaluation = _validate(frame, feature_cols, config, training=False) if config.evaluation_tickers else pd.DataFrame()
+    output, folds, transfer = [], [], []
     max_label_availability = {}
     for horizon in config.horizons:
         model = models[horizon]
+        if not evaluation.empty:
+            external = evaluation.loc[evaluation.date.isin(reserved)].copy()
+            if not external.empty:
+                scored = predict_evaluation(model, external, horizon, evaluation_cutoff)
+                scored["fold"] = 1
+                transfer.append(scored)
         prediction = model.predict(test)
         prediction["fold"] = 1
         labels = pd.to_numeric(test[f"target_{horizon}"], errors="coerce")
@@ -112,7 +120,7 @@ def evaluate_holdout(frame: pd.DataFrame, feature_cols: list[str], config: Resea
         max_known = known.loc[mature.index].max()
         max_label_availability[str(horizon)] = max_known.isoformat() if pd.notna(max_known) else None
         folds.append({"horizon": horizon, "fold": 1, "model_version": model.model_version,
-                      "train_start": mature.date.min(), "train_end": pd.Timestamp(model.trained_through),
+                      "train_start": model.training_start or mature.date.min(), "train_end": pd.Timestamp(model.trained_through),
                       "calibration_label_end": pd.Timestamp(model.calibration_ends),
                       "train_label_available_at_max": max_known,
                       "fit_cutoff": freeze, "test_start": start, "test_end": end,
@@ -128,6 +136,9 @@ def evaluate_holdout(frame: pd.DataFrame, feature_cols: list[str], config: Resea
         checks[f"h{horizon}_brier_not_worse_than_baseline"] = (metrics["observations"] > 0
             and metrics["brier"] is not None and metrics["baseline_brier"] is not None
             and metrics["brier_skill"] >= 0 and metrics["brier"] <= metrics["baseline_brier"])
+        checks[f"h{horizon}_beats_fixed_probability"] = (metrics.get("brier_skill_vs_p50") or 0) > 0
+        checks[f"h{horizon}_beats_training_frequency"] = (metrics.get("brier_skill_vs_frequency") or 0) > 0
+        checks[f"h{horizon}_direction_not_one_sided"] = (metrics.get("balanced_accuracy") or 0) > .5
         coverage = metrics["coverage80"]
         checks[f"h{horizon}_interval_coverage"] = coverage is not None and .7 <= coverage <= .95
     passive = portfolio.get("benchmark_buy_hold", {}).get("total_return")
@@ -152,4 +163,6 @@ def evaluate_holdout(frame: pd.DataFrame, feature_cols: list[str], config: Resea
                "feasibility": {"passed": all(checks.values()), "checks": checks,
                                "note": "Statistical screening only. Untouched status requires the caller's sealed protocol; data provenance and live paper evidence are separate gates."},
                "config": asdict(config), "sample": "frozen_final_holdout"}
-    return HoldoutResult(predictions, metrics, models, freeze.isoformat(), protocol, equity, pd.DataFrame(folds))
+    transfer_frame = pd.concat(transfer, ignore_index=True) if transfer else pd.DataFrame()
+    metrics["transfer"] = transfer_metrics(transfer_frame)
+    return HoldoutResult(predictions, metrics, models, freeze.isoformat(), protocol, equity, pd.DataFrame(folds), transfer_frame)

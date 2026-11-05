@@ -8,12 +8,12 @@ from .data import PriceStore
 from .web_data import DashboardData,GITHUB_URL
 from .workflows import data_kind,write_json
 
-REPORT_FIELDS={'run_id','created_at','data_kind','readiness','metrics','n_prices','n_features','date_range','scope','interval_note'}
-METRIC_FIELDS={'by_horizon','portfolio','feasibility','model','prediction_reference','data_quality','sealed_holdout'}
+REPORT_FIELDS={'run_id','created_at','data_kind','readiness','metrics','n_prices','n_features','date_range','scope','interval_note','training_tickers','evaluation_tickers'}
+METRIC_FIELDS={'by_horizon','portfolio','feasibility','model','prediction_reference','data_quality','sealed_holdout','transfer','paired_loss_audit'}
 FORECAST_FIELDS={'ticker','anchor_date','decision_ts','horizon','model_version','probability_up','expected_return',
     'q10','q50','q90','price_low','price_median','price_high','price_basis','reference_close','reference_adj_close',
     'status','signal','data_kind','features','explanation','actual_return','label_end_date','brier','covered',
-    'absolute_error','issued_at','is_replay'}
+    'absolute_error','issued_at','is_replay','asset_class','evaluation_role','return_basis','tradable','training_tickers','arithmetic_expected_return'}
 
 
 def _report(report):

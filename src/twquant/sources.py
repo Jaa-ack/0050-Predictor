@@ -314,10 +314,13 @@ def _paired_prices(provider,tickers,start,end,get):
             frame["available_at"]=(frame.date.dt.tz_localize("Asia/Taipei")+pd.Timedelta(hours=20)).dt.tz_convert("UTC")
             frame["availability_basis"]="reconstructed_eod"
             frame["source"]=provider
-            frame["adjustment_source"]=provider+"_latest_backward_adjusted"
+            is_index = raw.get("type") == "INDEX" or ticker.startswith(("IX", "IR"))
+            frame["asset_class"] = "index" if is_index else "etf" if ticker.startswith("00") else "equity"
+            frame["return_basis"] = "price_index" if is_index else "corporate_action_adjusted"
+            frame["adjustment_source"] = provider+("_price_index_no_dividend_reinvestment" if is_index else "_latest_backward_adjusted")
             frame["retrieved_at"]=now_utc()
             frames.append(frame[["ticker","date","open","high","low","close","adj_close","volume",
-                                  "available_at","availability_basis","source","adjustment_source","retrieved_at"]])
+                                  "available_at","availability_basis","source","adjustment_source","retrieved_at","asset_class","return_basis"]])
         if len(frames)==before:
             raise RuntimeError(f'{provider}: no usable adjusted daily prices for requested instrument {ticker}')
     if not frames:

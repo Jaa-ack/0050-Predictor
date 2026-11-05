@@ -2,6 +2,12 @@
 
 ## Unreleased — 2026-11-05
 
+- Fixed the user-selected ten as the exclusive shared-model training/calibration/selection universe and predictive market context; added same-fold and reserved-period transfer tests for 0050, 1216, 2002, 2412 and TAIEX, with immutable role-tagged paper forecasts.
+- Added portable feature ablations, bounded training windows, chronological calibration shrinkage, fixed/frequency/directional baselines, balanced direction metrics and paired market-date block diagnostics.
+- Separated executable open-to-close targets from close-price forecasts, fitted arithmetic-return estimates, and reported frozen-selection gross/net strategy costs.
+- Preserved missing index volume without fabricating activity, distinguished index-point returns from adjusted stock returns, and excluded transfer records from core release evidence.
+- Added grouped transfer tables to the dashboard and synthetic export, explicit prediction targets, reproducible fixed-ten configurations and protocol documentation.
+
 - Documented feasibility diagnostics and an ordered optimization plan covering constant/directional baselines, calibration, executable-return targets, factor ablations and live-operation gaps; preserved the frozen models and private research evidence.
 - Fixed FRED real-time end dates in Taiwan mornings to respect the provider's St. Louis calendar day; retained the requested and effective bounds.
 - Separated Fubon login rejections from market-data initialization errors using fixed diagnostic codes without exposing SDK account results.

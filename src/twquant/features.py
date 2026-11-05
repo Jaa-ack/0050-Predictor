@@ -11,9 +11,10 @@ import re
 
 import numpy as np
 import pandas as pd
+from .universe import TRAINING_TICKERS,BENCHMARK,asset_class
 
 HORIZONS = (1, 5, 20)
-FEATURE_VERSION = "pit-eod-v2"
+FEATURE_VERSION = "pit-eod-v4-fixed-ten-context"
 
 
 def observed_market_sessions(prices):
@@ -24,7 +25,8 @@ def observed_market_sessions(prices):
     """
     if not prices.ticker.astype(str).eq('0050').any():
         raise ValueError('0050 benchmark prices are required')
-    return pd.DatetimeIndex(pd.to_datetime(prices.date).dt.normalize().unique(),name='date').sort_values()
+    reference=prices.loc[prices.ticker.astype(str).isin((*TRAINING_TICKERS,BENCHMARK))]
+    return pd.DatetimeIndex(pd.to_datetime(reference.date).dt.normalize().unique(),name='date').sort_values()
 
 
 def _timestamps(values, name, allow_missing=False):
@@ -39,6 +41,22 @@ def _timestamps(values, name, allow_missing=False):
 def get_feature_columns(frame: pd.DataFrame) -> list[str]:
     """Return the explicit allowlist of model inputs, excluding all labels."""
     return [column for column in frame.columns if column.startswith("f_")]
+
+
+def select_feature_columns(frame,profile='legacy'):
+    columns=get_feature_columns(frame)
+    if profile=='legacy':return columns
+    if profile not in {'portable_price','portable_market','portable_all'}:
+        raise ValueError('Unknown feature profile')
+    result=[]
+    for column in columns:
+        if column in {'f_log_volume','f_amihud_20'}:continue
+        if column.startswith('f_ext_'):
+            if profile=='portable_price':continue
+            if '_close' in column:continue
+            if profile=='portable_market' and not column.startswith('f_ext_fmp_'):continue
+        result.append(column)
+    return result
 
 
 def point_in_time_join(decisions: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame:
@@ -125,7 +143,12 @@ def build_features(prices: pd.DataFrame, external: pd.DataFrame | None = None,
         raise ValueError("Duplicate ticker/date prices")
     numeric = ["open", "high", "low", "close", "adj_close", "volume"]
     data[numeric] = data[numeric].apply(pd.to_numeric, errors="raise")
-    if not np.isfinite(data[numeric].to_numpy(dtype=float)).all():
+    finite_values = np.isfinite(data[numeric].to_numpy(dtype=float))
+    # A price index has no executable volume requirement. Preserve vendor
+    # missing volume; do not fabricate zero activity or relax equity checks.
+    index_rows = data.ticker.map(asset_class).eq("index")
+    finite_values[:, -1] |= (index_rows & data.volume.isna()).to_numpy()
+    if not finite_values.all():
         raise ValueError("Prices and volumes must be finite")
     if (data[["open", "high", "low", "close", "adj_close"]] <= 0).any().any() or (data.volume < 0).any():
         raise ValueError("Prices must be positive and volume nonnegative")
@@ -143,9 +166,16 @@ def build_features(prices: pd.DataFrame, external: pd.DataFrame | None = None,
     # form terminal technical factors. External inputs remain missing at NaT.
     visibility_times = decision_times.where(decision_times.notna(), eod_times)
     benchmark = benchmark.reindex(calendar)
-    bm_visible = benchmark.available_at.to_numpy() <= visibility_times.to_numpy()
-    bm_known = benchmark.adj_close.where(bm_visible)
-    bm_return = bm_known.pct_change(fill_method=None)
+    # All predictive market context comes from the fixed ten. 0050 remains
+    # a reference calendar and outcome benchmark, never a training factor.
+    core = data.loc[data.ticker.isin(TRAINING_TICKERS)]
+    closes = core.pivot(index="date", columns="ticker", values="adj_close").reindex(calendar)
+    receipts = core.pivot(index="date", columns="ticker", values="available_at").reindex(calendar)
+    visible_core = receipts.le(pd.Series(visibility_times, index=calendar), axis=0)
+    core_known = closes.where(visible_core)
+    core_return = core_known.pct_change(fill_method=None).mean(axis=1)
+    core_market_returns = {h: np.expm1(np.log1p(core_return).rolling(h, min_periods=h).sum())
+                           for h in (5, 20, 60)}
     frames = []
     for ticker, source in data.groupby("ticker", sort=True):
         truth = source.set_index("date").sort_index().reindex(calendar)
@@ -159,6 +189,7 @@ def build_features(prices: pd.DataFrame, external: pd.DataFrame | None = None,
         ret = adj.pct_change(fill_method=None)
         out = truth.copy()
         out["ticker"] = ticker
+        out['asset_class']=asset_class(ticker)
         out["decision_ts"] = decision_times
         out["feature_version"] = FEATURE_VERSION
         for horizon in (1, 5, 10, 20, 60, 120, 250):
@@ -177,11 +208,11 @@ def build_features(prices: pd.DataFrame, external: pd.DataFrame | None = None,
         gain = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
         loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
         out["f_rsi_14"] = (gain / (gain + loss)).where((gain + loss) != 0, 0.5)
-        out["f_market_return_1"] = bm_return
+        out["f_market_return_1"] = core_return
         for horizon in (5, 20, 60):
-            out[f"f_market_return_{horizon}"] = bm_known.pct_change(horizon, fill_method=None)
+            out[f"f_market_return_{horizon}"] = core_market_returns[horizon]
             out[f"f_excess_return_{horizon}"] = out[f"f_return_{horizon}"] - out[f"f_market_return_{horizon}"]
-        out["f_beta_60"] = ret.rolling(60, min_periods=30).cov(bm_return) / bm_return.rolling(60, min_periods=30).var().replace(0, np.nan)
+        out["f_beta_60"] = ret.rolling(60, min_periods=30).cov(core_return) / core_return.rolling(60, min_periods=30).var().replace(0, np.nan)
         # Future values below are evaluation metadata; get_feature_columns excludes them.
         out["next_open"] = truth.open.shift(-1)
         out["next_open_date"] = pd.Series(calendar, index=calendar).shift(-1)
@@ -200,12 +231,13 @@ def build_features(prices: pd.DataFrame, external: pd.DataFrame | None = None,
         for horizon in HORIZONS:
             end_close = truth.adj_close.shift(-horizon)
             out[f"target_{horizon}"] = np.log(end_close / truth.adj_close)
+            out[f"execution_target_{horizon}"] = np.log(end_close / out.adjusted_next_open)
             out[f"label_end_{horizon}"] = pd.Series(calendar, index=calendar).shift(-horizon)
             out[f"label_available_at_{horizon}"] = truth.available_at.shift(-horizon)
             out[f"benchmark_target_{horizon}"] = np.log(benchmark.adj_close.shift(-horizon) / benchmark.adj_close)
             out[f"benchmark_end_adj_close_{horizon}"] = benchmark.adj_close.shift(-horizon)
             valid = executable_open & end_close.notna()
-            out[f"trade_valid_{horizon}"] = valid
+            out[f"trade_valid_{horizon}"] = valid & (asset_class(ticker)!='index')
             out[f"trade_return_{horizon}"] = (end_close / out.adjusted_next_open - 1).where(valid)
             out[f"benchmark_trade_return_{horizon}"] = benchmark.adj_close.shift(-horizon) / bm_next_open - 1
         out = out.loc[visible].reset_index()
@@ -213,11 +245,11 @@ def build_features(prices: pd.DataFrame, external: pd.DataFrame | None = None,
     frame = pd.concat(frames, ignore_index=True).sort_values(["ticker", "date"]).reset_index(drop=True)
     # Equal-weight peers exclude the target. This is deliberately named as a
     # proxy, not as a historical weight-adjusted leave-one-out 0050 return.
-    stocks = frame.loc[frame.ticker != "0050", ["date", "f_return_1"]]
+    stocks = frame.loc[frame.ticker.isin(TRAINING_TICKERS), ["date", "f_return_1"]]
     peer = stocks.groupby("date").f_return_1.agg(["sum", "count"])
     frame["_peer_sum"] = frame.date.map(peer["sum"])
     frame["_peer_count"] = frame.date.map(peer["count"])
-    include = (frame.ticker != "0050") & frame.f_return_1.notna()
+    include = frame.ticker.isin(TRAINING_TICKERS) & frame.f_return_1.notna()
     denominator = frame._peer_count - include.astype(int)
     frame["f_peer_return_ex_target"] = ((frame._peer_sum - frame.f_return_1.where(include, 0)) / denominator.replace(0, np.nan))
     frame = frame.drop(columns=["_peer_sum", "_peer_count"])

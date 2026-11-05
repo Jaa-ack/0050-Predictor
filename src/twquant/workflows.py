@@ -15,7 +15,9 @@ import pandas as pd
 
 from .ledger import ForecastLedger, json_safe, utc_timestamp
 
-TARGETS = {"2330", "2454", "2317", "2308", "3711", "1303", "2383", "2881", "2891", "3037"}
+from .universe import TRAINING_TICKERS, asset_class, evaluation_role, tickers as validate_tickers
+
+TARGETS = set(TRAINING_TICKERS)
 
 
 def write_json(path, value):
@@ -46,6 +48,7 @@ def assess_readiness(prices, metrics, monitoring=None):
     blockers = []
     if data_kind(prices) == "synthetic":
         blockers.append("synthetic_data")
+    prices = prices.loc[prices.ticker.isin(TARGETS | {"0050"})]
     counts = prices.groupby("ticker")["date"].nunique()
     if not (TARGETS | {"0050"}) <= set(counts.index):
         blockers.append("required_target_universe_missing")
@@ -93,7 +96,7 @@ def source_digest():
 
 def research(root, config=None, as_of=None, events_path=None, mode="postclose", holdout_dates=126):
     from .data import PriceStore
-    from .features import build_features, get_feature_columns
+    from .features import build_features, select_feature_columns
     from .research import ResearchConfig, run_research, train_latest
 
     root = Path(root)
@@ -109,18 +112,11 @@ def research(root, config=None, as_of=None, events_path=None, mode="postclose", 
     events = load_events(events_path)
     frame = build_features(prices, external=events, mode=mode)
     frame = frame[frame.decision_ts.notna() & (pd.to_datetime(frame.decision_ts, utc=True) <= cutoff)].copy()
-    cols = get_feature_columns(frame)
-    dates = sorted(frame.date.unique())
-    if holdout_dates < 1 or len(dates) <= holdout_dates:
-        raise ValueError("Reserve at least one final holdout session and enough earlier training history")
-    holdout_start = pd.Timestamp(dates[-holdout_dates])
+    cols = select_feature_columns(frame, config.feature_profile)
+    from .comparison import reserve_development
+    development, holdout_start = reserve_development(frame, config.horizons, holdout_dates)
+    dates = sorted(frame.loc[frame.ticker == "0050", "date"].unique())
     first_holdout_decision = pd.to_datetime(frame.loc[frame.date == holdout_start, "decision_ts"], utc=True).min()
-    development = frame[frame.date < holdout_start].copy()
-    for horizon in config.horizons:
-        label_known = pd.to_datetime(development[f"label_available_at_{horizon}"], utc=True) < first_holdout_decision
-        for prefix in ("target", "trade_return", "benchmark_target", "benchmark_trade_return", "benchmark_end_adj_close"):
-            development.loc[~label_known, f"{prefix}_{horizon}"] = np.nan
-        development.loc[~label_known, f"trade_valid_{horizon}"] = False
     external_hash = hashlib.sha256(Path(events_path).read_bytes()).hexdigest() if events_path else None
     external_basis=sorted(events.availability_basis.dropna().astype(str).unique().tolist()) if events is not None and 'availability_basis' in events else []
     external_synthetic=bool(events is not None and 'data_kind' in events and
@@ -140,6 +136,8 @@ def research(root, config=None, as_of=None, events_path=None, mode="postclose", 
         write_json(root / "current.json", dict(run_id=run_id))
         return json.loads((folder / "report.json").read_text())
     result = run_research(development, cols, config)
+    from .diagnostics import paired_block_audit
+    result.metrics["paired_loss_audit"] = paired_block_audit(result.predictions)
     result.metrics['data_quality']=dict(synthetic_external=external_synthetic,
         external_history_verified=events is None or bool(external_basis) and
             set(external_basis)<={'observed','verified_publication','vintage_day_conservative'} and not external_synthetic,
@@ -162,7 +160,8 @@ def research(root, config=None, as_of=None, events_path=None, mode="postclose", 
                   metrics=result.metrics, n_prices=len(prices), n_features=len(cols),
                   date_range=[str(prices.date.min().date()), str(prices.date.max().date())],
                   python=sys.version.split()[0],
-                  scope="Fixed configured universe; not a reconstructed historical top-ten strategy.",
+                  training_tickers=list(TRAINING_TICKERS), evaluation_tickers=list(config.evaluation_tickers),
+                  scope="Fixed user-selected ten train the shared model. Other assets are same-model transfer tests only.",
                   interval_note="Calibrated 80% residual interval; serial dependence means coverage is empirical, not guaranteed.")
     folder.mkdir(parents=True, exist_ok=True)
     development.to_parquet(folder / "features.parquet", index=False)
@@ -174,9 +173,11 @@ def research(root, config=None, as_of=None, events_path=None, mode="postclose", 
         development_rows=len(development), opened=False,
         policy="Freeze configuration/source/snapshot before opening; never tune on this holdout. Production refit uses all matured data separately."))
     result.predictions.to_parquet(folder / "oos_predictions.parquet", index=False)
+    result.transfer_predictions.to_parquet(folder / "transfer_oos_predictions.parquet", index=False)
     result.folds.to_csv(folder / "folds.csv", index=False)
     result.equity.to_csv(folder / "equity.csv", index=False)
-    feature_reference = {c:dict(mean=float(frame[c].mean()), std=float(frame[c].std())) for c in cols}
+    training_frame = frame.loc[frame.ticker.isin(TARGETS)]
+    feature_reference = {c:dict(mean=float(training_frame[c].mean()), std=float(training_frame[c].std())) for c in cols}
     bundle = dict(models=models, feature_columns=cols, fit_cutoff=cutoff.isoformat(),
                   run_id=run_id, feature_reference=feature_reference, mode=mode, data_kind=data_kind(prices),
                   provenance=provenance)
@@ -211,7 +212,7 @@ def current_report(root, champion=False):
 def release_holdout(root):
     """Open a sealed, frozen final audit once; repeated reads return its record."""
     from .data import PriceStore
-    from .features import build_features, get_feature_columns
+    from .features import build_features, select_feature_columns
     from .holdout import evaluate_holdout
     from .research import ResearchConfig
     root = Path(root)
@@ -234,11 +235,16 @@ def release_holdout(root):
     frame = frame[frame.decision_ts.notna() & (pd.to_datetime(frame.decision_ts, utc=True) <= cutoff)].copy()
     values = dict(report["provenance"]["config"])
     values["horizons"] = tuple(values["horizons"])
-    result = evaluate_holdout(frame, get_feature_columns(frame), ResearchConfig(**values),
+    values["evaluation_tickers"] = tuple(values.get("evaluation_tickers", []))
+    config = ResearchConfig(**values)
+    result = evaluate_holdout(frame, select_feature_columns(frame, config.feature_profile), config,
                               holdout_dates=report["provenance"]["holdout_dates"])
+    from .diagnostics import paired_block_audit
+    result.metrics["paired_loss_audit"] = paired_block_audit(result.predictions)
     result.protocol.update(workflow_sealed=True, seal_sha256=hashlib.sha256((folder / "seal.json").read_bytes()).hexdigest(),
                            run_id=report["run_id"], note="Code/config/snapshot frozen before opening. Human reuse across research runs still requires discipline.")
     result.predictions.to_parquet(folder / "holdout_predictions.parquet", index=False)
+    result.transfer_predictions.to_parquet(folder / "transfer_holdout_predictions.parquet", index=False)
     result.equity.to_csv(folder / "holdout_equity.csv", index=False)
     payload = dict(metrics=result.metrics, protocol=result.protocol, cutoff=result.cutoff,
                    opened_at=datetime.now(timezone.utc).isoformat(), data_kind=report["data_kind"])
@@ -299,7 +305,7 @@ def valuation_at(path, ticker, as_of):
     return result
 
 
-def forecast(root, as_of, paper=False, events_path=None, fundamentals_path=None, max_stale_days=5):
+def forecast(root, as_of, paper=False, events_path=None, fundamentals_path=None, max_stale_days=5, tickers=None):
     from .data import PriceStore
     from .features import build_features, point_in_time_join
     root = Path(root)
@@ -307,6 +313,11 @@ def forecast(root, as_of, paper=False, events_path=None, fundamentals_path=None,
     if cutoff > pd.Timestamp.now(tz="UTC") + pd.Timedelta(minutes=1):
         raise ValueError("Prediction cutoff cannot be in the future")
     report = current_report(root, champion=not paper)
+    selected = set(validate_tickers(tickers)) if tickers is not None else TARGETS
+    if not paper and not selected <= TARGETS:
+        raise ValueError("Transfer assets require --paper; core approval cannot authorize transfer forecasts")
+    if report["provenance"]["config"].get("objective", "close_return") != "close_return":
+        raise ValueError("Price forecasts require a close_return objective; open_return models are execution research only")
     folder = root / "runs" / report["run_id"]
     if source_digest() != report["provenance"]["source_sha256"]:
         raise ValueError("Code changed since model training; retrain before issuing forecasts")
@@ -328,12 +339,15 @@ def forecast(root, as_of, paper=False, events_path=None, fundamentals_path=None,
     age_days = (cutoff.tz_convert("Asia/Taipei").date() - last_market.date()).days
     if age_days > max_stale_days:
         raise ValueError(f"Price feed stale ({age_days} calendar days); forecast withheld")
+    context = set(p.loc[p.date.eq(last_market) & p.ticker.isin(TARGETS), "ticker"])
+    if context != TARGETS:
+        raise ValueError("Fixed training universe context incomplete: " + ", ".join(sorted(TARGETS-context)))
     events = load_events(events_path)
     if bundle["provenance"].get("external_sha256") and events is None:
         raise ValueError("This model requires the same external feature feed used in training")
     frame = build_features(p, external=events, mode=bundle["mode"])
-    latest = frame[(frame.date == last_market) & frame.ticker.isin(TARGETS)].copy()
-    missing_targets = TARGETS - set(latest.ticker)
+    latest = frame[(frame.date == last_market) & frame.ticker.isin(selected)].copy()
+    missing_targets = selected - set(latest.ticker)
     if missing_targets:
         raise ValueError("Missing or stale latest target prices: " + ", ".join(sorted(missing_targets)))
     if latest.empty:
@@ -373,12 +387,11 @@ def forecast(root, as_of, paper=False, events_path=None, fundamentals_path=None,
         if age_col in latest:
             stale_external |= latest[age_col] > 120
     records = []
-    max_z = 0.0
+    max_z = pd.Series(0.0, index=latest.index)
     for c, ref in bundle["feature_reference"].items():
         if ref["std"] and np.isfinite(ref["std"]) and ref["std"] > 1e-9:
-            z = abs((latest[c].mean() - ref["mean"]) / ref["std"])
-            if np.isfinite(z):
-                max_z = max(max_z, float(z))
+            z = abs((latest[c] - ref["mean"]) / ref["std"])
+            max_z = pd.concat([max_z, z.where(np.isfinite(z), 0.0)], axis=1).max(axis=1)
     for horizon, model in bundle["models"].items():
         outputs = model.predict(latest).reset_index(drop=True)
         for i, (_, row) in enumerate(latest.iterrows()):
@@ -388,7 +401,8 @@ def forecast(root, as_of, paper=False, events_path=None, fundamentals_path=None,
             cost = 2 * report["provenance"]["config"]["commission"] + report["provenance"]["config"]["sell_tax"] + 2 * report["provenance"]["config"]["slippage"]
             reason = "research_only" if paper else "tracked_forecast"
             signal = "observe" if probability >= .55 and expected > cost else "no_edge"
-            if max_z > 5:
+            row_z = float(max_z.loc[row.name])
+            if row_z > 5:
                 signal = "abstain"
                 reason = "feature_distribution_shift"
             if stale_external.loc[row.name]:
@@ -398,18 +412,22 @@ def forecast(root, as_of, paper=False, events_path=None, fundamentals_path=None,
                 decision_ts=cutoff.isoformat(), data_cutoff=cutoff.isoformat(), horizon=int(horizon),
                 model_version=f"{report['run_id']}-{model.model_version}", snapshot_id=snapshot_id,
                 probability_up=probability, expected_return=expected,
+                arithmetic_expected_return=float(out["arithmetic_expected_return"]),
+                training_tickers=list(TRAINING_TICKERS), evaluation_role=evaluation_role(str(row.ticker)),
+                asset_class=asset_class(row.ticker), tradable=asset_class(row.ticker) != "index",
+                return_basis="price_index" if asset_class(row.ticker) == "index" else "corporate_action_adjusted",
                 baseline_probability=float(out["baseline_probability"]),
                 q10=float(out["q10"]), q50=float(out["q50"]), q90=float(out["q90"]),
                 price_low=float(row.close * (1 + out["q10"])),
                 price_median=float(row.close * (1 + out["q50"])),
                 price_high=float(row.close * (1 + out["q90"])),
-                price_basis="Anchor raw-share basis; future corporate actions may change quoted price units",
+                price_basis="Price-index points; excludes dividend reinvestment" if asset_class(row.ticker) == "index" else "Anchor raw-share basis; future corporate actions may change quoted price units",
                 reference_close=float(row.close), reference_adj_close=float(row.adj_close),
-                status=reason, signal=signal, max_feature_z=max_z, data_kind=bundle["data_kind"],
+                status=reason, signal=signal, max_feature_z=row_z, data_kind=bundle["data_kind"],
                 pipeline_version=bundle["provenance"]["pipeline_version"], mode=bundle["mode"],
                 feature_version=bundle["provenance"]["source_sha256"],
                 features={c:row[c] for c in bundle["feature_columns"]},
-                valuation=valuation_at(fundamentals_path, str(row.ticker), cutoff),
+                valuation=dict(status="not_applicable", reason="ETF/index has no single-company valuation") if asset_class(row.ticker) != "equity" else valuation_at(fundamentals_path, str(row.ticker), cutoff),
                 explanation=out.get("explanations", out.get("explanation", []))))
     inserted = ledger_for(root).append(records)
     write_json(root / "latest_forecast.json", dict(as_of=cutoff.isoformat(), inserted=inserted,

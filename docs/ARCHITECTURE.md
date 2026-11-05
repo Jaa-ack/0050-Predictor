@@ -31,6 +31,8 @@ flowchart LR
 | `sources` / `public_sources` | 私人服務與TWSE／TAIFEX／TDCC／GDELT唯讀連接、日期及格式正規化、固定主機與覆蓋限制 |
 | `source_store` / `source_workflows` / `source_verification` | 不可覆寫來源快照、事件／文件匯出、首次收件與修訂、逐端點格式及權限驗證 |
 | `credentials` / `secret_audit` | 伺服端Key、PKCS#12私人複本、原生SDK日誌隔離、遮罩與發布集合稽核 |
+| `universe` | 使用者固定十檔、延伸測試角色及指數點數語義 |
+| `comparison` / `diagnostics` | 開發期特徵消融與以市場日期為單位的成對損失區塊抽樣 |
 | `features` | `build_features`、`point_in_time_join`；只有 `f_` 欄位能進模型 |
 | `research` | `ResearchConfig`、`run_research`、`train_latest`、`simulate_portfolio` |
 | `holdout` | 固定資料時間界線之外的封存樣本評估 |
@@ -48,3 +50,5 @@ flowchart LR
 帳本以同一新快照內的基準與到期還原價格計算實際報酬，避免資料商重新縮放歷史還原價格導致舊預測基準錯配。第一次到期結果及其快照留存；後續資料商修正需另做修正稽核，目前不自動覆寫答案。
 
 本機 joblib 模型只載入專案自己產生的可信產物；介面不提供上傳或任意模型路徑執行。資料／模型環境建議分為 `artifacts/demo`、`artifacts/real`、`artifacts/preopen`。
+
+固定十檔資料先分為訓練／校準／測試；0050、1216、2002、2412與TAIEX僅向同一凍結模型推論。十檔同儕因子不受外部資產影響，延伸評分亦不回流模型選擇，詳見[固定十檔協定](FIXED_TEN_PROTOCOL.md)。

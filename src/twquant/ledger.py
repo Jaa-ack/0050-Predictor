@@ -9,6 +9,8 @@ import sqlite3
 import numpy as np
 import pandas as pd
 
+from .universe import TRAINING_TICKERS
+
 _ISSUE_METADATA = {"issued_at", "is_replay"}
 _REPLAY_TOLERANCE_SECONDS = 15 * 60
 
@@ -52,6 +54,9 @@ def _price_data_kind(prices):
 
 
 def _eligible_for_paper_record(record):
+    # Transfer assets cannot supply evidence for the fixed-ten release gate.
+    if record.get("ticker") not in TRAINING_TICKERS:
+        return False
     # Old ledgers without system issuance fields cannot prove a timely forecast.
     if record.get("data_kind") != "historical" or record.get("is_replay") is not False:
         return False

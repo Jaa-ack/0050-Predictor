@@ -148,3 +148,11 @@ def test_settlement_keeps_stock_horizon_when_benchmark_is_suspended(tmp_path):
     assert ledger.settle(p,'2025-01-03T20:00:00+08:00','etf-suspended')==1
     assert ledger.forecasts()[0]['label_end_date']=='2025-01-03'
     assert ledger.forecasts()[0]["actual_return"] == pytest.approx(.02)
+
+
+def test_transfer_predictions_cannot_satisfy_fixed_ten_live_release_gate():
+    from twquant.ledger import _eligible_for_paper_record
+    record=dict(data_kind='historical',is_replay=False,issued_at='2025-01-02T12:00:00Z',decision_ts='2025-01-02T12:00:00Z')
+    assert _eligible_for_paper_record(dict(record,ticker='2330'))
+    assert not _eligible_for_paper_record(dict(record,ticker='0050'))
+    assert not _eligible_for_paper_record(dict(record,ticker='IX0001'))

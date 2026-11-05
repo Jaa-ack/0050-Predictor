@@ -53,3 +53,13 @@ def test_export_destination_cannot_overwrite_source_or_input_data(tmp_path):
     report_fixture(root)
     with pytest.raises(ValueError,match='destination'):
         export_dashboard(root,root)
+
+
+def test_synthetic_export_retains_transfer_roles_and_grouped_evaluation(tmp_path):
+    from twquant.web_export import _report, FORECAST_FIELDS
+    report={'data_kind':'synthetic','training_tickers':['2330'],'evaluation_tickers':['IX0001'],
+            'metrics':{'transfer':{'IX0001':{'tradable':False}}}}
+    result=_report(report)
+    assert result['metrics']['transfer']['IX0001']['tradable'] is False
+    assert result['training_tickers']==['2330']
+    assert {'asset_class','evaluation_role','return_basis','tradable'} <= FORECAST_FIELDS

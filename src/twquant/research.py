@@ -22,6 +22,7 @@ from sklearn.metrics import brier_score_loss, log_loss, mean_absolute_error, mea
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from threadpoolctl import threadpool_limits
+from .universe import TRAINING_TICKERS,asset_class,tickers
 
 
 @dataclass(frozen=True)
@@ -42,8 +43,22 @@ class ResearchConfig:
     min_probability: float = 0.55
     min_expected_return: float = 0.0
     random_state: int = 42
+    evaluation_tickers: tuple[str,...] = ()
+    feature_profile: str = 'legacy'
+    objective: str = 'close_return'
+    training_window_dates: int | None = None
+    calibration_policy: str = 'sigmoid'
 
     def __post_init__(self):
+        if self.evaluation_tickers:
+            if set(tickers(self.evaluation_tickers))&set(TRAINING_TICKERS):
+                raise ValueError('Evaluation tickers must be outside the fixed training ten')
+        if self.feature_profile not in {'legacy','portable_price','portable_market','portable_all'}:
+            raise ValueError('Unknown feature profile')
+        if self.objective not in {'close_return','open_return'}:raise ValueError('Unknown objective')
+        if self.calibration_policy not in {'sigmoid','chronological_shrinkage'}:raise ValueError('Unknown calibration policy')
+        if self.training_window_dates is not None and self.training_window_dates<self.min_train_dates:
+            raise ValueError('Training window is shorter than minimum history')
         if not self.horizons or any(h not in (1, 5, 20) for h in self.horizons):
             raise ValueError("horizons must be selected from 1, 5, 20")
         if min(self.min_train_dates, self.calibration_dates, self.test_dates, self.max_folds) < 1:
@@ -67,14 +82,15 @@ class ResearchResult:
     folds: pd.DataFrame
     equity: pd.DataFrame
     models: dict[int, "TrainedModel"] = field(default_factory=dict)
+    transfer_predictions: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def _numeric(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     return frame[columns].apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
 
 
-def _validate(frame: pd.DataFrame, feature_cols: list[str], config: ResearchConfig) -> pd.DataFrame:
-    if not feature_cols or any(c.startswith(("target", "label", "trade_", "next_", "benchmark_target")) for c in feature_cols):
+def _validate(frame: pd.DataFrame, feature_cols: list[str], config: ResearchConfig,training=True) -> pd.DataFrame:
+    if not feature_cols or any(not c.startswith("f_") for c in feature_cols):
         raise ValueError("feature columns must be nonempty and must not contain future targets or execution outcomes")
     required = {"ticker", "date", "decision_ts", *feature_cols}
     for h in config.horizons:
@@ -82,17 +98,44 @@ def _validate(frame: pd.DataFrame, feature_cols: list[str], config: ResearchConf
     missing = required - set(frame)
     if missing:
         raise ValueError(f"research frame missing columns: {sorted(missing)}")
-    out = frame.loc[frame.ticker.astype(str) != "0050"].copy()
+    universe=TRAINING_TICKERS if training else config.evaluation_tickers
+    out = frame.loc[frame.ticker.astype(str).isin(universe)].copy()
     out["date"] = pd.to_datetime(out["date"]).dt.normalize()
     out["decision_ts"] = pd.to_datetime(out["decision_ts"], utc=True)
     out = out.loc[out.decision_ts.notna()].copy()
     if out.duplicated(["ticker", "date"]).any():
         raise ValueError("research frame contains duplicate ticker/date observations")
     for h in config.horizons:
+        if config.objective=='open_return':
+            if f'execution_target_{h}' not in out:raise ValueError('Executable-return objective requires execution targets')
+            out[f'target_{h}']=out[f'execution_target_{h}']
         out[f"label_end_{h}"] = pd.to_datetime(out[f"label_end_{h}"])
         vals = pd.to_numeric(out[f"target_{h}"], errors="coerce")
         out[f"target_{h}"] = vals.where(np.isfinite(vals))
     return out.sort_values(["date", "ticker"]).reset_index(drop=True)
+
+
+def predict_evaluation(model,frame,horizon,evaluation_cutoff=None):
+    prediction=model.predict(frame)
+    actual=np.expm1(pd.to_numeric(frame[f'target_{horizon}'],errors='coerce'))
+    if evaluation_cutoff is not None and f'label_available_at_{horizon}' in frame:
+        known=pd.to_datetime(frame[f'label_available_at_{horizon}'],utc=True).le(evaluation_cutoff)
+        actual=actual.where(known)
+    prediction['actual_return']=actual.where(np.isfinite(actual))
+    prediction['label_end_date']=frame[f'label_end_{horizon}']
+    for column in ['close','adj_close','next_open','next_open_date','asset_class',f'label_available_at_{horizon}',
+                   f'trade_return_{horizon}',f'benchmark_trade_return_{horizon}',f'benchmark_target_{horizon}',
+                   f'trade_valid_{horizon}','benchmark_adj_close','benchmark_adjusted_next_open',f'benchmark_end_adj_close_{horizon}']:
+        if column in frame:prediction[column]=frame[column]
+    return prediction
+
+
+def transfer_metrics(predictions):
+    if predictions.empty:return {}
+    return {str(ticker):dict(tradable=asset_class(ticker)!='index',scope='same_model_unseen_asset',
+        return_basis='price_index' if asset_class(ticker)=='index' else 'corporate_action_adjusted',
+        by_horizon={str(h):_horizon_metrics(g) for h,g in group.groupby('horizon')})
+        for ticker,group in predictions.groupby('ticker')}
 
 
 def temporal_splits(frame: pd.DataFrame, horizon: int, config: ResearchConfig) -> list[dict]:
@@ -195,6 +238,13 @@ class TrainedModel:
     trained_through: str
     calibration_ends: str
     training_cutoff: str = ""
+    training_probability: float = .5
+    calibration_prior_weight: float = 0.
+    calibration_selection: dict = field(default_factory=dict)
+    arithmetic_regressor: Any = None
+    training_start: str = ''
+    training_dates: int = 0
+    training_rows: int = 0
 
     @property
     def train_end(self):
@@ -214,6 +264,7 @@ class TrainedModel:
             probability = np.full(len(frame), self.constant_probability)
         else:
             probability = self.calibrator.predict_proba(_logit(p0))[:, 1]
+        probability=(1-self.calibration_prior_weight)*probability+self.calibration_prior_weight*self.training_probability
         center = raw_log + self.return_bias
         # Clip logs to keep JSON finite even for malformed or extreme research inputs.
         center = np.clip(center, -10, 10)
@@ -221,6 +272,8 @@ class TrainedModel:
         out["horizon"] = self.horizon
         out["probability_up"] = np.clip(probability, 0, 1)
         out["expected_return"] = np.expm1(center)
+        out['arithmetic_expected_return']=np.clip(self.arithmetic_regressor.predict(x),-.999,np.expm1(10)) if self.arithmetic_regressor is not None else np.nan
+        out['training_probability']=self.training_probability
         out["q10"] = np.expm1(np.clip(center - self.residual_radius, -10, 10))
         out["q50"] = np.expm1(center)
         out["q90"] = np.expm1(np.clip(center + self.residual_radius, -10, 10))
@@ -240,8 +293,30 @@ class TrainedModel:
                  for i in np.argsort(np.abs(row))[-max(1, top_n):][::-1]] for row in contributions]
 
 
+def _calibration_weight(p,labels,calibration,horizon,prior,random_state):
+    dates=pd.DatetimeIndex(calibration.date.unique()).sort_values()
+    validation_start=dates[min(len(dates)-1,max(1,len(dates)*2//3))]
+    fit=(calibration.date<validation_start)&(calibration[f'label_end_{horizon}']<validation_start)
+    if f'label_available_at_{horizon}' in calibration:
+        fit &= pd.to_datetime(calibration[f'label_available_at_{horizon}'],utc=True)<validation_start.tz_localize('Asia/Taipei').tz_convert('UTC')
+    validation=calibration.date>=validation_start
+    metadata=dict(validation_start=validation_start.isoformat(),
+        fit_label_end_max=str(calibration.loc[fit,f'label_end_{horizon}'].max()),
+        method='chronological_calibration_only',candidate_weights=[0.,.25,.5,.75,1.])
+    if fit.sum()<10 or len(np.unique(labels[fit.to_numpy()]))<2 or not validation.any():
+        return 1.,{**metadata,'status':'insufficient_inner_calibration_use_training_prior'}
+    inner=LogisticRegression(C=1.,max_iter=1000,random_state=random_state).fit(_logit(p[fit.to_numpy()]),labels[fit.to_numpy()])
+    raw=inner.predict_proba(_logit(p[validation.to_numpy()]))[:,1]
+    scores={w:float(np.mean(((1-w)*raw+w*prior-labels[validation.to_numpy()])**2)) for w in (0.,.25,.5,.75,1.)}
+    weight=min(scores,key=lambda w:(scores[w],-w))
+    return weight,{**metadata,'status':'selected','validation_brier':scores}
+
+
 @threadpool_limits.wrap(limits=1)
 def _fit(train: pd.DataFrame, calibration: pd.DataFrame, feature_cols: list[str], horizon: int, config: ResearchConfig) -> TrainedModel:
+    if config.training_window_dates is not None:
+        dates=pd.DatetimeIndex(train.date.unique()).sort_values()
+        train=train[train.date>=dates[-min(config.training_window_dates,len(dates))]]
     x = _numeric(train, feature_cols)
     y = train[f"target_{horizon}"].to_numpy(dtype=float)
     yc = (y > 0).astype(int)
@@ -250,6 +325,9 @@ def _fit(train: pd.DataFrame, calibration: pd.DataFrame, feature_cols: list[str]
     regressor = Pipeline([("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
         ("model", HistGradientBoostingRegressor(max_iter=45, max_leaf_nodes=15, min_samples_leaf=20,
             learning_rate=0.06, l2_regularization=5.0, random_state=config.random_state))]).fit(x, y)
+    arithmetic=Pipeline([('imputer',SimpleImputer(strategy='median',keep_empty_features=True)),
+        ('model',HistGradientBoostingRegressor(max_iter=45,max_leaf_nodes=15,min_samples_leaf=20,
+            learning_rate=.06,l2_regularization=5.,random_state=config.random_state))]).fit(x,np.expm1(np.clip(y,-10,10)))
     if len(np.unique(yc)) < 2:
         classifier = _classifier(yc, config.random_state).fit(x, yc)
     else:
@@ -273,14 +351,21 @@ def _fit(train: pd.DataFrame, calibration: pd.DataFrame, feature_cols: list[str]
         constant = float((labels.sum() + 1) / (len(labels) + 2))
     else:
         calibrator = LogisticRegression(C=1.0, max_iter=1000, random_state=config.random_state).fit(_logit(p), labels)
+    prior=float((yc.sum()+1)/(len(yc)+2))
+    prior_weight,selection=_calibration_weight(p,labels,calibration,horizon,prior,config.random_state) if config.calibration_policy=='chronological_shrinkage' else (0.,{'method':'sigmoid'})
     digest = hashlib.sha256()
     digest.update(json.dumps({"config": asdict(config), "features": feature_cols, "horizon": horizon}, sort_keys=True).encode())
     for dataset in (train, calibration):
         digest.update(pd.util.hash_pandas_object(dataset[["ticker", "date", *feature_cols, f"target_{horizon}"]], index=False).to_numpy().tobytes())
     version = f"twq-v1-h{horizon}-{digest.hexdigest()[:16]}"
-    return TrainedModel(horizon, feature_cols, regressor, classifier, baseline_regressor, baseline_classifier,
+    model=TrainedModel(horizon, feature_cols, regressor, classifier, baseline_regressor, baseline_classifier,
                         calibrator, constant, radius, bias, version, str(train.date.max().date()),
                         str(calibration[f"label_end_{horizon}"].max().date()))
+    model.training_probability=prior;model.calibration_prior_weight=prior_weight
+    model.calibration_selection=selection;model.arithmetic_regressor=arithmetic
+    model.training_start=str(train.date.min().date())
+    model.training_dates=int(train.date.nunique());model.training_rows=len(train)
+    return model
 
 
 def _horizon_metrics(p: pd.DataFrame) -> dict:
@@ -300,7 +385,23 @@ def _horizon_metrics(p: pd.DataFrame) -> dict:
     for _, group in p.groupby("date"):
         if len(group) >= 3 and group.actual_return.nunique() > 1 and group.expected_return.nunique() > 1:
             ics.append(float(group.actual_return.rank().corr(group.expected_return.rank())))
+    positive=probability>=.5;up=labels==1;down=~up
+    up_recall=float(positive[up].mean()) if up.any() else None
+    down_recall=float((~positive[down]).mean()) if down.any() else None
+    frequency=pd.to_numeric(p.get('training_probability',pd.Series(.5,index=p.index)),errors='raise').to_numpy()
+    frequency_brier=float(np.mean((frequency-labels)**2))
+    reliability=[]
+    for low in (0.,.2,.4,.6,.8):
+        mask=(probability>=low)&(probability<round(low+.2,2) if low<.8 else probability<=1.)
+        reliability.append(dict(low=low,count=int(mask.sum()),predicted=float(probability[mask].mean()) if mask.any() else None,
+                                observed=float(labels[mask].mean()) if mask.any() else None))
     return {
+        'predicted_up_fraction':float(positive.mean()),'observed_up_fraction':float(up.mean()),
+        'always_up_accuracy':float(up.mean()),'fixed_p50_brier':.25,'frequency_brier':frequency_brier,
+        'brier_skill_vs_p50':float(1-brier/.25),'brier_skill_vs_frequency':float(1-brier/frequency_brier) if frequency_brier>0 else None,
+        'balanced_accuracy':float((up_recall+down_recall)/2) if up_recall is not None and down_recall is not None else None,
+        'recall_up':up_recall,'recall_down':down_recall,'reliability':reliability,
+        'confusion':dict(true_up=int((positive&up).sum()),false_up=int((positive&down).sum()),true_down=int((~positive&down).sum()),false_down=int((~positive&up).sum())),
         "observations": len(p), "test_dates": p.date.nunique(), "folds": p.fold.nunique(),
         "accuracy": float(np.mean((probability >= .5) == labels)),
         "baseline_accuracy": float(np.mean((baseline >= .5) == labels)),
@@ -362,9 +463,10 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
                  & group.next_open.gt(0) & group.next_open_date.notna())
         if "trade_valid_1" in group:
             valid &= group.trade_valid_1.fillna(False).astype(bool)
+        score='arithmetic_expected_return' if 'arithmetic_expected_return' in group else 'expected_return'
         candidates = group.loc[group.probability_up.ge(config.min_probability)
-                               & group.expected_return.gt(roundtrip + config.min_expected_return)]
-        selected = candidates.sort_values(["expected_return", "ticker"], ascending=[False, True]).head(config.max_positions)
+                               & group[score].gt(roundtrip + config.min_expected_return)]
+        selected = candidates.sort_values([score, "ticker"], ascending=[False, True]).head(config.max_positions)
         # Select on decision-time information only. If a selected order cannot
         # execute, its allocation stays cash; future fillability cannot promote
         # another stock into the selected portfolio.
@@ -373,6 +475,7 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
         allocation = weight * len(eligible)
         lot_returns = ((1 + eligible.trade_return_1) * (1 - sell) / (1 + buy) - 1)
         strategy_return = float(weight * lot_returns.sum())
+        strategy_gross=float(weight*eligible.trade_return_1.sum())
         benchmark_gross=float(benchmark_vals.iloc[0]) if len(benchmark_vals) else np.nan
         # The overnight-flat ETF strategy stays cash when its opening trade is
         # unavailable. Stock trades still execute on the observed market day.
@@ -389,7 +492,7 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
         absolute_open = group.get("benchmark_adjusted_next_open", pd.Series(dtype=float)).dropna()
         absolute_close = group.get("benchmark_end_adj_close_1", pd.Series(dtype=float)).dropna()
         rows.append({"date": pd.Timestamp(group.next_open_date.dropna().iloc[0]), "anchor_date": anchor,
-                     "strategy_return": strategy_return, "benchmark_return": benchmark_return,
+                     "strategy_return": strategy_return,'strategy_gross_return':strategy_gross, "benchmark_return": benchmark_return,
                      "equal_weight_return": equal_weight_return, "benchmark_hold_return": hold_return,
                      "benchmark_intraday_gross": benchmark_gross,
                      "benchmark_absolute_open": float(absolute_open.iloc[0]) if len(absolute_open) else np.nan,
@@ -430,6 +533,10 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
                          "stock_sell_tax": config.sell_tax, "etf_sell_tax": config.etf_sell_tax}}
     for name in ["strategy", "benchmark", "equal_weight"]:
         metrics[name] = _performance(equity[f"{name}_return"].to_numpy(), equity[f"{name}_net"].to_numpy())
+    gross_nav=(1+equity.strategy_gross_return).cumprod()
+    metrics['gross_strategy']=_performance(equity.strategy_gross_return.to_numpy(),gross_nav.to_numpy())
+    metrics['cost_drag_percentage_points']=(metrics['gross_strategy']['total_return']-metrics['strategy']['total_return'])*100
+    metrics['gross_selection']='identical_frozen_selected_trades'
     if np.isfinite(hold_equity).all():
         passive = _performance(hold_returns, hold_equity)
         passive["status"] = "total_return_only" if gaps else "ok"
@@ -453,7 +560,8 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
 def run_research(frame: pd.DataFrame, feature_cols: list[str], config: ResearchConfig | None = None) -> ResearchResult:
     config = config or ResearchConfig()
     data = _validate(frame, feature_cols, config)
-    output, fold_rows, models = [], [], {}
+    evaluation=_validate(frame,feature_cols,config,training=False) if config.evaluation_tickers else pd.DataFrame()
+    output, fold_rows, models,transfer = [], [], {},[]
     for horizon in config.horizons:
         for fold, split in enumerate(temporal_splits(data, horizon, config), start=1):
             train, calibration, test = (data.loc[split[k]] for k in ("train", "calibration", "test"))
@@ -468,16 +576,22 @@ def run_research(frame: pd.DataFrame, feature_cols: list[str], config: ResearchC
                 if c in test:
                     pred[c] = test[c]
             output.append(pred)
+            if not evaluation.empty:
+                external=evaluation[evaluation.date.isin(test.date.unique())]
+                if not external.empty:
+                    external_prediction=predict_evaluation(model,external,horizon)
+                    external_prediction['fold']=fold
+                    transfer.append(external_prediction)
             models[horizon] = model
             fold_rows.append({
                 "horizon": horizon, "fold": fold, "model_version": model.model_version,
-                "train_start": train.date.min(), "train_end": train.date.max(),
+                "train_start": model.training_start, "train_end": train.date.max(),
                 "train_label_end": train[f"label_end_{horizon}"].max(),
                 "calibration_start": calibration.date.min(), "calibration_end": calibration.date.max(),
                 "calibration_label_end": calibration[f"label_end_{horizon}"].max(),
                 "test_start": test.date.min(), "test_end": test.date.max(),
-                "train_dates": train.date.nunique(), "calibration_dates": calibration.date.nunique(),
-                "test_dates": test.date.nunique(), "train_rows": len(train), "test_rows": len(test),
+                "train_dates": model.training_dates, "calibration_dates": calibration.date.nunique(),
+                "test_dates": test.date.nunique(), "train_rows": model.training_rows, "test_rows": len(test),
             })
     predictions = pd.concat(output, ignore_index=True)
     by_horizon = {str(h): _horizon_metrics(g) for h, g in predictions.groupby("horizon")}
@@ -486,6 +600,9 @@ def run_research(frame: pd.DataFrame, feature_cols: list[str], config: ResearchC
     for h, m in by_horizon.items():
         checks[f"h{h}_enough_out_of_sample_dates"] = m["test_dates"] >= 126 and m["folds"] >= 3
         checks[f"h{h}_brier_beats_baseline"] = m["brier_skill"] > 0
+        checks[f'h{h}_beats_fixed_probability']=m.get('brier_skill_vs_p50',0)>0
+        checks[f'h{h}_beats_training_frequency']=m.get('brier_skill_vs_frequency') is not None and m['brier_skill_vs_frequency']>0
+        checks[f'h{h}_direction_not_one_sided']=m.get('balanced_accuracy') is not None and m['balanced_accuracy']>.5
         checks[f"h{h}_interval_coverage"] = m["coverage80"] is not None and .7 <= m["coverage80"] <= .95
     checks["net_beats_passive_0050"] = (portfolio.get("status") == "ok"
         and portfolio["benchmark_buy_hold"]["total_return"] is not None
@@ -494,10 +611,14 @@ def run_research(frame: pd.DataFrame, feature_cols: list[str], config: ResearchC
     metrics = {"by_horizon": by_horizon, "portfolio": portfolio,
                "feasibility": {"passed": all(checks.values()), "checks": checks,
                                "note": "Research screening only. Requires real PIT data, untouched holdout and paper tracking before promotion."},
-               "model": "fixed 50/50 Ridge + histogram boosting, sigmoid temporal calibration",
+               "model": "fixed 50/50 Ridge + histogram boosting; temporal calibration: " + config.calibration_policy,
                "prediction_reference": "last adjusted close; expected_return is exp(predicted log return)-1",
                "config": asdict(config)}
-    return ResearchResult(predictions, metrics, pd.DataFrame(fold_rows), equity, models)
+    transfer_frame=pd.concat(transfer,ignore_index=True) if transfer else pd.DataFrame()
+    metrics['transfer']=transfer_metrics(transfer_frame)
+    metrics['training_tickers']=list(TRAINING_TICKERS)
+    metrics['objective']=config.objective
+    return ResearchResult(predictions, metrics, pd.DataFrame(fold_rows), equity, models,transfer_frame)
 
 
 def train_latest(frame: pd.DataFrame, feature_cols: list[str], config: ResearchConfig | None = None,

@@ -12,7 +12,9 @@ from zoneinfo import ZoneInfo
 from .workflows import forecast, ledger_for, promote, release_holdout, research, settle, write_json
 
 
-TICKERS = ["2330", "2454", "2317", "2308", "3711", "1303", "2383", "2881", "2891", "3037", "0050"]
+from .universe import TRAINING_TICKERS
+
+TICKERS = [*TRAINING_TICKERS, "0050"]
 
 
 def load_dotenv(path=Path(".env")):
@@ -35,6 +37,8 @@ def config_from(path):
         raise ValueError("Unknown research configuration: " + ", ".join(sorted(unknown)))
     if "horizons" in values:
         values["horizons"] = tuple(values["horizons"])
+    if "evaluation_tickers" in values:
+        values["evaluation_tickers"] = tuple(values["evaluation_tickers"])
     return ResearchConfig(**values)
 
 
@@ -104,11 +108,16 @@ def parser():
     r.add_argument("--events", type=Path)
     r.add_argument("--mode", choices=["postclose", "preopen"], default="postclose")
     r.add_argument("--holdout-dates", type=int, default=126)
+    compare = subs.add_parser("compare", help="僅以開發期固定十檔指標選擇特徵組；不開封保留期")
+    compare.add_argument("--config", type=Path)
+    compare.add_argument("--events", type=Path)
+    compare.add_argument("--holdout-dates", type=int, default=126)
     f = subs.add_parser("predict", help="保存不可覆寫的1/5/20日預測")
     f.add_argument("--as-of", required=True)
     f.add_argument("--paper", action="store_true")
     f.add_argument("--events", type=Path)
     f.add_argument("--fundamentals", type=Path)
+    f.add_argument("--tickers", help="逗號分隔；預設固定十檔，其他標的限 --paper")
     s = subs.add_parser("settle", help="只評分已到期且實際可得的結果")
     s.add_argument("--as-of", required=True)
     subs.add_parser("status", help="模型狀態、可行性缺口與逐筆預測追蹤")
@@ -212,11 +221,19 @@ def execute(args):
                     readiness=result["readiness"], forecasts=predictions["total"],
                     replay_settled=matured["newly_settled"],
                     report=str((root / "runs" / result["run_id"] / "report.json").resolve()))
+    if args.command == "compare":
+        from .comparison import compare_profiles
+        from .workflows import load_events
+        from .data import PriceStore
+        result = compare_profiles(PriceStore(root/"data").read_prices(), config_from(args.config),
+            load_events(args.events), args.holdout_dates, output=root/"comparison")
+        write_json(root/"comparison"/"report.json", result)
+        return dict(selected_profile=result["selected_profile"], scores=result["scores"], holdout_opened=False)
     if args.command == "research":
         report = research(root, config_from(args.config), args.as_of, args.events, args.mode, args.holdout_dates)
         return dict(run_id=report["run_id"], metrics=report["metrics"], readiness=report["readiness"])
     if args.command == "predict":
-        result = forecast(root, args.as_of, args.paper, args.events, args.fundamentals)
+        result = forecast(root, args.as_of, args.paper, args.events, args.fundamentals, tickers=args.tickers.split(",") if args.tickers else None)
         return dict(inserted=result["inserted"], forecasts=result["total"])
     if args.command == "settle":
         return settle(root, args.as_of)
@@ -245,7 +262,7 @@ def execute(args):
         report = research(root, config_from(args.config), cutoff, args.events, args.mode, args.holdout_dates)
         if not args.paper:
             promote(root)
-        result = forecast(root, cutoff, args.paper, args.events, args.fundamentals)
+        result = forecast(root, cutoff, args.paper, args.events, args.fundamentals, tickers=args.tickers.split(",") if args.tickers else None)
         return dict(newly_settled=settlements["newly_settled"], run_id=report["run_id"],
                     forecasts=result["total"], readiness=report["readiness"])
     if args.command == "status":

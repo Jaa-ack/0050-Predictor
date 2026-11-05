@@ -383,3 +383,14 @@ def test_fred_today_uses_provider_day_before_us_midnight(monkeypatch):
     assert result.records
     assert requested[-1]['realtime_end']=='2026-11-04'
     assert result.metadata['requested_end']=='2026-11-05'
+
+
+def test_index_prices_preserve_price_index_basis_instead_of_stock_total_return():
+    def handler(m,u,k):
+        result=candle('IX0001',adjusted=k['params']['adjusted']=='true')
+        result['type']='INDEX'
+        return Response(result)
+    frame=fetch_fugle_prices(transport(handler),['IX0001'],'2025-01-02','2025-01-03')
+    assert set(frame.asset_class)=={'index'}
+    assert set(frame.return_basis)=={'price_index'}
+    assert set(frame.adjustment_source)=={'fugle_price_index_no_dividend_reinvestment'}

@@ -73,3 +73,12 @@ test('gap filtering keeps completed work visible only under the matching status 
   assert.deepEqual(state.filterGaps(rows,'P0'),[rows[0],rows[2]]);
   assert.deepEqual(state.filterGaps(rows,'all'),rows);
 });
+
+test('transfer table keeps development and reserved metrics separate for the selected horizon',()=>{
+  assert.equal(typeof state.transferRows,'function');
+  const report={metrics:{transfer:{'1216':{tradable:true,by_horizon:{'1':{brier:.2}}}},sealed_holdout:{metrics:{transfer:{'IX0001':{tradable:false,by_horizon:{'1':{brier:.3}}}}}}}};
+  assert.deepEqual(state.transferRows(report,1,'development').map(r=>r.ticker),['1216']);
+  assert.equal(state.transferRows(report,1,'holdout')[0].tradable,false);
+  assert.equal(state.transferRows(report,5,'holdout').length,0);
+  assert.deepEqual(state.transferRows({},1,'holdout'),[]);
+});
