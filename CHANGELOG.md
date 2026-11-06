@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — 2026-11-07
+
+- Added a separate nested chronological direction-model search across eight predeclared model/window candidates and five thresholds, preserving the fixed-ten training universe and frozen-model external transfer diagnostics.
+- Audited every fixed-ten stock and all 252 five-stock subsets with complete-calendar denominators, missing/abstained prediction penalties, directional baselines and market-date block diagnostics.
+- Added isolated, multi-seed hypothetical-information experiments covering absent, weak, strong, delayed and missing signals; synthetic success cannot establish real-market accuracy or change release gates.
+- Preserved final-date exclusions, immutable local experiment protocols, data/source fingerprints and research-only CLI commands; documented the unsuccessful historical target and conditional synthetic results without publishing provider data.
+
 ## Unreleased — 2026-11-05
 
 - Fixed the user-selected ten as the exclusive shared-model training/calibration/selection universe and predictive market context; added same-fold and reserved-period transfer tests for 0050, 1216, 2002, 2412 and TAIEX, with immutable role-tagged paper forecasts.
