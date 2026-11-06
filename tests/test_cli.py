@@ -31,7 +31,11 @@ def test_cli_error_boundary_never_echoes_configured_secret(monkeypatch,capsys):
     assert '[REDACTED]' in output
 
 
-@pytest.mark.parametrize('candidate_set,policy,mode', [('base', 'worst_stock_accuracy', 'postclose'), ('factor', 'pooled_brier', 'preopen')])
+@pytest.mark.parametrize('candidate_set,policy,mode', [
+    ('base', 'worst_stock_accuracy', 'postclose'),
+    ('factor', 'pooled_brier', 'preopen'),
+    ('market', 'worst_stock_brier', 'preopen'),
+])
 def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, candidate_set, policy, mode):
     from twquant.data import PriceStore
     from twquant.demo import make_demo_prices
@@ -47,11 +51,18 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
     assert result['holdout_opened'] is False
     assert result['selection_policy'] == policy
     assert result['mode'] == mode
-    assert result['candidate_count'] == (8 if candidate_set == 'base' else 10)
+    assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16}[candidate_set]
     assert (tmp_path / result['report']).exists()
     report = json.loads((tmp_path / result['report']).read_text())
     assert report['protocol']['selection_policy'] == policy
     assert report['protocol']['mode'] == mode
+    if candidate_set == 'market':
+        market = [c for c in report['protocol']['candidates'] if c['feature_profile'] == 'portable_market']
+        assert {c['model'] for c in market} == {
+            'logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist'}
+        assert all(c['window_dates'] == 756 for c in market)
+        scored = {s['candidate'] for s in report['selections'][0]['candidate_scores']}
+        assert all(f"{c['model']}:portable_market:756" in scored for c in market)
     assert not (tmp_path / 'current.json').exists()
 
 

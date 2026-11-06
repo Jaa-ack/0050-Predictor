@@ -50,6 +50,10 @@ FACTOR_CANDIDATES = DEFAULT_CANDIDATES + (
     DirectionCandidate('factor_ridge', 'portable_all', 756),
     DirectionCandidate('factor_hist', 'portable_all', 756),
 )
+MARKET_CANDIDATES = FACTOR_CANDIDATES + tuple(
+    DirectionCandidate(model, 'portable_market', 756)
+    for model in ('logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist')
+)
 THRESHOLDS = (.4, .45, .5, .55, .6)
 SELECTION_POLICIES = ('worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier')
 

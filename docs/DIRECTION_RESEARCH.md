@@ -146,3 +146,17 @@ LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membershi
 保留期凍結時間另限定由固定十檔與0050決定：改動外部股票的特徵、答案，甚至保留期的外部時間戳，都不會改變核心擬合或預測。原有日曆成熟排除仍保守地要求評分目標終點在保留期錨點之前，兩種模式都不會因盤前已知更多資訊而讀取預留期答案。
 
 六組實際比較已完成，三組盤後控制亦逐筆重現上一輪的數值預測。較晚資訊截止點的一日結果改善，但較長期間沒有一致改善；完整名單與事先定義的資訊就緒診斷均未達75%。逐筆配對、日期區塊重抽、原始報告及全部失敗方案只存本機，沒有把已反覆檢視的歷史稱為新未接觸驗證。
+
+## 第五輪：美股市場資訊消融
+
+`--candidate-set market`保留原有十組，另加入六組`portable_market`候選，共十六組。新增的logistic、hist、extra_trees、random_forest、factor_ridge及factor_hist全部使用756個訓練日期，與原來相同演算法的`portable_all`候選比較；沒有更改模型參數、時間門檻或驗收條件。原`base`八組及`factor`十組仍可分別重現。
+
+`portable_market`保留可攜價格特徵與FMP美股報酬／事件年齡，排除FRED等其他事件與絕對收盤價。這一輪只根據固定十檔的盤前一日結果提出假說，以原有三種規則在訓練／校準區間選擇；外部50檔不決定候選、規則或門檻。所有規則及失敗結果均保存，相同歷史再次使用仍是探索性證據。
+
+```bash
+LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membership-transfer-20261107 direction-search --config configs/research_direction.json --events artifacts/fixed-ten/sources/events.csv --candidate-set market --selection-policy pooled_brier --membership artifacts/current-membership/20261107/membership.json --mode preopen
+```
+
+本機協定事先凍結十六組候選、三種規則、程式／事件摘要、行情快照與上一輪盤前控制；價格錨點、標籤、最後126日期間及完整名單診斷起點均沿用。後續比較亦核對原十組的逐折校準分數，避免把額外候選以外的變動混入結果。
+
+三組實際比較已完成：原十組的全部逐折校準分數與上一輪完全相同，開發矩陣摘要及逐筆答案也相同。新增候選的一日改善有限，較長期間並非一致改善；核心、完整50檔及資訊就緒次要診斷均未達75%，也沒有改善所有最弱股票。未以最好的單一平均取代任意五檔驗收，正式模型與門檻維持原狀。

@@ -119,8 +119,8 @@ def parser():
                            help='盤後20:00或下一實際市場日盤前08:30；兩者維持同一收盤價錨點')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
-    direction.add_argument('--candidate-set', choices=['base', 'factor'], default='base',
-                           help='base為原八組候選；factor另加市場／個股殘差的線性與提升樹模型')
+    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market'], default='base',
+                           help='base為原八組；factor加兩組殘差模型；market再加六組價格＋美股資訊消融')
     direction.add_argument('--selection-policy', choices=['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'],
                            default='worst_stock_accuracy', help='Brier規則固定0.5門檻；只以校準期選模')
     simulation = subs.add_parser('direction-simulate', help='模擬假設資訊量、延遲及缺漏；合成結果不是真實預測證據')
@@ -246,7 +246,7 @@ def execute(args):
         return dict(selected_profile=result["selected_profile"], scores=result["scores"], holdout_opened=False)
     if args.command in {'direction-search', 'direction-simulate'}:
         import uuid
-        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, search_direction_models, simulate_information_scenarios
+        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, search_direction_models, simulate_information_scenarios
         from .direction_audit import load_membership_snapshot
         from .features import build_features
         from .workflows import data_kind, load_events
@@ -270,7 +270,7 @@ def execute(args):
             kind = 'synthetic'
         result = search_direction_models(build_features(prices, external=events, mode=args.mode), config,
             holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder,
-            candidates=FACTOR_CANDIDATES if args.candidate_set == 'factor' else DEFAULT_CANDIDATES,
+            candidates={'base': DEFAULT_CANDIDATES, 'factor': FACTOR_CANDIDATES, 'market': MARKET_CANDIDATES}[args.candidate_set],
             selection_policy=args.selection_policy, mode=args.mode,
             constituents=membership['tickers'] if membership is not None else None,
             membership_as_of=membership['as_of'] if membership is not None else None)

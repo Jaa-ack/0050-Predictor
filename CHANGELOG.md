@@ -2,6 +2,8 @@
 
 ## Unreleased — 2026-11-07
 
+- Added an opt-in sixteen-candidate direction search with six matched price-plus-US-market feature ablations; original candidate sets and fixed-ten-only chronological selection remain available.
+- Compared the three declared market-ablation policies against frozen preopen controls, verifying identical original-candidate calibration scores and retaining failed all-constituent target evidence locally.
 - Added explicit postclose/preopen decision modes to direction research, including primary-clock validation, frozen timing contracts and mode-specific prediction/model provenance.
 - Limited development-freeze timestamps to the fixed ten and reference ETF, preventing external-stock metadata from changing training-label availability.
 - Preserved identical price anchors and future-close targets while comparing overnight information; extended full-constituent and leakage tests to both timing modes.
