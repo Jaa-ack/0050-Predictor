@@ -116,6 +116,10 @@ def parser():
     direction.add_argument('--config', type=Path)
     direction.add_argument('--events', type=Path)
     direction.add_argument('--holdout-dates', type=int, default=126)
+    direction.add_argument('--candidate-set', choices=['base', 'factor'], default='base',
+                           help='base為原八組候選；factor另加市場／個股殘差的線性與提升樹模型')
+    direction.add_argument('--selection-policy', choices=['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'],
+                           default='worst_stock_accuracy', help='Brier規則固定0.5門檻；只以校準期選模')
     simulation = subs.add_parser('direction-simulate', help='模擬假設資訊量、延遲及缺漏；合成結果不是真實預測證據')
     simulation.add_argument('--sessions', type=int, default=1200)
     simulation.add_argument('--seeds', default='17,29,43', help='保留所有指定種子的結果，不挑選幸運種子')
@@ -239,7 +243,7 @@ def execute(args):
         return dict(selected_profile=result["selected_profile"], scores=result["scores"], holdout_opened=False)
     if args.command in {'direction-search', 'direction-simulate'}:
         import uuid
-        from .direction import search_direction_models, simulate_information_scenarios
+        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, search_direction_models, simulate_information_scenarios
         from .features import build_features
         from .workflows import data_kind, load_events
         run_id = datetime.now(ZoneInfo('Asia/Taipei')).strftime('%Y%m%dT%H%M%S') + '_' + uuid.uuid4().hex[:8]
@@ -255,13 +259,16 @@ def execute(args):
         if events is not None and data_kind(events) == 'synthetic':
             kind = 'synthetic'
         result = search_direction_models(build_features(prices, external=events), config_from(args.config),
-            holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder)
+            holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder,
+            candidates=FACTOR_CANDIDATES if args.candidate_set == 'factor' else DEFAULT_CANDIDATES,
+            selection_policy=args.selection_policy)
         provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind,
             availability_basis=sorted(prices.availability_basis.unique().tolist()),
             limitation='Historical receipt timestamps and latest adjusted prices do not establish original point-in-time data.')
         write_json(folder / 'data_provenance.json', provenance)
         return dict(run_id=run_id, report=str((folder / 'report.json').relative_to(root)),
             evidence_kind=kind, holdout_opened=False, real_world_target_verified=False,
+            selection_policy=args.selection_policy, candidate_count=result.report['candidate_count'],
             by_horizon={h: {k: m[k] for k in ('overall_accuracy', 'minimum_stock_accuracy',
                 'worst_five_accuracy', 'coverage', 'empirical_target_met')} for h, m in result.report['by_horizon'].items()})
     if args.command == "research":

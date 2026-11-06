@@ -85,7 +85,8 @@ def search_frame():
     return pd.concat(rows, ignore_index=True)
 
 
-def test_search_selection_ignores_outer_test_labels_reserved_labels_and_transfer_assets(tmp_path):
+@pytest.mark.parametrize('selection_policy', ['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'])
+def test_search_selection_ignores_outer_test_labels_reserved_labels_and_transfer_assets(tmp_path, selection_policy):
     from test_research import small_config
     from twquant.direction import DirectionCandidate, search_direction_models
     from twquant.comparison import reserve_development
@@ -94,7 +95,7 @@ def test_search_selection_ignores_outer_test_labels_reserved_labels_and_transfer
     cfg = small_config(horizons=(1,), max_folds=1, evaluation_tickers=('0050', '1216'))
     candidates = (DirectionCandidate('logistic'), DirectionCandidate('prior'))
     a = search_direction_models(frame, cfg, candidates=candidates, holdout_dates=15,
-                                bootstrap_samples=20, output=tmp_path)
+                                bootstrap_samples=20, output=tmp_path, selection_policy=selection_policy)
     dev, start = reserve_development(frame, cfg.horizons, 15)
     fixed = dev.loc[dev.ticker.isin(TRAINING_TICKERS)].reset_index(drop=True)
     split = temporal_splits(fixed, 1, cfg)[0]
@@ -104,7 +105,7 @@ def test_search_selection_ignores_outer_test_labels_reserved_labels_and_transfer
     changed.loc[changed.ticker.isin(['0050', '1216']), 'f_signal'] = 900
     changed.loc[changed.ticker.isin(['0050', '1216']), 'target_1'] = -.9
     b = search_direction_models(changed, cfg, candidates=candidates, holdout_dates=15,
-                                bootstrap_samples=20)
+                                bootstrap_samples=20, selection_policy=selection_policy)
     pd.testing.assert_frame_equal(a.predictions.drop(columns='actual_return'), b.predictions.drop(columns='actual_return'))
     assert a.report['selections'] == b.report['selections']
     assert a.report['holdout_opened'] is False
@@ -112,7 +113,15 @@ def test_search_selection_ignores_outer_test_labels_reserved_labels_and_transfer
     assert set(a.transfer_predictions.ticker) == {'0050', '1216'}
     assert set(a.transfer_predictions.date) == set(a.predictions.date)
     assert set(a.transfer_predictions.model_version) == set(a.predictions.model_version)
-    assert len(a.report['selections'][0]['candidate_scores']) == 2 * 5
+    thresholds = 5 if selection_policy == 'worst_stock_accuracy' else 1
+    assert len(a.report['selections'][0]['candidate_scores']) == 2 * thresholds
+    assert a.report['protocol']['selection_policy'] == selection_policy
+    if selection_policy != 'worst_stock_accuracy':
+        assert a.predictions.decision_threshold.eq(.5).all()
+        scores = a.report['selections'][0]['candidate_scores']
+        field = 'brier' if selection_policy == 'pooled_brier' else 'worst_stock_brier'
+        chosen = next(s for s in scores if s['candidate'] == a.predictions.candidate.iloc[0])
+        assert chosen[field] == min(s[field] for s in scores)
     assert (tmp_path / 'protocol.json').exists()
     assert (tmp_path / 'predictions.parquet').exists()
     selected = a.report['selections'][0]
@@ -144,6 +153,58 @@ def test_search_retains_benchmark_sessions_when_all_ten_stock_rows_are_missing()
     audit = result.report['by_horizon']['1']
     assert audit['missing_predictions'] == 10
     assert audit['coverage'] < 1
+
+
+@pytest.mark.parametrize('model', ['factor_ridge', 'factor_hist'])
+def test_market_and_stock_residual_model_learns_both_signals_without_test_or_transfer_refitting(model):
+    from test_research import small_config
+    from twquant.direction import DirectionCandidate, search_direction_models
+    frame = search_frame()
+    rng = np.random.default_rng(63)
+    dates = sorted(frame.date.unique())
+    market = dict(zip(dates, rng.normal(size=len(dates))))
+    frame['f_market_return_1'] = frame.date.map(market)
+    frame['f_signal'] = rng.normal(size=len(frame))
+    frame['target_1'] = .02 * (frame.f_market_return_1 + frame.f_signal) + rng.normal(0, .0001, len(frame))
+    frame.loc[frame.label_end_1.isna(), 'target_1'] = np.nan
+    cfg = small_config(horizons=(1,), test_dates=30, max_folds=1, evaluation_tickers=('0050', '1216'))
+    candidate = (DirectionCandidate(model),)
+    a = search_direction_models(frame, cfg, candidates=candidate, holdout_dates=15,
+                                bootstrap_samples=10, selection_policy='pooled_brier')
+    valid = a.predictions.actual_return.notna()
+    accuracy = a.predictions.probability_up[valid].ge(.5).eq(a.predictions.actual_return[valid].gt(0)).mean()
+    assert accuracy > .85
+    details = a.report['selections'][0]['model_details']
+    assert details['market_features'] == ['f_market_return_1']
+    assert details['market_training_dates'] == a.report['selections'][0]['training_dates']
+    assert details['residual_training_rows'] == details['market_training_dates'] * 10
+    assert set(a.transfer_predictions.model_version) == set(a.predictions.model_version)
+    changed = frame.copy()
+    changed.loc[changed.date.isin(a.predictions.date), 'target_1'] = -.9
+    changed.loc[changed.ticker.isin(['0050', '1216']), ['f_signal', 'f_market_return_1']] = 999.
+    changed.loc[changed.ticker.isin(['0050', '1216']), 'target_1'] = -.9
+    b = search_direction_models(changed, cfg, candidates=candidate, holdout_dates=15,
+                                bootstrap_samples=10, selection_policy='pooled_brier')
+    pd.testing.assert_frame_equal(a.predictions.drop(columns='actual_return'), b.predictions.drop(columns='actual_return'))
+    assert a.report['selections'] == b.report['selections']
+
+
+def test_incomplete_market_history_skips_factor_candidate_and_keeps_other_candidates():
+    from test_research import small_config
+    from twquant.direction import DirectionCandidate, search_direction_models
+    frame = search_frame().loc[lambda f: f.ticker.ne(TRAINING_TICKERS[0])]
+    cfg = small_config(horizons=(1,), max_folds=1)
+    candidates = (DirectionCandidate('prior'), DirectionCandidate('factor_ridge'))
+    result = search_direction_models(frame, cfg, candidates=candidates, holdout_dates=15,
+                                    bootstrap_samples=10, selection_policy='pooled_brier')
+    assert result.predictions.candidate.str.startswith('prior:').all()
+    scores = result.report['selections'][0]['candidate_scores']
+    assert scores[-1]['status'] == 'unavailable'
+    assert scores[-1]['reason'] == 'incomplete_fixed_ten_market_history'
+    assert result.report['total_selection_trials'] == 1
+    with pytest.raises(ValueError, match='No eligible direction candidates'):
+        search_direction_models(frame, cfg, candidates=candidates[1:], holdout_dates=15,
+                                bootstrap_samples=10, selection_policy='pooled_brier')
 
 
 def test_information_scenario_has_explicit_hypotheses_mature_labels_and_delay():

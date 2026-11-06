@@ -1,4 +1,5 @@
 import json
+import pytest
 
 from twquant.cli import main
 from twquant.workflows import ledger_for
@@ -30,7 +31,8 @@ def test_cli_error_boundary_never_echoes_configured_secret(monkeypatch,capsys):
     assert '[REDACTED]' in output
 
 
-def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys):
+@pytest.mark.parametrize('candidate_set,policy', [('base', 'worst_stock_accuracy'), ('factor', 'pooled_brier')])
+def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, candidate_set, policy):
     from twquant.data import PriceStore
     from twquant.demo import make_demo_prices
     PriceStore(tmp_path / 'data').write_prices(make_demo_prices(170))
@@ -38,12 +40,16 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys):
     config.write_text(json.dumps(dict(horizons=[1], min_train_dates=30, calibration_dates=10,
                                      test_dates=15, max_folds=1)))
     assert main(['--root', str(tmp_path), 'direction-search', '--config', str(config),
-                 '--holdout-dates', '20']) == 0
+                 '--holdout-dates', '20', '--candidate-set', candidate_set, '--selection-policy', policy]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result['evidence_kind'] == 'synthetic'
     assert result['real_world_target_verified'] is False
     assert result['holdout_opened'] is False
+    assert result['selection_policy'] == policy
+    assert result['candidate_count'] == (8 if candidate_set == 'base' else 10)
     assert (tmp_path / result['report']).exists()
+    report = json.loads((tmp_path / result['report']).read_text())
+    assert report['protocol']['selection_policy'] == policy
     assert not (tmp_path / 'current.json').exists()
 
 

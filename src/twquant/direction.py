@@ -116,7 +116,7 @@ class DirectionCandidate:
     window_dates: int | None = None
 
     def __post_init__(self):
-        if self.model not in {'prior', 'logistic', 'hist', 'extra_trees', 'random_forest'}:
+        if self.model not in {'prior', 'logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist'}:
             raise ValueError('Unknown direction model')
         if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all'}:
             raise ValueError('Unknown direction feature profile')
@@ -138,7 +138,12 @@ DEFAULT_CANDIDATES = (
     DirectionCandidate('extra_trees', 'portable_all', 756),
     DirectionCandidate('random_forest', 'portable_all', 756),
 )
+FACTOR_CANDIDATES = DEFAULT_CANDIDATES + (
+    DirectionCandidate('factor_ridge', 'portable_all', 756),
+    DirectionCandidate('factor_hist', 'portable_all', 756),
+)
 THRESHOLDS = (.4, .45, .5, .55, .6)
+SELECTION_POLICIES = ('worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier')
 
 
 @dataclass
@@ -148,38 +153,29 @@ class DirectionSearchResult:
     transfer_predictions: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
-def _direction_classifier(candidate, seed, labels):
-    from sklearn.dummy import DummyClassifier
-    from sklearn.ensemble import ExtraTreesClassifier, HistGradientBoostingClassifier, RandomForestClassifier
-    from sklearn.impute import SimpleImputer
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.pipeline import make_pipeline
-    from sklearn.preprocessing import StandardScaler
-    if candidate.model == 'prior' or len(np.unique(labels)) < 2:
-        estimator = DummyClassifier(strategy='prior')
-    elif candidate.model == 'logistic':
-        estimator = LogisticRegression(C=.1, max_iter=1500, random_state=seed)
-    elif candidate.model == 'hist':
-        estimator = HistGradientBoostingClassifier(max_iter=100, max_leaf_nodes=7,
-            min_samples_leaf=40, learning_rate=.05, l2_regularization=10, random_state=seed)
-    else:
-        cls = ExtraTreesClassifier if candidate.model == 'extra_trees' else RandomForestClassifier
-        estimator = cls(n_estimators=96, max_depth=8, min_samples_leaf=25,
-                        max_features=.8, random_state=seed, n_jobs=1)
-    return make_pipeline(SimpleImputer(strategy='median', keep_empty_features=True), StandardScaler(), estimator)
-
-
-def _selection_score(calibration, probability, threshold, horizon):
+def _calibration_metrics(calibration, probability, threshold, horizon):
     actual = calibration[f'target_{horizon}'].gt(0).to_numpy()
     decision = probability >= threshold
     accuracy = pd.Series(decision == actual, index=calibration.index).groupby(calibration.ticker).mean()
     recalls = [float((decision[actual == y] == y).mean()) for y in (False, True) if (actual == y).any()]
-    return (float(accuracy.min()), float(np.mean(recalls)),
-            -float(np.mean((probability - actual) ** 2)), -abs(threshold - .5))
+    losses = pd.Series((probability - actual) ** 2, index=calibration.index)
+    return dict(minimum_stock_accuracy=float(accuracy.min()), balanced_accuracy=float(np.mean(recalls)),
+                brier=float(losses.mean()), worst_stock_brier=float(losses.groupby(calibration.ticker).mean().max()),
+                predicted_up_fraction=float(decision.mean()))
+
+
+def _selection_key(metrics, threshold, policy):
+    if policy == 'worst_stock_accuracy':
+        return (metrics['minimum_stock_accuracy'], metrics['balanced_accuracy'],
+                -metrics['brier'], -abs(threshold - .5))
+    if policy == 'pooled_brier':
+        return (-metrics['brier'], -metrics['worst_stock_brier'])
+    return (-metrics['worst_stock_brier'], -metrics['brier'])
 
 
 def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, holdout_dates=126,
-                            evidence_kind='unknown', bootstrap_samples=500, output=None):
+                            evidence_kind='unknown', bootstrap_samples=500, output=None,
+                            selection_policy='worst_stock_accuracy'):
     """Nested chronological selection of a shared direction model per fold.
 
     Candidate transforms and classifiers fit training rows only. The subsequent
@@ -189,22 +185,30 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
     from threadpoolctl import threadpool_limits
     from .comparison import reserve_development
     from .features import get_feature_columns, select_feature_columns
+    from .direction_models import DirectionCandidateUnavailable, fit_direction_model
     from .research import _numeric, _positive_probability, _validate, temporal_splits
     from .workflows import source_digest, write_json
     if config.objective != 'close_return':
         raise ValueError('Direction goal requires the close_return objective')
     if not candidates or len({c.name for c in candidates}) != len(candidates):
         raise ValueError('Direction candidates must have unique names and be nonempty')
+    if selection_policy not in SELECTION_POLICIES:
+        raise ValueError('Unknown direction selection policy')
+    thresholds = THRESHOLDS if selection_policy == 'worst_stock_accuracy' else (.5,)
     development, start = reserve_development(frame, config.horizons, holdout_dates)
     fixed = _validate(development, get_feature_columns(development), config)
     external = (_validate(development, get_feature_columns(development), config, training=False)
                 if config.evaluation_tickers else pd.DataFrame())
     protocol = dict(config=asdict(config), candidates=[asdict(c) for c in candidates],
-        thresholds=list(THRESHOLDS), holdout_start=str(start.date()), holdout_dates=holdout_dates,
+        thresholds=list(thresholds), selection_policy=selection_policy,
+        holdout_start=str(start.date()), holdout_dates=holdout_dates,
         holdout_opened=False, evidence_kind=evidence_kind, training_tickers=list(TRAINING_TICKERS),
         source_sha256=source_digest(),
         development_sha256=hashlib.sha256(pd.util.hash_pandas_object(fixed, index=False).to_numpy().tobytes()).hexdigest(),
-        selection_rule='Maximize worst-stock calibration accuracy, then pooled balanced accuracy, then minimize Brier, then prefer threshold nearest 0.5; candidate ties prefer declared order.',
+        selection_rule=('Maximize worst-stock calibration accuracy, then pooled balanced accuracy, then minimize Brier, then prefer threshold nearest 0.5.'
+            if selection_policy == 'worst_stock_accuracy' else
+            'Minimize pooled calibration Brier, then worst-stock Brier; fixed threshold 0.5.' if selection_policy == 'pooled_brier' else
+            'Minimize worst-stock calibration Brier, then pooled Brier; fixed threshold 0.5.') + ' Candidate ties prefer declared order.',
         evaluation='Purged chronological train / candidate-selection calibration / outer test. Final reserved period is excluded.',
         limitation='Exploratory historical development, not an independently untouched or prospective test.')
     if output is not None:
@@ -221,23 +225,23 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
             # Parallelism is bounded to avoid native numerical oversubscription.
             with threadpool_limits(limits=1):
                 for candidate in candidates:
-                    subset = train
-                    window = candidate.window_dates
-                    if window is not None:
-                        dates = pd.DatetimeIndex(train.date.unique()).sort_values()
-                        subset = train.loc[train.date >= dates[-min(window, len(dates))]]
-                    columns = select_feature_columns(subset, candidate.feature_profile)
-                    labels = subset[f'target_{horizon}'].gt(0).to_numpy(dtype=int)
-                    model = _direction_classifier(candidate, config.random_state, labels)
-                    model.fit(_numeric(subset, columns), labels)
+                    columns = select_feature_columns(train, candidate.feature_profile)
+                    try:
+                        model, subset = fit_direction_model(candidate, train, columns, horizon, config.random_state)
+                    except DirectionCandidateUnavailable as exc:
+                        candidate_scores.append(dict(candidate=candidate.name, status='unavailable', reason=exc.code))
+                        continue
                     probability = _positive_probability(model, _numeric(calibration, columns))
-                    for threshold in THRESHOLDS:
-                        key = _selection_score(calibration, probability, threshold, horizon)
+                    for threshold in thresholds:
+                        metrics = _calibration_metrics(calibration, probability, threshold, horizon)
+                        key = _selection_key(metrics, threshold, selection_policy)
                         candidate_scores.append(dict(candidate=candidate.name, threshold=threshold,
-                            minimum_stock_accuracy=key[0], balanced_accuracy=key[1], brier=-key[2]))
+                                                     **metrics, selection_score=list(key)))
                         if winner_key is None or key > winner_key:
                             winner_key = key
                             winner = (candidate, model, columns, threshold, subset)
+                if winner is None:
+                    raise ValueError(f'No eligible direction candidates for horizon {horizon}, fold {fold}')
                 candidate, model, columns, threshold, subset = winner
                 predicted = _positive_probability(model, _numeric(test, columns))
             rows = test[['ticker', 'date', 'decision_ts']].copy()
@@ -248,6 +252,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
             rows['candidate'] = candidate.name
             version_settings = json.dumps(dict(candidate=asdict(candidate), horizon=horizon,
                 random_state=config.random_state, threshold=threshold, features=columns,
+                selection_policy=selection_policy,
                 source_sha256=protocol['source_sha256']), sort_keys=True).encode()
             rows['model_version'] = hashlib.sha256(pd.util.hash_pandas_object(
                 subset[['ticker', 'date', *columns, f'target_{horizon}']], index=False).to_numpy().tobytes()
@@ -273,6 +278,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
             expected_dates.extend(calendar.unique())
             selections.append(dict(horizon=horizon, fold=fold, candidate=candidate.name, threshold=threshold,
                 feature_columns=columns, training_dates=int(subset.date.nunique()),
+                model_details=getattr(model, 'training_details', {}),
                 train_start=str(subset.date.min().date()), train_label_end_max=str(subset[f'label_end_{horizon}'].max()),
                 calibration_start=str(calibration.date.min().date()),
                 calibration_label_end_max=str(calibration[f'label_end_{horizon}'].max()),
@@ -283,7 +289,8 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
         audits[str(horizon)] = audit_five_stock_accuracy(combined, expected_dates=expected_dates,
             evidence_kind=evidence_kind, bootstrap_samples=bootstrap_samples, seed=config.random_state)
     report = dict(protocol=protocol, holdout_opened=False, selections=selections, by_horizon=audits,
-        candidate_count=len(candidates), total_selection_trials=sum(len(s['candidate_scores']) for s in selections),
+        candidate_count=len(candidates),
+        total_selection_trials=sum('selection_score' in score for s in selections for score in s['candidate_scores']),
         real_world_target_verified=False)
     transfer_predictions = pd.concat(transfers, ignore_index=True) if transfers else pd.DataFrame()
     report['transfer'] = {}

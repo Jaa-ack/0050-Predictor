@@ -2,6 +2,9 @@
 
 ## Unreleased — 2026-11-07
 
+- Added fixed-threshold pooled/worst-stock Brier selection policies and shared market-plus-stock-residual return models, with training-only transforms and unchanged target gates.
+- Recorded incomplete historical factor panels as unavailable candidates without fabricating pre-listing data; retained actual fitted sample counts and excluded skipped candidates from trial totals.
+- Compared all three declared policies on the same development dates; preserved failed target evidence, original model promotion state and multi-seed synthetic behavior.
 - Added a separate nested chronological direction-model search across eight predeclared model/window candidates and five thresholds, preserving the fixed-ten training universe and frozen-model external transfer diagnostics.
 - Audited every fixed-ten stock and all 252 five-stock subsets with complete-calendar denominators, missing/abstained prediction penalties, directional baselines and market-date block diagnostics.
 - Added isolated, multi-seed hypothetical-information experiments covering absent, weak, strong, delayed and missing signals; synthetic success cannot establish real-market accuracy or change release gates.

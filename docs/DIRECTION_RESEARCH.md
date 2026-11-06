@@ -71,3 +71,34 @@ LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant direction-simulate --sessions 1
 八組方向候選的真實歷史比較未達 75%，也沒有建立比原模型可靠的優勢。因此保留原模型與既有驗收門檻，新流程繼續作研究工具。真正需要解決的是可取得資料是否有穩定的決策前訊息，而不是讓合成標籤更容易預測。
 
 後續候選須登記歷史檢視與試驗總數，針對可驗證發布時間的因子進行消融，與原模型、訓練頻率及常數方向在相同日期比較；新設計若反覆使用本輪結果，仍屬開發研究。真正達標仍需新的獨立未來驗證；若研究全部 0050 成分股，還須在固定訓練宇宙之外取得其完整歷史並作隔離的同模型延伸測試。
+
+## 第二輪：機率選模與市場／個股分離
+
+上一輪有多個20日外層測試折幾乎只預測下跌，與隨後市場方向不同而失準。這是歷史開發診斷，不能憑事後檢視直接選擇一個測試期贏家。第二輪預先比較三種規則，原規則保持為預設：
+
+| `--selection-policy` | 校準期排名 | 分類門檻 |
+|---|---|---|
+| `worst_stock_accuracy` | 最大化最低單檔準確率，再比較平衡準確率、Brier及接近0.5的程度 | 原五門檻 |
+| `pooled_brier` | 最低整體Brier，同分再比最高單檔Brier | 固定0.5 |
+| `worst_stock_brier` | 最低的最高單檔Brier，同分再比整體Brier | 固定0.5 |
+
+Brier同時衡量機率品質的多個面向，不能單獨證明校準或分類方向具有優勢；[官方說明](https://scikit-learn.org/stable/modules/calibration.html)解釋其作為proper scoring rule的用途。這兩個候選規則減少分類門檻的選擇自由度，是否改善仍由後續外層測試評分；沒有變更75%目標、完整覆蓋及逐檔方向門檻。
+
+`--candidate-set factor`在原八組候選之外，再加入756日窗口的`factor_ridge`與`factor_hist`。`twquant.direction_models`提供共用的訓練介面：
+
+1. 只用當時已成熟的固定十檔訓練資料，依日期計算十檔平均未來對數報酬，作為共同市場目標；每個市場日期只出現一次。
+2. 以各檔報酬減去上述平均形成個股殘差，再以同一個共用殘差模型學習所有股票；推論時將共同市場與個股殘差估計相加。
+3. 市場輸入限決策時的固定十檔市場特徵及確實向十檔等值廣播的FRED／美股因子；個別公司或部分填入的外部欄位只留在殘差模型。市場均值不是0050未來報酬，也不使用外部測試股票來計算。
+4. 線性／提升樹各自擬合兩個報酬模型。機率分數採訓練殘差尺度的常態近似，**不是正式校準機率**；訓練內殘差可能過度樂觀，限制保留在每折模型資訊。
+
+分離模型只用十檔資料完整的訓練日期；不足十個共同日期或缺少市場特徵時，該候選記為`unavailable`，其固定原因碼留在校準紀錄，其餘候選繼續。最早歷史折確實缺少完整十檔共同訓練日期，不能補造上市前資料。每折另記實際擬合日期與筆數，未執行的候選不計入評分試驗數；若全部候選不可用，命令明確失敗。
+
+可重現比較命令如下，每個命令均建立獨立研究目錄：
+
+```bash
+LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/fixed-ten direction-search --config configs/research_direction.json --events artifacts/fixed-ten/sources/events.csv --candidate-set factor --selection-policy worst_stock_accuracy
+LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/fixed-ten direction-search --config configs/research_direction.json --events artifacts/fixed-ten/sources/events.csv --candidate-set factor --selection-policy pooled_brier
+LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/fixed-ten direction-search --config configs/research_direction.json --events artifacts/fixed-ten/sources/events.csv --candidate-set factor --selection-policy worst_stock_brier
+```
+
+三個方案都保存並報告，不用外層結果自動切換正式模型。第二輪歷史比較仍未達75%；較高的整體準確率主要出現在大量選用訓練頻率基準的方案，不能混稱個股辨識能力。完整實際分數、逐折方向分布、模型選擇及資料／程式指紋只保存在本機成果。
