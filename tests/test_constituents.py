@@ -141,7 +141,8 @@ def test_membership_loader_checks_adjacent_archived_html_when_present(tmp_path):
         load_membership_snapshot(path)
 
 
-def test_full_constituent_research_uses_fixed_ten_selection_and_the_same_frozen_model(tmp_path):
+@pytest.mark.parametrize('mode', ['postclose', 'preopen'])
+def test_full_constituent_research_uses_fixed_ten_selection_and_the_same_frozen_model(tmp_path, mode):
     from dataclasses import replace
     from test_research import small_config
     from twquant.demo import make_demo_prices
@@ -155,17 +156,17 @@ def test_full_constituent_research_uses_fixed_ten_selection_and_the_same_frozen_
         copy['ticker'] = ticker
         copy[['open', 'high', 'low', 'close', 'adj_close', 'volume']] *= i + 2
         expanded.append(copy)
-    core = build_features(prices)
-    complete = build_features(pd.concat(expanded, ignore_index=True))
+    core = build_features(prices, mode=mode)
+    complete = build_features(pd.concat(expanded, ignore_index=True), mode=mode)
     pd.testing.assert_frame_equal(core[get_feature_columns(core)].reset_index(drop=True),
         complete.loc[complete.ticker.isin(prices.ticker.unique()), get_feature_columns(core)].reset_index(drop=True))
     cfg = small_config(horizons=(1,), max_folds=1, evaluation_tickers=('0050',))
     candidates = (DirectionCandidate('prior'), DirectionCandidate('logistic'))
-    a = search_direction_models(core, cfg, candidates=candidates, holdout_dates=20, bootstrap_samples=10)
+    a = search_direction_models(core, cfg, candidates=candidates, holdout_dates=20, bootstrap_samples=10, mode=mode)
     full_cfg = replace(cfg, evaluation_tickers=('0050', *external))
     universe = (*TRAINING_TICKERS, *external)
     b = search_direction_models(complete, full_cfg, candidates=candidates, holdout_dates=20, bootstrap_samples=10,
-        constituents=universe, membership_as_of='2025-12-31', evidence_kind='synthetic', output=tmp_path)
+        constituents=universe, membership_as_of='2025-12-31', evidence_kind='synthetic', output=tmp_path, mode=mode)
     pd.testing.assert_frame_equal(a.predictions, b.predictions)
     assert a.report['selections'] == b.report['selections']
     audit = b.report['constituents']['by_horizon']['1']
@@ -184,19 +185,19 @@ def test_full_constituent_research_uses_fixed_ten_selection_and_the_same_frozen_
     changed.loc[mask, 'target_1'] = -.9
     changed.loc[mask, 'f_return_1'] = 999.
     c = search_direction_models(changed, full_cfg, candidates=candidates, holdout_dates=20, bootstrap_samples=10,
-        constituents=universe, membership_as_of='2025-12-31', evidence_kind='synthetic')
+        constituents=universe, membership_as_of='2025-12-31', evidence_kind='synthetic', mode=mode)
     pd.testing.assert_frame_equal(b.predictions, c.predictions)
     assert b.report['selections'] == c.report['selections']
     partial = complete.loc[complete.ticker.ne(external[0])]
     d = search_direction_models(partial, full_cfg, candidates=candidates, holdout_dates=20, bootstrap_samples=10,
-        constituents=universe, membership_as_of='2025-12-31', evidence_kind='synthetic')
+        constituents=universe, membership_as_of='2025-12-31', evidence_kind='synthetic', mode=mode)
     partial_audit = d.report['constituents']['by_horizon']['1']
     assert partial_audit['missing_predictions'] == partial_audit['test_dates']
     assert partial_audit['coverage'] == pytest.approx(49 / 50)
     assert partial_audit['empirical_target_met'] is False
     with pytest.raises(ValueError, match='evaluation-only'):
         search_direction_models(complete, cfg, candidates=candidates, holdout_dates=20,
-            constituents=universe, membership_as_of='2025-12-31')
+            constituents=universe, membership_as_of='2025-12-31', mode=mode)
 
 
 def test_full_synthetic_success_stays_distinct_from_real_market_verification():

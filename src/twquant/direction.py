@@ -83,7 +83,8 @@ def _selection_key(metrics, threshold, policy):
 
 def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, holdout_dates=126,
                             evidence_kind='unknown', bootstrap_samples=500, output=None,
-                            selection_policy='worst_stock_accuracy', constituents=None, membership_as_of=None):
+                            selection_policy='worst_stock_accuracy', constituents=None, membership_as_of=None,
+                            mode='postclose'):
     """Nested chronological selection of a shared direction model per fold.
 
     Candidate transforms and classifiers fit training rows only. The subsequent
@@ -102,6 +103,17 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
         raise ValueError('Direction candidates must have unique names and be nonempty')
     if selection_policy not in SELECTION_POLICIES:
         raise ValueError('Unknown direction selection policy')
+    if mode not in {'postclose', 'preopen'}:
+        raise ValueError('Unknown direction decision mode')
+    primary = frame.loc[frame.ticker.astype(str).isin((*TRAINING_TICKERS, '0050'))]
+    local = pd.to_datetime(primary.decision_ts, utc=True).dt.tz_convert('Asia/Taipei')
+    anchor = pd.to_datetime(primary.date).dt.normalize()
+    local_date = local.dt.tz_localize(None).dt.normalize()
+    hour, minute = (20, 0) if mode == 'postclose' else (8, 30)
+    clock = local.dt.hour.eq(hour) & local.dt.minute.eq(minute) & local.dt.second.eq(0)
+    date_valid = local_date.eq(anchor) if mode == 'postclose' else local_date.gt(anchor)
+    if not (clock & date_valid).loc[local.notna()].all():
+        raise ValueError('Direction mode does not match the primary decision-time contract')
     if constituents is not None:
         constituents = constituent_universe(constituents)
         missing = set(constituents) - set(TRAINING_TICKERS) - set(config.evaluation_tickers)
@@ -125,6 +137,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
     for h in config.horizons:
         split_frame.loc[split_frame[f'label_end_{h}'].ge(start), f'label_end_{h}'] = pd.NaT
     protocol = dict(config=asdict(config), candidates=[asdict(c) for c in candidates],
+        mode=mode, decision_contract='20:00 on anchor session' if mode == 'postclose' else '08:30 on next observed market session; price anchor remains previous close',
         thresholds=list(thresholds), selection_policy=selection_policy,
         holdout_start=str(start.date()), holdout_dates=holdout_dates,
         holdout_opened=False, evidence_kind=evidence_kind, training_tickers=list(TRAINING_TICKERS),
@@ -175,6 +188,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
                 predicted = _positive_probability(model, _numeric(test, columns)) if len(test) else np.empty(0)
             rows = test[['ticker', 'date', 'decision_ts']].copy()
             rows['horizon'], rows['fold'] = horizon, fold
+            rows['decision_mode'] = mode
             rows['probability_up'], rows['decision_threshold'] = predicted, threshold
             rows['actual_return'] = np.expm1(test[f'target_{horizon}'])
             rows['training_probability'] = float(subset[f'target_{horizon}'].gt(0).mean())
@@ -182,6 +196,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
             version_settings = json.dumps(dict(candidate=asdict(candidate), horizon=horizon,
                 random_state=config.random_state, threshold=threshold, features=columns,
                 selection_policy=selection_policy,
+                mode=mode,
                 source_sha256=protocol['source_sha256']), sort_keys=True).encode()
             model_version = hashlib.sha256(pd.util.hash_pandas_object(
                 subset[['ticker', 'date', *columns, f'target_{horizon}']], index=False).to_numpy().tobytes()
@@ -195,6 +210,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
                         probability = _positive_probability(model, _numeric(transfer, columns))
                     transferred = transfer[['ticker', 'date', 'decision_ts']].copy()
                     transferred['horizon'], transferred['fold'] = horizon, fold
+                    transferred['decision_mode'] = mode
                     transferred['probability_up'], transferred['decision_threshold'] = probability, threshold
                     transferred['actual_return'] = np.expm1(transfer[f'target_{horizon}'])
                     transferred['candidate'], transferred['model_version'] = candidate.name, model_version

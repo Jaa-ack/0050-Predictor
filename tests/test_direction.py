@@ -85,17 +85,57 @@ def search_frame():
     return pd.concat(rows, ignore_index=True)
 
 
+def preopen_frame(frame):
+    out = frame.copy()
+    dates = pd.DatetimeIndex(sorted(frame.date.unique()))
+    next_date = pd.Series(dates, index=dates).shift(-1)
+    out['decision_ts'] = (pd.to_datetime(out.date.map(next_date)).dt.tz_localize('Asia/Taipei')
+                          + pd.Timedelta(hours=8, minutes=30)).dt.tz_convert('UTC')
+    return out
+
+
+def test_direction_mode_is_frozen_in_protocol_predictions_and_model_version():
+    from test_research import small_config
+    from twquant.direction import DirectionCandidate, search_direction_models
+    frame = search_frame()
+    cfg = small_config(horizons=(1,), max_folds=1, evaluation_tickers=('0050',))
+    candidates = (DirectionCandidate('prior'),)
+    a = search_direction_models(frame, cfg, candidates=candidates, holdout_dates=15, bootstrap_samples=10,
+                                mode='postclose')
+    b = search_direction_models(preopen_frame(frame), cfg, candidates=candidates, holdout_dates=15,
+                                bootstrap_samples=10, mode='preopen')
+    assert a.report['protocol']['mode'] == 'postclose'
+    assert b.report['protocol']['mode'] == 'preopen'
+    assert b.predictions.decision_mode.eq('preopen').all()
+    assert b.transfer_predictions.decision_mode.eq('preopen').all()
+    assert b.predictions.decision_ts.dt.tz_convert('Asia/Taipei').dt.hour.eq(8).all()
+    assert b.predictions.decision_ts.dt.tz_convert('Asia/Taipei').dt.minute.eq(30).all()
+    np.testing.assert_array_equal(a.predictions.probability_up, b.predictions.probability_up)
+    assert set(a.predictions.model_version).isdisjoint(b.predictions.model_version)
+
+
+@pytest.mark.parametrize('mode', ['preopen', 'unsupported'])
+def test_direction_search_rejects_a_mode_that_does_not_match_primary_decision_times(mode):
+    from test_research import small_config
+    from twquant.direction import search_direction_models
+    with pytest.raises(ValueError, match='mode'):
+        search_direction_models(search_frame(), small_config(), mode=mode)
+
+
+@pytest.mark.parametrize('mode', ['postclose', 'preopen'])
 @pytest.mark.parametrize('selection_policy', ['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'])
-def test_search_selection_ignores_outer_test_labels_reserved_labels_and_transfer_assets(tmp_path, selection_policy):
+def test_search_selection_ignores_outer_test_labels_reserved_labels_and_transfer_assets(tmp_path, selection_policy, mode):
     from test_research import small_config
     from twquant.direction import DirectionCandidate, search_direction_models
     from twquant.comparison import reserve_development
     from twquant.research import temporal_splits
     frame = search_frame()
+    if mode == 'preopen':
+        frame = preopen_frame(frame)
     cfg = small_config(horizons=(1,), max_folds=1, evaluation_tickers=('0050', '1216'))
     candidates = (DirectionCandidate('logistic'), DirectionCandidate('prior'))
     a = search_direction_models(frame, cfg, candidates=candidates, holdout_dates=15,
-                                bootstrap_samples=20, output=tmp_path, selection_policy=selection_policy)
+                                bootstrap_samples=20, output=tmp_path, selection_policy=selection_policy, mode=mode)
     dev, start = reserve_development(frame, cfg.horizons, 15)
     fixed = dev.loc[dev.ticker.isin(TRAINING_TICKERS)].reset_index(drop=True)
     split = temporal_splits(fixed, 1, cfg)[0]
@@ -104,8 +144,9 @@ def test_search_selection_ignores_outer_test_labels_reserved_labels_and_transfer
     changed.loc[changed.date.isin(test_dates) | (changed.date >= start), 'target_1'] = .8
     changed.loc[changed.ticker.isin(['0050', '1216']), 'f_signal'] = 900
     changed.loc[changed.ticker.isin(['0050', '1216']), 'target_1'] = -.9
+    changed.loc[changed.ticker.eq('1216') & changed.date.ge(start), 'decision_ts'] = pd.Timestamp('1980-01-01T00:00Z')
     b = search_direction_models(changed, cfg, candidates=candidates, holdout_dates=15,
-                                bootstrap_samples=20, selection_policy=selection_policy)
+                                bootstrap_samples=20, selection_policy=selection_policy, mode=mode)
     pd.testing.assert_frame_equal(a.predictions.drop(columns='actual_return'), b.predictions.drop(columns='actual_return'))
     assert a.report['selections'] == b.report['selections']
     assert a.report['holdout_opened'] is False

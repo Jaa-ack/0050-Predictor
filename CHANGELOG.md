@@ -2,6 +2,9 @@
 
 ## Unreleased — 2026-11-07
 
+- Added explicit postclose/preopen decision modes to direction research, including primary-clock validation, frozen timing contracts and mode-specific prediction/model provenance.
+- Limited development-freeze timestamps to the fixed ten and reference ETF, preventing external-stock metadata from changing training-label availability.
+- Preserved identical price anchors and future-close targets while comparing overnight information; extended full-constituent and leakage tests to both timing modes.
 - Extended direction audits to full declared current constituents, with an exact worst-five calculation covering all 2,118,760 subsets of fifty stocks without materializing each subset.
 - Added complete official-holdings snapshot validation, checksum traceability and transfer-only CLI configuration; membership documents cannot change training roles or supply a five-stock substitute for the full universe.
 - Preserved shared model/threshold checks, complete-calendar missing-data penalties and historical-membership limitations for the full-scope audit.

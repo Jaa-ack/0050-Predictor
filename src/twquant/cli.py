@@ -115,6 +115,8 @@ def parser():
     direction = subs.add_parser('direction-search', help='巢狀時間比較方向模型，檢查固定十檔全部252種五檔組合；不開封保留期')
     direction.add_argument('--config', type=Path)
     direction.add_argument('--events', type=Path)
+    direction.add_argument('--mode', choices=['postclose', 'preopen'], default='postclose',
+                           help='盤後20:00或下一實際市場日盤前08:30；兩者維持同一收盤價錨點')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
     direction.add_argument('--candidate-set', choices=['base', 'factor'], default='base',
@@ -266,20 +268,20 @@ def execute(args):
         kind = data_kind(prices)
         if events is not None and data_kind(events) == 'synthetic':
             kind = 'synthetic'
-        result = search_direction_models(build_features(prices, external=events), config,
+        result = search_direction_models(build_features(prices, external=events, mode=args.mode), config,
             holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder,
             candidates=FACTOR_CANDIDATES if args.candidate_set == 'factor' else DEFAULT_CANDIDATES,
-            selection_policy=args.selection_policy,
+            selection_policy=args.selection_policy, mode=args.mode,
             constituents=membership['tickers'] if membership is not None else None,
             membership_as_of=membership['as_of'] if membership is not None else None)
-        provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind,
+        provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind, mode=args.mode,
             availability_basis=sorted(prices.availability_basis.unique().tolist()),
             limitation='Historical receipt timestamps and latest adjusted prices do not establish original point-in-time data.')
         write_json(folder / 'data_provenance.json', provenance)
         fields_to_report = ('overall_accuracy', 'minimum_stock_accuracy', 'worst_five_accuracy', 'coverage', 'empirical_target_met')
         summary = dict(run_id=run_id, report=str((folder / 'report.json').relative_to(root)),
             evidence_kind=kind, holdout_opened=False, real_world_target_verified=False,
-            selection_policy=args.selection_policy, candidate_count=result.report['candidate_count'],
+            selection_policy=args.selection_policy, candidate_count=result.report['candidate_count'], mode=args.mode,
             by_horizon={h: {k: m[k] for k in fields_to_report} for h, m in result.report['by_horizon'].items()})
         if membership is not None:
             audits = result.report['constituents']['by_horizon']

@@ -14,7 +14,8 @@ def reserve_development(frame, horizons, holdout_dates):
     if holdout_dates < 1 or len(dates) <= holdout_dates:
         raise ValueError('Insufficient benchmark history for reserved holdout')
     start = dates[-holdout_dates]
-    freeze = pd.to_datetime(frame.loc[frame.date == start, 'decision_ts'], utc=True).min()
+    primary = frame.ticker.isin((*TRAINING_TICKERS, '0050'))
+    freeze = pd.to_datetime(frame.loc[primary & frame.date.eq(start), 'decision_ts'], utc=True).min()
     development = frame.loc[frame.date < start].copy()
     for h in horizons:
         known = pd.to_datetime(development[f'label_available_at_{h}'], utc=True) < freeze
