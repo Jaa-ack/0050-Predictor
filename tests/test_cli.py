@@ -62,3 +62,37 @@ def test_direction_simulation_cli_labels_every_result_synthetic(tmp_path, capsys
     report = json.loads((tmp_path / result['report']).read_text())
     assert len(report['experiments']) == 5
     assert report['provider_data_obtained'] is False
+
+
+def test_direction_search_cli_adds_full_membership_as_transfer_tests_only(tmp_path, capsys):
+    import pandas as pd
+    from test_constituents import membership_document
+    from twquant.data import PriceStore
+    from twquant.demo import make_demo_prices
+    from twquant.universe import TRAINING_TICKERS
+    prices = make_demo_prices(170)
+    external = tuple(str(6001 + i) for i in range(40))
+    copies = [prices]
+    for ticker in external:
+        copies.append(prices.loc[prices.ticker.eq('2330')].assign(ticker=ticker))
+    PriceStore(tmp_path / 'data').write_prices(pd.concat(copies, ignore_index=True))
+    config = tmp_path / 'direction.json'
+    config.write_text(json.dumps(dict(horizons=[1], min_train_dates=30, calibration_dates=10,
+                                     test_dates=15, max_folds=1, evaluation_tickers=['0050'])))
+    document = membership_document()
+    document['tickers'] = [*TRAINING_TICKERS, *external]
+    document['training_tickers'] = ['6001']  # A document cannot rotate training roles.
+    membership = tmp_path / 'membership.json'
+    membership.write_text(json.dumps(document), encoding='utf-8')
+    assert main(['--root', str(tmp_path), 'direction-search', '--config', str(config),
+                 '--holdout-dates', '20', '--membership', str(membership)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['constituents']['constituent_count'] == 50
+    assert result['constituents']['combination_count'] == 2_118_760
+    report_path = tmp_path / result['report']
+    report = json.loads(report_path.read_text())
+    assert report['protocol']['training_tickers'] == list(TRAINING_TICKERS)
+    assert set(report['protocol']['config']['evaluation_tickers']) == {'0050', *external}
+    assert (report_path.parent / 'membership_snapshot.json').exists()
+    saved = pd.read_parquet(report_path.parent / 'constituent_predictions.parquet')
+    assert set(saved.ticker) == set(document['tickers'])

@@ -1,6 +1,6 @@
 """Command line entry point: python -m twquant --help."""
 import argparse
-from dataclasses import fields
+from dataclasses import fields, replace
 from datetime import datetime
 import hashlib
 import json
@@ -116,6 +116,7 @@ def parser():
     direction.add_argument('--config', type=Path)
     direction.add_argument('--events', type=Path)
     direction.add_argument('--holdout-dates', type=int, default=126)
+    direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
     direction.add_argument('--candidate-set', choices=['base', 'factor'], default='base',
                            help='base為原八組候選；factor另加市場／個股殘差的線性與提升樹模型')
     direction.add_argument('--selection-policy', choices=['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'],
@@ -244,6 +245,7 @@ def execute(args):
     if args.command in {'direction-search', 'direction-simulate'}:
         import uuid
         from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, search_direction_models, simulate_information_scenarios
+        from .direction_audit import load_membership_snapshot
         from .features import build_features
         from .workflows import data_kind, load_events
         run_id = datetime.now(ZoneInfo('Asia/Taipei')).strftime('%Y%m%dT%H%M%S') + '_' + uuid.uuid4().hex[:8]
@@ -254,23 +256,38 @@ def execute(args):
             return dict(run_id=run_id, report=str((folder / 'report.json').relative_to(root)),
                 evidence_kind='synthetic', scenarios=report['scenarios'], real_world_target_verified=False)
         store = PriceStore(root / 'data')
+        membership = load_membership_snapshot(args.membership) if args.membership else None
+        config = config_from(args.config)
+        if membership is not None:
+            external = [t for t in membership['tickers'] if t not in TRAINING_TICKERS]
+            config = replace(config, evaluation_tickers=tuple(dict.fromkeys([*config.evaluation_tickers, *external])))
+            write_json(folder / 'membership_snapshot.json', membership)
         prices, events = store.read_prices(), load_events(args.events)
         kind = data_kind(prices)
         if events is not None and data_kind(events) == 'synthetic':
             kind = 'synthetic'
-        result = search_direction_models(build_features(prices, external=events), config_from(args.config),
+        result = search_direction_models(build_features(prices, external=events), config,
             holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder,
             candidates=FACTOR_CANDIDATES if args.candidate_set == 'factor' else DEFAULT_CANDIDATES,
-            selection_policy=args.selection_policy)
+            selection_policy=args.selection_policy,
+            constituents=membership['tickers'] if membership is not None else None,
+            membership_as_of=membership['as_of'] if membership is not None else None)
         provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind,
             availability_basis=sorted(prices.availability_basis.unique().tolist()),
             limitation='Historical receipt timestamps and latest adjusted prices do not establish original point-in-time data.')
         write_json(folder / 'data_provenance.json', provenance)
-        return dict(run_id=run_id, report=str((folder / 'report.json').relative_to(root)),
+        fields_to_report = ('overall_accuracy', 'minimum_stock_accuracy', 'worst_five_accuracy', 'coverage', 'empirical_target_met')
+        summary = dict(run_id=run_id, report=str((folder / 'report.json').relative_to(root)),
             evidence_kind=kind, holdout_opened=False, real_world_target_verified=False,
             selection_policy=args.selection_policy, candidate_count=result.report['candidate_count'],
-            by_horizon={h: {k: m[k] for k in ('overall_accuracy', 'minimum_stock_accuracy',
-                'worst_five_accuracy', 'coverage', 'empirical_target_met')} for h, m in result.report['by_horizon'].items()})
+            by_horizon={h: {k: m[k] for k in fields_to_report} for h, m in result.report['by_horizon'].items()})
+        if membership is not None:
+            audits = result.report['constituents']['by_horizon']
+            summary['constituents'] = dict(constituent_count=membership['constituent_count'],
+                membership_as_of=membership['as_of'], combination_count=next(iter(audits.values()))['combination_count'],
+                real_world_target_verified=False,
+                by_horizon={h: {k: m[k] for k in fields_to_report} for h, m in audits.items()})
+        return summary
     if args.command == "research":
         report = research(root, config_from(args.config), args.as_of, args.events, args.mode, args.holdout_dates)
         return dict(run_id=report["run_id"], metrics=report["metrics"], readiness=report["readiness"])

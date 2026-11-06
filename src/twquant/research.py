@@ -138,15 +138,22 @@ def transfer_metrics(predictions):
         for ticker,group in predictions.groupby('ticker')}
 
 
-def temporal_splits(frame: pd.DataFrame, horizon: int, config: ResearchConfig) -> list[dict]:
+def temporal_splits(frame: pd.DataFrame, horizon: int, config: ResearchConfig, *, calendar_dates=None) -> list[dict]:
     """Return row-index splits with date grouping, maturity purging and embargo.
 
     The beginning of history is retained for expanding-window fits. Up to
     max_folds recent non-overlapping test blocks are reported. At each seam the
     labels must finish strictly before the next segment, including an embargo
-    measured in observed market dates.
+    measured in observed market dates. An explicit observed market calendar
+    keeps dates where every stock row is absent, and defines the latest mature
+    anchor by horizon length rather than a future quote's presence. Callers
+    retain control of whether benchmark outcomes are required in the frame.
     """
     dates = pd.DatetimeIndex(pd.to_datetime(frame.date).dropna().unique()).sort_values()
+    if calendar_dates is not None:
+        dates = pd.DatetimeIndex(pd.to_datetime(calendar_dates)).normalize().unique().sort_values()
+        if not len(dates) or dates.hasnans or dates.tz is not None or not set(frame.date) <= set(dates):
+            raise ValueError('Reference market calendar must contain every frame date as naive daily dates')
     label = f"label_end_{horizon}"
     target = f"target_{horizon}"
     first_test = config.min_train_dates + config.calibration_dates + 2 * (horizon + config.embargo_dates)
@@ -154,12 +161,16 @@ def temporal_splits(frame: pd.DataFrame, horizon: int, config: ResearchConfig) -
     if f"benchmark_target_{horizon}" in frame:
         globally_mature &= frame[f"benchmark_target_{horizon}"].notna()
     last_mature = frame.loc[globally_mature, "date"].max()
+    if calendar_dates is not None:
+        last_mature = dates[-horizon - 1] if len(dates) > horizon else pd.NaT
     starts = [start for start in range(first_test, len(dates), config.test_dates)
               if pd.notna(last_mature) and dates[start] <= last_mature][-config.max_folds:]
     folds = []
     finite = pd.to_numeric(frame[target], errors="coerce").notna() & frame[label].notna()
     for start in starts:
         test_dates = dates[start:start + config.test_dates]
+        if calendar_dates is not None:
+            test_dates = test_dates[test_dates <= last_mature]
         if not len(test_dates):
             continue
         cal_stop = start - config.embargo_dates
@@ -185,13 +196,14 @@ def temporal_splits(frame: pd.DataFrame, horizon: int, config: ResearchConfig) -
         train_idx = frame.index[train_mask].tolist()
         cal_idx = frame.index[calibration_mask].tolist()
         test_idx = frame.index[test_mask].tolist()
-        if not train_idx or not cal_idx or not test_idx:
+        if not train_idx or not cal_idx or (not test_idx and calendar_dates is None):
             continue
         if frame.loc[train_idx, "date"].nunique() < config.min_train_dates:
             continue
         if frame.loc[cal_idx, "date"].nunique() < config.calibration_dates:
             continue
-        folds.append({"train": train_idx, "calibration": cal_idx, "test": test_idx})
+        folds.append({"train": train_idx, "calibration": cal_idx, "test": test_idx,
+                      "test_calendar": test_dates.tolist()})
     if not folds:
         raise ValueError(f"insufficient history dates for horizon {horizon}; need at least {first_test + 1} sessions with mature labels")
     return folds

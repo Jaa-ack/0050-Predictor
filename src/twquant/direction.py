@@ -5,7 +5,6 @@ Zero returns belong to the non-up class, as in the existing research engine.
 """
 from __future__ import annotations
 
-from itertools import combinations
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
@@ -15,98 +14,7 @@ import numpy as np
 import pandas as pd
 
 from .universe import TRAINING_TICKERS, asset_class
-
-
-def audit_five_stock_accuracy(predictions, *, evidence_kind='unknown', expected_dates=None,
-                             target_accuracy=.75, min_dates=126, bootstrap_samples=500,
-                             block_dates=20, seed=42):
-    """Score every stock and all 252 five-stock subsets on the same calendar.
-
-    Missing/abstained predictions and unresolved outcomes cannot be deleted to
-    improve accuracy. Bootstrap intervals resample whole market-date blocks;
-    they are exploratory diagnostics, not a certification of future accuracy.
-    """
-    if evidence_kind not in {'unknown', 'synthetic', 'historical'}:
-        raise ValueError('Unknown evidence kind')
-    if not 0 < target_accuracy <= 1 or min_dates < 1 or bootstrap_samples < 1 or block_dates < 1:
-        raise ValueError('Invalid direction audit settings')
-    p = predictions.copy()
-    required = {'date', 'ticker', 'horizon', 'actual_return', 'probability_up'}
-    if not required <= set(p):
-        raise ValueError('Direction predictions lack required columns')
-    if p.horizon.nunique() != 1:
-        raise ValueError('Audit requires exactly one horizon')
-    p['date'] = pd.to_datetime(p.date).dt.normalize()
-    p['ticker'] = p.ticker.astype(str)
-    if not set(p.ticker) <= set(TRAINING_TICKERS):
-        raise ValueError('Direction audit universe must be the fixed ten')
-    if p.duplicated(['date', 'ticker']).any():
-        raise ValueError('Direction predictions contain duplicate ticker/date rows')
-    dates = pd.DatetimeIndex(p.date.unique() if expected_dates is None else expected_dates).normalize().unique().sort_values()
-    if not len(dates) or dates.hasnans or not set(p.date) <= set(dates):
-        raise ValueError('Invalid expected decision dates')
-    grid = pd.MultiIndex.from_product([dates, TRAINING_TICKERS], names=['date', 'ticker'])
-    present = pd.Series(True, index=pd.MultiIndex.from_frame(p[['date', 'ticker']])).reindex(grid, fill_value=False)
-    p = p.set_index(['date', 'ticker']).reindex(grid)
-    actual = pd.to_numeric(p.actual_return, errors='coerce')
-    probability = pd.to_numeric(p.probability_up, errors='coerce')
-    threshold = pd.to_numeric(p.get('decision_threshold', pd.Series(.5, index=grid)), errors='coerce')
-    valid = probability.between(0, 1) & threshold.between(0, 1)
-    if 'abstain' in p:
-        valid &= ~p.abstain.fillna(True).astype(bool)
-    known = np.isfinite(actual)
-    up = actual.gt(0)
-    predicted_up = probability.ge(threshold)
-    correct = (known & valid & predicted_up.eq(up)).to_numpy().reshape(len(dates), 10)
-    stocks = {}
-    for ticker in TRAINING_TICKERS:
-        mask = grid.get_level_values('ticker') == ticker
-        k, v, y, decision = known[mask], valid[mask], up[mask], predicted_up[mask]
-        successes = (k & v & decision.eq(y))
-        recall_up = float((v[y & k] & decision[y & k]).mean()) if (y & k).any() else None
-        recall_down = float((v[~y & k] & ~decision[~y & k]).mean()) if (~y & k).any() else None
-        balanced = (recall_up + recall_down) / 2 if recall_up is not None and recall_down is not None else None
-        stocks[ticker] = dict(accuracy=float(successes.sum() / len(dates)),
-            balanced_accuracy=balanced, observations=int(k.sum()), expected_predictions=len(dates),
-            coverage=float((k & v).sum() / len(dates)), recall_up=recall_up, recall_down=recall_down,
-            always_up_accuracy=float((k & y).sum() / len(dates)),
-            always_down_accuracy=float((k & ~y).sum() / len(dates)))
-    subsets = []
-    for indices in combinations(range(10), 5):
-        values = correct[:, indices]
-        subsets.append(dict(tickers=[TRAINING_TICKERS[i] for i in indices],
-                            accuracy=float(values.mean()), all_five_correct_rate=float(values.all(axis=1).mean())))
-    subsets.sort(key=lambda s: (s['accuracy'], s['tickers']))
-    minimum = min(s['accuracy'] for s in stocks.values())
-    edge = all(s['balanced_accuracy'] is not None and s['balanced_accuracy'] > .5
-               and s['accuracy'] > max(s['always_up_accuracy'], s['always_down_accuracy']) for s in stocks.values())
-    coverage = float((known & valid).mean())
-    empirical = bool(minimum >= target_accuracy and coverage == 1 and len(dates) >= min_dates and edge)
-    # Preserve cross-stock dependence and at least the label-overlap scale.
-    block = min(len(dates), max(block_dates, int(predictions.horizon.iloc[0])))
-    rng = np.random.default_rng(seed)
-    minima = []
-    for _ in range(bootstrap_samples):
-        starts = rng.integers(len(dates), size=int(np.ceil(len(dates) / block)))
-        sample = ((starts[:, None] + np.arange(block)) % len(dates)).ravel()[:len(dates)]
-        minima.append(float(correct[sample].mean(axis=0).min()))
-    return dict(evidence_kind=evidence_kind, horizon=int(predictions.horizon.iloc[0]),
-        target_accuracy=target_accuracy, training_tickers=list(TRAINING_TICKERS),
-        scope='all_252_five_stock_subsets_of_fixed_ten_only',
-        definition='Every fixed-ten stock must reach the target, with full coverage; each five-stock subset is also reported. Five simultaneously correct is a separate metric.',
-        test_dates=len(dates), expected_predictions=len(grid), missing_predictions=int((~present).sum()),
-        unresolved_labels=int((~known).sum()), coverage=coverage, overall_accuracy=float(correct.mean()),
-        minimum_stock_accuracy=minimum, worst_five_accuracy=subsets[0]['accuracy'],
-        per_stock=stocks, five_stock_combinations=subsets, directional_edge_demonstrated=edge,
-        empirical_target_met=empirical, simulated_target_met=empirical and evidence_kind == 'synthetic',
-        real_world_target_verified=False,
-        minimum_stock_accuracy_interval=dict(low=float(np.quantile(minima, .025)),
-            high=float(np.quantile(minima, .975)), samples=bootstrap_samples, block_dates=block,
-            method='exploratory_circular_market_date_block_bootstrap_of_minimum_stock_accuracy'),
-        limitations=['Retrospective model selection and synthetic experiments cannot certify future accuracy.',
-                     'An independent, frozen prospective test and verified point-in-time data remain required.',
-                     'Blocks concatenate the supplied decision calendar, which may contain gaps.',
-                     'Fixed ten are not the entire historical or current 0050 membership.'])
+from .direction_audit import audit_constituent_accuracy, audit_five_stock_accuracy, constituent_universe
 
 
 @dataclass(frozen=True)
@@ -175,7 +83,7 @@ def _selection_key(metrics, threshold, policy):
 
 def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, holdout_dates=126,
                             evidence_kind='unknown', bootstrap_samples=500, output=None,
-                            selection_policy='worst_stock_accuracy'):
+                            selection_policy='worst_stock_accuracy', constituents=None, membership_as_of=None):
     """Nested chronological selection of a shared direction model per fold.
 
     Candidate transforms and classifiers fit training rows only. The subsequent
@@ -194,15 +102,33 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
         raise ValueError('Direction candidates must have unique names and be nonempty')
     if selection_policy not in SELECTION_POLICIES:
         raise ValueError('Unknown direction selection policy')
+    if constituents is not None:
+        constituents = constituent_universe(constituents)
+        missing = set(constituents) - set(TRAINING_TICKERS) - set(config.evaluation_tickers)
+        if missing:
+            raise ValueError('Configure every external constituent as evaluation-only before research')
+        date = pd.Timestamp(membership_as_of) if membership_as_of is not None else pd.NaT
+        if pd.isna(date) or date.tzinfo is not None or date != date.normalize():
+            raise ValueError('Constituent research requires a daily membership snapshot date')
+        membership_as_of = date.date().isoformat()
     thresholds = THRESHOLDS if selection_policy == 'worst_stock_accuracy' else (.5,)
     development, start = reserve_development(frame, config.horizons, holdout_dates)
     fixed = _validate(development, get_feature_columns(development), config)
     external = (_validate(development, get_feature_columns(development), config, training=False)
                 if config.evaluation_tickers else pd.DataFrame())
+    # A stock direction task does not require an ETF quote at the future
+    # horizon. Use the observed primary-market calendar, never transfer assets,
+    # and keep the final reserved outcomes excluded by calendar maturity.
+    primary_dates = pd.DatetimeIndex(development.loc[
+        development.ticker.isin((*TRAINING_TICKERS, '0050')), 'date'].unique()).sort_values()
+    split_frame = fixed.drop(columns=[f'benchmark_target_{h}' for h in config.horizons], errors='ignore').copy()
+    for h in config.horizons:
+        split_frame.loc[split_frame[f'label_end_{h}'].ge(start), f'label_end_{h}'] = pd.NaT
     protocol = dict(config=asdict(config), candidates=[asdict(c) for c in candidates],
         thresholds=list(thresholds), selection_policy=selection_policy,
         holdout_start=str(start.date()), holdout_dates=holdout_dates,
         holdout_opened=False, evidence_kind=evidence_kind, training_tickers=list(TRAINING_TICKERS),
+        calendar_policy='observed_fixed_ten_and_0050_sessions; benchmark_future_quotes_do_not_gate_stock_predictions',
         source_sha256=source_digest(),
         development_sha256=hashlib.sha256(pd.util.hash_pandas_object(fixed, index=False).to_numpy().tobytes()).hexdigest(),
         selection_rule=('Maximize worst-stock calibration accuracy, then pooled balanced accuracy, then minimize Brier, then prefer threshold nearest 0.5.'
@@ -211,15 +137,18 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
             'Minimize worst-stock calibration Brier, then pooled Brier; fixed threshold 0.5.') + ' Candidate ties prefer declared order.',
         evaluation='Purged chronological train / candidate-selection calibration / outer test. Final reserved period is excluded.',
         limitation='Exploratory historical development, not an independently untouched or prospective test.')
+    if constituents is not None:
+        protocol['constituent_audit'] = dict(tickers=list(constituents), membership_as_of=membership_as_of,
+            selection_scope='fixed_ten_only', historical_membership_verified=False)
     if output is not None:
         output = Path(output)
         if (output / 'protocol.json').exists():
             raise ValueError('Use a fresh output directory; experiment records cannot be overwritten')
         write_json(output / 'protocol.json', protocol)
-    predictions, selections, audits, transfers = [], [], {}, []
+    predictions, selections, audits, transfers, expected_calendars = [], [], {}, [], {}
     for horizon in config.horizons:
         horizon_rows, expected_dates = [], []
-        for fold, split in enumerate(temporal_splits(fixed, horizon, config), 1):
+        for fold, split in enumerate(temporal_splits(split_frame, horizon, config, calendar_dates=primary_dates), 1):
             train, calibration, test = (fixed.loc[split[k]].copy() for k in ('train', 'calibration', 'test'))
             winner, winner_key, candidate_scores = None, None, []
             # Parallelism is bounded to avoid native numerical oversubscription.
@@ -243,7 +172,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
                 if winner is None:
                     raise ValueError(f'No eligible direction candidates for horizon {horizon}, fold {fold}')
                 candidate, model, columns, threshold, subset = winner
-                predicted = _positive_probability(model, _numeric(test, columns))
+                predicted = _positive_probability(model, _numeric(test, columns)) if len(test) else np.empty(0)
             rows = test[['ticker', 'date', 'decision_ts']].copy()
             rows['horizon'], rows['fold'] = horizon, fold
             rows['probability_up'], rows['decision_threshold'] = predicted, threshold
@@ -254,12 +183,13 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
                 random_state=config.random_state, threshold=threshold, features=columns,
                 selection_policy=selection_policy,
                 source_sha256=protocol['source_sha256']), sort_keys=True).encode()
-            rows['model_version'] = hashlib.sha256(pd.util.hash_pandas_object(
+            model_version = hashlib.sha256(pd.util.hash_pandas_object(
                 subset[['ticker', 'date', *columns, f'target_{horizon}']], index=False).to_numpy().tobytes()
                 + pd.util.hash_pandas_object(calibration[['ticker', 'date', *columns, f'target_{horizon}']],
                                              index=False).to_numpy().tobytes() + version_settings).hexdigest()[:20]
+            rows['model_version'] = model_version
             if not external.empty:
-                transfer = external.loc[external.date.isin(test.date.unique())].copy()
+                transfer = external.loc[external.date.isin(split['test_calendar'])].copy()
                 if not transfer.empty:
                     with threadpool_limits(limits=1):
                         probability = _positive_probability(model, _numeric(transfer, columns))
@@ -267,25 +197,24 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
                     transferred['horizon'], transferred['fold'] = horizon, fold
                     transferred['probability_up'], transferred['decision_threshold'] = probability, threshold
                     transferred['actual_return'] = np.expm1(transfer[f'target_{horizon}'])
-                    transferred['candidate'], transferred['model_version'] = candidate.name, rows.model_version.iloc[0]
+                    transferred['candidate'], transferred['model_version'] = candidate.name, model_version
                     transfers.append(transferred)
-            horizon_rows.append(rows)
-            # Keep benchmark sessions even when the entire stock panel is
-            # absent. Reconstructing the denominator from surviving rows would
-            # hide a complete acquisition outage.
-            calendar = development.loc[development.ticker.eq('0050')
-                & development.date.between(test.date.min(), test.date.max()), 'date']
-            expected_dates.extend(calendar.unique())
+            if len(rows):
+                horizon_rows.append(rows)
+            expected_dates.extend(split['test_calendar'])
             selections.append(dict(horizon=horizon, fold=fold, candidate=candidate.name, threshold=threshold,
                 feature_columns=columns, training_dates=int(subset.date.nunique()),
                 model_details=getattr(model, 'training_details', {}),
                 train_start=str(subset.date.min().date()), train_label_end_max=str(subset[f'label_end_{horizon}'].max()),
                 calibration_start=str(calibration.date.min().date()),
                 calibration_label_end_max=str(calibration[f'label_end_{horizon}'].max()),
-                test_start=str(test.date.min().date()), test_end=str(test.date.max().date()),
+                test_start=str(split['test_calendar'][0].date()), test_end=str(split['test_calendar'][-1].date()),
                 candidate_scores=candidate_scores))
+        if not horizon_rows:
+            raise ValueError('No observed fixed-ten test predictions on the declared market calendar')
         combined = pd.concat(horizon_rows, ignore_index=True)
         predictions.append(combined)
+        expected_calendars[str(horizon)] = expected_dates
         audits[str(horizon)] = audit_five_stock_accuracy(combined, expected_dates=expected_dates,
             evidence_kind=evidence_kind, bootstrap_samples=bootstrap_samples, seed=config.random_state)
     report = dict(protocol=protocol, holdout_opened=False, selections=selections, by_horizon=audits,
@@ -305,9 +234,22 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
             report['transfer'][ticker] = dict(scope='same_model_unseen_asset_diagnostic_only',
                 tradable=asset_class(ticker) != 'index', by_horizon=by_horizon)
     result = DirectionSearchResult(pd.concat(predictions, ignore_index=True), report, transfer_predictions)
+    constituent_predictions = None
+    if constituents is not None:
+        panel = pd.concat([result.predictions, transfer_predictions], ignore_index=True)
+        constituent_predictions = panel.loc[panel.ticker.isin(constituents)].copy()
+        report['constituents'] = dict(membership_as_of=membership_as_of, evaluation_tickers=list(constituents),
+            selection_scope='fixed_ten_only', historical_membership_verified=False, real_world_target_verified=False,
+            by_horizon={str(h): audit_constituent_accuracy(
+                constituent_predictions.loc[constituent_predictions.horizon.eq(h)], constituents,
+                membership_as_of=membership_as_of, evidence_kind=evidence_kind,
+                expected_dates=expected_calendars[str(h)], bootstrap_samples=bootstrap_samples, seed=config.random_state)
+                for h in config.horizons})
     if output is not None:
         result.predictions.to_parquet(output / 'predictions.parquet', index=False)
         result.transfer_predictions.to_parquet(output / 'transfer_predictions.parquet', index=False)
+        if constituent_predictions is not None:
+            constituent_predictions.to_parquet(output / 'constituent_predictions.parquet', index=False)
         write_json(output / 'report.json', report)
     return result
 

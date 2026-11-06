@@ -2,6 +2,10 @@
 
 ## Unreleased — 2026-11-07
 
+- Extended direction audits to full declared current constituents, with an exact worst-five calculation covering all 2,118,760 subsets of fifty stocks without materializing each subset.
+- Added complete official-holdings snapshot validation, checksum traceability and transfer-only CLI configuration; membership documents cannot change training roles or supply a five-stock substitute for the full universe.
+- Preserved shared model/threshold checks, complete-calendar missing-data penalties and historical-membership limitations for the full-scope audit.
+- Fixed direction-only test calendars to retain valid stock forecasts when ETF quotes are absent, and retained complete-panel outages at fold boundaries without admitting reserved-period labels.
 - Added fixed-threshold pooled/worst-stock Brier selection policies and shared market-plus-stock-residual return models, with training-only transforms and unchanged target gates.
 - Recorded incomplete historical factor panels as unavailable candidates without fabricating pre-listing data; retained actual fitted sample counts and excluded skipped candidates from trial totals.
 - Compared all three declared policies on the same development dates; preserved failed target evidence, original model promotion state and multi-seed synthetic behavior.

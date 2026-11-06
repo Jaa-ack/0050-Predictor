@@ -139,20 +139,73 @@ def test_direction_search_requires_close_return_and_unique_candidate_names():
         search_direction_models(frame, small_config(), candidates=(DirectionCandidate('prior'),) * 2)
 
 
-def test_search_retains_benchmark_sessions_when_all_ten_stock_rows_are_missing():
+@pytest.mark.parametrize('missing_position', ['middle', 'last'])
+def test_search_retains_benchmark_sessions_when_all_ten_stock_rows_are_missing(missing_position):
     from test_research import small_config
     from twquant.direction import DirectionCandidate, search_direction_models
     frame = search_frame()
     cfg = small_config(horizons=(1,), max_folds=1, test_dates=20)
     a = search_direction_models(frame, cfg, holdout_dates=15,
         candidates=(DirectionCandidate('prior'),), bootstrap_samples=10)
-    absent = sorted(a.predictions.date.unique())[5]
+    absent = sorted(a.predictions.date.unique())[5 if missing_position == 'middle' else -1]
     frame = frame.loc[~(frame.date.eq(absent) & frame.ticker.isin(TRAINING_TICKERS))]
     result = search_direction_models(frame, cfg, holdout_dates=15,
         candidates=(DirectionCandidate('prior'),), bootstrap_samples=10)
     audit = result.report['by_horizon']['1']
     assert audit['missing_predictions'] == 10
     assert audit['coverage'] < 1
+
+
+@pytest.mark.parametrize('horizon', [1, 5, 20])
+def test_stock_direction_dates_do_not_depend_on_future_benchmark_quotes_or_etf_suspensions(horizon):
+    from test_research import small_config
+    from twquant.direction import DirectionCandidate, search_direction_models
+    frame = search_frame()
+    cfg = small_config(horizons=(horizon,), max_folds=1, test_dates=20, evaluation_tickers=('0050',))
+    candidates = (DirectionCandidate('prior'),)
+    a = search_direction_models(frame, cfg, candidates=candidates, holdout_dates=15, bootstrap_samples=10)
+    dates = sorted(a.predictions.date.unique())
+    anchor = dates[len(dates) // 2]
+    changed = frame.loc[~(frame.date.eq(anchor) & frame.ticker.eq('0050'))].copy()
+    changed.loc[changed.date.eq(anchor), f'benchmark_target_{horizon}'] = np.nan
+    b = search_direction_models(changed, cfg, candidates=candidates, holdout_dates=15, bootstrap_samples=10)
+    pd.testing.assert_frame_equal(a.predictions, b.predictions)
+    assert a.report['selections'] == b.report['selections']
+    assert b.predictions.date.eq(anchor).sum() == 10
+    matured = frame.merge(b.predictions[['ticker', 'date']], on=['ticker', 'date'], validate='one_to_one')
+    assert matured[f'label_end_{horizon}'].max() < pd.Timestamp(b.report['protocol']['holdout_start'])
+
+
+def test_missing_stock_outcomes_are_still_forecast_and_counted_as_unresolved():
+    from test_research import small_config
+    from twquant.direction import DirectionCandidate, search_direction_models
+    frame = search_frame()
+    cfg = small_config(horizons=(1,), max_folds=1, test_dates=20)
+    candidates = (DirectionCandidate('prior'),)
+    a = search_direction_models(frame, cfg, candidates=candidates, holdout_dates=15, bootstrap_samples=10)
+    anchor = sorted(a.predictions.date.unique())[5]
+    frame.loc[frame.date.eq(anchor) & frame.ticker.eq('2330'), 'target_1'] = np.nan
+    b = search_direction_models(frame, cfg, candidates=candidates, holdout_dates=15, bootstrap_samples=10)
+    assert len(a.predictions) == len(b.predictions)
+    assert b.report['by_horizon']['1']['unresolved_labels'] == 1
+    assert b.report['by_horizon']['1']['coverage'] < 1
+
+
+def test_a_whole_missing_core_test_fold_stays_in_coverage_and_keeps_transfer_dates():
+    from test_research import small_config
+    from twquant.direction import DirectionCandidate, search_direction_models
+    frame = search_frame()
+    cfg = small_config(horizons=(1,), max_folds=2, test_dates=20, evaluation_tickers=('0050',))
+    candidates = (DirectionCandidate('prior'),)
+    a = search_direction_models(frame, cfg, candidates=candidates, holdout_dates=15, bootstrap_samples=10)
+    missing_dates = a.predictions.loc[a.predictions.fold.eq(a.predictions.fold.max()), 'date'].unique()
+    damaged = frame.loc[~(frame.ticker.isin(TRAINING_TICKERS) & frame.date.isin(missing_dates))]
+    b = search_direction_models(damaged, cfg, candidates=candidates, holdout_dates=15, bootstrap_samples=10)
+    audit = b.report['by_horizon']['1']
+    assert audit['test_dates'] == a.report['by_horizon']['1']['test_dates']
+    assert audit['missing_predictions'] == len(missing_dates) * 10
+    assert audit['coverage'] < 1
+    assert set(missing_dates) <= set(b.transfer_predictions.date.unique())
 
 
 @pytest.mark.parametrize('model', ['factor_ridge', 'factor_hist'])
