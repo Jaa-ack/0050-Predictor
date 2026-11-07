@@ -31,31 +31,46 @@ def test_cli_error_boundary_never_echoes_configured_secret(monkeypatch,capsys):
     assert '[REDACTED]' in output
 
 
-@pytest.mark.parametrize('candidate_set,policy,mode', [
-    ('base', 'worst_stock_accuracy', 'postclose'),
-    ('factor', 'pooled_brier', 'preopen'),
-    ('market', 'worst_stock_brier', 'preopen'),
+@pytest.mark.parametrize('candidate_set,policy,mode,overseas_window', [
+    ('base', 'worst_stock_accuracy', 'postclose', False),
+    ('factor', 'pooled_brier', 'preopen', False),
+    ('market', 'worst_stock_brier', 'preopen', False),
+    ('market', 'pooled_brier', 'preopen', True),
 ])
-def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, candidate_set, policy, mode):
+def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, candidate_set, policy, mode, overseas_window):
+    import pandas as pd
     from twquant.data import PriceStore
     from twquant.demo import make_demo_prices
-    PriceStore(tmp_path / 'data').write_prices(make_demo_prices(170))
+    prices = make_demo_prices(170)
+    PriceStore(tmp_path / 'data').write_prices(prices)
     config = tmp_path / 'direction.json'
     config.write_text(json.dumps(dict(horizons=[1], min_train_dates=30, calibration_dates=10,
                                      test_dates=15, max_folds=1)))
+    extra = []
+    if overseas_window:
+        dates = pd.DatetimeIndex(sorted(prices.date.unique()))
+        timestamps = (dates.tz_localize('Asia/Taipei') + pd.Timedelta(hours=6)).tz_convert('UTC')
+        events = pd.DataFrame(dict(ticker='*', feature='fmp_spy_close', value=range(100, 100+len(dates)),
+                                  published_at=timestamps, available_at=timestamps, source='synthetic'))
+        path = tmp_path / 'events.csv'
+        events.to_csv(path, index=False)
+        extra = ['--overseas-window', '--events', str(path)]
     assert main(['--root', str(tmp_path), 'direction-search', '--config', str(config),
-                 '--holdout-dates', '20', '--candidate-set', candidate_set, '--selection-policy', policy, '--mode', mode]) == 0
+                 '--holdout-dates', '20', '--candidate-set', candidate_set, '--selection-policy', policy, '--mode', mode, *extra]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result['evidence_kind'] == 'synthetic'
     assert result['real_world_target_verified'] is False
     assert result['holdout_opened'] is False
     assert result['selection_policy'] == policy
     assert result['mode'] == mode
+    assert result['overseas_window'] == overseas_window
     assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16}[candidate_set]
     assert (tmp_path / result['report']).exists()
     report = json.loads((tmp_path / result['report']).read_text())
     assert report['protocol']['selection_policy'] == policy
     assert report['protocol']['mode'] == mode
+    expected_windows = ['f_ext_fmp_spy_window_return', 'f_ext_fmp_spy_window_updated'] if overseas_window else []
+    assert report['protocol']['overseas_window_features'] == expected_windows
     if candidate_set == 'market':
         market = [c for c in report['protocol']['candidates'] if c['feature_profile'] == 'portable_market']
         assert {c['model'] for c in market} == {

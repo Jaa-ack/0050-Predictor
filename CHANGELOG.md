@@ -2,6 +2,9 @@
 
 ## Unreleased — 2026-11-07
 
+- Added opt-in incremental overseas-window context: two as-of global FMP close joins measure new cumulative information after the Taiwan anchor cutoff, distinguish updated receipts from stale quotes, and preserve unknown starting history.
+- Recorded window feature names and CLI provenance while preserving original price inputs, labels, candidate parameters and default research behavior; added causal, boundary, scale and transfer-isolation tests.
+- Verified unchanged price-only calibration controls across all three overseas-window policies; retained inconclusive one-day paired improvements and failed full-coverage target evidence in local reports.
 - Added an opt-in sixteen-candidate direction search with six matched price-plus-US-market feature ablations; original candidate sets and fixed-ten-only chronological selection remain available.
 - Compared the three declared market-ablation policies against frozen preopen controls, verifying identical original-candidate calibration scores and retaining failed all-constituent target evidence locally.
 - Added explicit postclose/preopen decision modes to direction research, including primary-clock validation, frozen timing contracts and mode-specific prediction/model provenance.
