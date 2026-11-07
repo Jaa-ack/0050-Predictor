@@ -124,6 +124,49 @@ def test_pit_join_uses_publication_availability_and_revision_timestamps():
     assert len(events) == 2
 
 
+def test_pit_join_honors_inclusive_event_expiry_without_reviving_an_older_value():
+    timestamps = pd.to_datetime(['2024-01-08T21:59:00Z', '2024-01-08T22:00:00Z',
+                                 '2024-01-09T00:30:00Z', '2024-01-09T00:30:00.000001Z'], format='mixed')
+    decisions = pd.DataFrame(dict(ticker='2330', decision_ts=timestamps))
+    events = pd.DataFrame(dict(ticker='*', feature=['night', 'night', 'macro'], value=[9., 1., 2.],
+        published_at=['2024-01-08T01:00Z', '2024-01-08T21:00Z', '2024-01-08T01:00Z'],
+        available_at=['2024-01-08T01:00Z', '2024-01-08T22:00Z', '2024-01-08T01:00Z'],
+        expires_at=[None, '2024-01-09T00:30Z', None]))
+    out = point_in_time_join(decisions, events)
+    np.testing.assert_allclose(out.f_ext_night, [9., 1., 1., np.nan], equal_nan=True)
+    assert out.f_ext_macro.eq(2.).all()
+    assert pd.isna(out.f_ext_night_age_days.iloc[-1])
+    permanent = point_in_time_join(decisions, events.drop(columns='expires_at'))
+    assert permanent.f_ext_night.iloc[-1] == 1.
+
+
+def test_pit_join_accepts_mixed_explicit_timestamp_resolutions():
+    decisions = pd.DataFrame(dict(ticker=['2330'], decision_ts=pd.to_datetime(['2024-01-09T00:30Z']).astype('datetime64[ns, UTC]')))
+    events = pd.DataFrame(dict(ticker=['*'], feature=['night'], value=[1.],
+        published_at=pd.to_datetime(['2024-01-08T21:00Z']).astype('datetime64[us, UTC]'),
+        available_at=pd.to_datetime(['2024-01-08T22:00Z']).astype('datetime64[us, UTC]'),
+        expires_at=pd.to_datetime(['2024-01-09T00:30Z']).astype('datetime64[us, UTC]')))
+    assert point_in_time_join(decisions, events).f_ext_night.iloc[0] == 1.
+
+
+@pytest.mark.parametrize('expiry', ['2024-01-08T01:00Z', '2024-01-10 00:00:00'])
+def test_pit_join_rejects_expiry_before_receipt_or_without_timezone(expiry):
+    decisions = pd.DataFrame(dict(ticker=['2330'], decision_ts=['2024-01-09T00:30Z']))
+    events = pd.DataFrame(dict(ticker=['*'], feature=['night'], value=[1.],
+        published_at=['2024-01-08T21:00Z'], available_at=['2024-01-08T22:00Z'], expires_at=[expiry]))
+    with pytest.raises(ValueError):
+        point_in_time_join(decisions, events)
+
+
+def test_portable_market_allows_relative_taifex_context_without_absolute_quotes_or_macro_levels():
+    from twquant.features import select_feature_columns
+    columns = ['f_return_1', 'f_ext_fmp_spy_return1', 'f_ext_taifex_tx_night_return',
+               'f_ext_taifex_tx_night_return_age_days', 'f_ext_taifex_tx_close', 'f_ext_fred_unrate', 'target_1']
+    frame = pd.DataFrame(columns=columns)
+    assert select_feature_columns(frame, 'portable_market') == columns[:4]
+    assert select_feature_columns(frame, 'portable_price') == ['f_return_1']
+
+
 def test_pit_join_rejects_available_before_publication_and_unsafe_feature_names():
     decisions = pd.DataFrame({"ticker": ["2330"], "decision_ts": pd.to_datetime(["2024-04-03T12:00Z"])})
     events = pd.DataFrame({"ticker": ["2330"], "feature": ["eps"], "value": [3],

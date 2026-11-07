@@ -31,14 +31,15 @@ def test_cli_error_boundary_never_echoes_configured_secret(monkeypatch,capsys):
     assert '[REDACTED]' in output
 
 
-@pytest.mark.parametrize('candidate_set,policy,mode,overseas_window', [
-    ('base', 'worst_stock_accuracy', 'postclose', False),
-    ('factor', 'pooled_brier', 'preopen', False),
-    ('market', 'worst_stock_brier', 'preopen', False),
-    ('market', 'pooled_brier', 'preopen', True),
-    ('exposure', 'worst_stock_brier', 'preopen', True),
+@pytest.mark.parametrize('candidate_set,policy,mode,overseas_window,taifex', [
+    ('base', 'worst_stock_accuracy', 'postclose', False, False),
+    ('factor', 'pooled_brier', 'preopen', False, False),
+    ('market', 'worst_stock_brier', 'preopen', False, False),
+    ('market', 'pooled_brier', 'preopen', True, False),
+    ('exposure', 'worst_stock_brier', 'preopen', True, False),
+    ('exposure', 'pooled_brier', 'preopen', True, True),
 ])
-def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, candidate_set, policy, mode, overseas_window):
+def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, candidate_set, policy, mode, overseas_window, taifex):
     import pandas as pd
     from twquant.data import PriceStore
     from twquant.demo import make_demo_prices
@@ -56,6 +57,16 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
         path = tmp_path / 'events.csv'
         events.to_csv(path, index=False)
         extra = ['--overseas-window', '--events', str(path)]
+    if taifex:
+        from test_taifex_history import csv_bytes, record
+        rows = []
+        for date in dates:
+            text = date.strftime('%Y/%m/%d')
+            expiry = date.strftime('%Y%m')
+            rows.extend([record(date=text, expiry=expiry), record(date=text, expiry=expiry, session='盤後', close=101)])
+        history = tmp_path / 'taifex.csv'
+        history.write_bytes(csv_bytes(rows))
+        extra.extend(['--taifex-history', str(history)])
     assert main(['--root', str(tmp_path), 'direction-search', '--config', str(config),
                  '--holdout-dates', '20', '--candidate-set', candidate_set, '--selection-policy', policy, '--mode', mode, *extra]) == 0
     result = json.loads(capsys.readouterr().out)
@@ -65,6 +76,7 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
     assert result['selection_policy'] == policy
     assert result['mode'] == mode
     assert result['overseas_window'] == overseas_window
+    assert result['taifex_history'] == taifex
     assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16, 'exposure': 24}[candidate_set]
     assert (tmp_path / result['report']).exists()
     report = json.loads((tmp_path / result['report']).read_text())
@@ -72,6 +84,15 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
     assert report['protocol']['mode'] == mode
     expected_windows = ['f_ext_fmp_spy_window_return', 'f_ext_fmp_spy_window_updated'] if overseas_window else []
     assert report['protocol']['overseas_window_features'] == expected_windows
+    provenance = json.loads((tmp_path / result['report']).with_name('data_provenance.json').read_text())
+    if taifex:
+        assert 'f_ext_taifex_tx_night_return' in report['protocol']['taifex_night_features']
+        assert provenance['taifex_history_sha256']
+        assert 'reconstructed_taifex_trade_date_0600_no_original_receipt' in provenance['external_availability_basis']
+        assert 'taifex_tx_night_return' in provenance['external_expiring_features']
+    else:
+        assert provenance['taifex_history_sha256'] is None
+        assert report['protocol']['taifex_night_features'] == []
     if candidate_set == 'market':
         market = [c for c in report['protocol']['candidates'] if c['feature_profile'] == 'portable_market']
         assert {c['model'] for c in market} == {

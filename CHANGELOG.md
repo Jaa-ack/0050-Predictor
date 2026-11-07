@@ -2,6 +2,10 @@
 
 ## Unreleased — 2026-11-07
 
+- Added offline TAIFEX CSV/ZIP parsing and relative night-session context using strictly earlier same-contract regular closes, with explicit reconstructed receipt times and no settlement/open-interest inputs.
+- Added inclusive event expiry and canonical timestamp resolution to point-in-time joins; stale night context stays unknown, while permanent events retain their previous behavior.
+- Exposed opt-in historical-night research provenance and shared market inputs, preserving the fixed-ten universe, original price features and complete daily evaluation.
+- Completed matched night-context comparisons under the declared receipt assumption, verifying unchanged price-only controls and preserving improvements, regressions and unsuccessful all-constituent target evidence locally.
 - Added opt-in beta-projected shared-factor candidates, using decision-time fixed-ten market exposures and pooled stock residuals without external-asset fitting.
 - Added training-only volatility-scaled Gaussian scores, explicit missing-input fallbacks and unavailable-candidate diagnostics; exposed twenty-four-candidate research while retaining original sets and daily full-coverage gates.
 - Compared all three exposure policies against frozen controls, reconstructing selected models' training statistics and preserving unsuccessful target evidence; separately acquired official daily/after-hours archive evidence for future input research without changing the experiment matrix.

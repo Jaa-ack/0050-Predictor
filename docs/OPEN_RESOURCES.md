@@ -10,7 +10,7 @@
 | P0 | [元大0050持股](https://www.yuantaetfs.com/product/detail/0050/ratio)：完整當期50檔快照已核對 | 同模型完整成分延伸驗收與逐日持股留存 | 今日名單不證明歷史成分資格；歷史快照仍需保存。固定十檔訓練／校準／選模不隨名單輪換，外部成分不回流 |
 | P0 | [MOPS](https://mops.twse.com.tw/)／原始財報公告；TWSE重大訊息已接入 | 財報、營收、重大訊息的原發布與更正時點 | 公告可按發言時間與實際收件保留，歷史版本及財報金額、股數、累計／單季和金融科目字典仍缺；今天財報快照不當過去已知 |
 | P1 | [TDCC股權分散](https://openapi.tdcc.com.tw/v1/opendata/1-5)：最新快照與數值映射已接入 | 籌碼與持股分散，核對供應商數值 | BOM／代號空白已正規化；仍缺更早歷史及原發布證據。週資料不按日補造新資訊，更正／總計級距不入模 |
-| P1 | [期交所歷史日／夜盤下載](https://www.taifex.com.tw/cht/3/futDailyMarketView)：月與年度原始檔已另存本機，尚未接入模型 | 區分一般／盤後時段的本地期貨市場資訊 | 夜盤交易日期是交易量歸屬日；須驗證換月、夜盤欄位及盤前可用時點。歷史檔不證明原始收件，亦不等同逐筆／委託歷史 |
+| P1 | [期交所歷史日／夜盤下載](https://www.taifex.com.tw/cht/3/futDailyMarketView)：原始檔另存本機，方向研究可選擇使用 | 嚴格更早同合約的夜盤相對報酬、振幅與成交量 | 已有歸屬日期、換月及欄位隔離測試；06:00收件仍為重建假設，08:30後失效。歷史檔不證明原始收件，亦不等同逐筆／委託歷史 |
 | P1 | [主計總處](https://www.stat.gov.tw/)、[央行](https://www.cbc.gov.tw/)、[經濟部](https://www.moea.gov.tw/) | 臺灣GDP／CPI、利匯率、外銷訂單與工業生產 | Twinkle已能搜尋資料，但各dataset仍須明確數值映射、發布日及修訂版本 |
 | P1 | FRED的[NASDAQCOM](https://fred.stlouisfed.org/series/NASDAQCOM)／[NASDAQSOX](https://fred.stlouisfed.org/series/NASDAQSOX) | 美股市場及半導體指數因子，補充部分FMP符號未授權時的研究 | 已實測可讀，計畫加入但預設停用，啟用前核對使用條件；它們不是QQQ／SOXX ETF，時間延遲與收益定義不同。系列標有Nasdaq版權，不能當無限制開放資料公開轉售 |
 | P1 | [SEC EDGAR API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces) | 美股／ADR原始申報、申報接受時間及XBRL版本 | 無須API Key，但需遵守Fair Access及識別要求；美國GAAP／IFRS、幣別與ADR比例需標準化，不能直接代替臺股估值 |

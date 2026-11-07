@@ -198,3 +198,23 @@ LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membershi
 三組實際比較已完成，原十六組的全部逐折校準分數與控制完全相同。從開發矩陣重建每折實際訓練列，核對選中新模型的係數缺失／截斷數、波動中位數、下限及樣本數皆相符。一日最佳結果維持原值，部分規則與期間退步；核心、完整50檔及原資訊就緒次要診斷均未達75%，正式模型與門檻維持原狀。
 
 另行取得的期交所官方日／夜盤月、年度檔放在獨立本機目錄，沒有回填本輪特徵或選模。它們提供真實價格資料，但盤前原始交付時間、合約換月及可用夜盤欄位仍須驗證；尚未產生新的夜盤預測事件。
+
+## 第八輪：本地夜盤的盤前外生資訊
+
+`direction-search --taifex-history <本機CSV或ZIP>`解析官方歷史格式，只保留TX、TE、TF月契約的日期、合約、交易時段與OHLCV；週契約、價差組合及其他商品不進此研究。結算價、未平倉、歷史極值等欄位不輸出。支援UTF-8／CP950及單一CSV的ZIP，只有已識別的空尾欄、缺失末尾價差成交量及DOS EOF可正規化；來源原始檔與雜湊仍留本機。
+
+依[官方日期說明](https://www.taifex.com.tw/cht/3/futDailyMarketView)，夜盤日期為交易量歸屬日。每個歸屬日只從當次已觀測、有成交的夜盤月契約選最近月，再找**嚴格更早、相同商品及相同月份**的日盤收盤。缺少參考價時保持未知，不改用同日日盤或其他月份補值；因此換月不會把兩個合約的價差當成夜盤報酬。
+
+每商品加入夜盤報酬、夜盤振幅及相對參考日盤成交量，各有事件年齡。這些是外生資訊，固定十檔的市場／同儕價格特徵、訓練／校準／選模及IX0001延伸角色均不變。`portable_market`允許這些相對資訊，共同因子亦只接受在固定十檔間按日期一致的欄位。
+
+依[官方金融期貨時段](https://www.taifex.com.tw/cht/2/tF)，夜盤至次日05:00；但歷史檔不能證明原始交付時間。本輪**假設**歸屬日05:00發布、06:00可得，並在08:30含截止瞬間到期；週末歸屬日期的處理亦保持此保守重建，不宣稱實際收件。`availability_basis`與`original_pit_verified=false`隨事件保存。結果只在這個時間假設下解讀。
+
+`point_in_time_join`尊重`expires_at`，過期的值及年齡皆為NaN，不恢復較舊值；沒有宣告到期的原事件維持原行為。另將顯式時區時間統一為UTC奈秒，修正不同精度會使as-of失敗的情況；只改表示精度，不改實際時刻。原有價格特徵與答案已逐筆核對不變。
+
+```bash
+LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membership-transfer-20261107 direction-search --config configs/research_direction.json --events artifacts/fixed-ten/sources/events.csv --candidate-set exposure --selection-policy pooled_brier --membership artifacts/current-membership/20261107/membership.json --mode preopen --overseas-window --taifex-history artifacts/taifex-night-research-20261107/futures_selected_2017_2026.csv
+```
+
+擬合前保存歷史檔雜湊、外部可用時間依據、到期特徵清單與實際夜盤欄位。沿用二十四組候選、三規則、同價格／名單／日期與預留期，全部50檔及資料缺口保留；當年度資料已補至原股票快照終點，不以資料較齊的日期取代原驗收。所有假設及失敗結果均保留，正式模型不自動替換。
+
+三組實際比較已完成。純價格候選逐折分數與原控制完全相同，逐筆決策時點、答案、共用模型及保留期隔離核對通過。在宣告的收件假設下，一日期間有改善，較長期間未一致改善；核心、完整50檔及原資訊就緒次要診斷均未達75%。實際分數、配對區塊診斷與全部失敗方案只留本機，未將探索性改善標成及時未來實績。

@@ -32,7 +32,8 @@ def observed_market_sessions(prices):
 def _timestamps(values, name, allow_missing=False):
     if any(pd.Timestamp(value).tzinfo is None for value in values if not pd.isna(value)):
         raise ValueError(f"{name} must contain explicit timezone offsets")
-    result = pd.to_datetime(values, utc=True)
+    # Archives and Parquet may carry different timestamp resolutions.
+    result = pd.to_datetime(values, utc=True).astype('datetime64[ns, UTC]')
     if not allow_missing and result.isna().any():
         raise ValueError(f"{name} cannot contain missing timestamps")
     return result
@@ -54,7 +55,7 @@ def select_feature_columns(frame,profile='legacy'):
         if column.startswith('f_ext_'):
             if profile=='portable_price':continue
             if '_close' in column:continue
-            if profile=='portable_market' and not column.startswith('f_ext_fmp_'):continue
+            if profile=='portable_market' and not column.startswith(('f_ext_fmp_', 'f_ext_taifex_')):continue
         result.append(column)
     return result
 
@@ -65,6 +66,8 @@ def point_in_time_join(decisions: pd.DataFrame, events: pd.DataFrame) -> pd.Data
     Event values are long-form: ticker, feature, value, published_at,
     available_at. A ``*`` ticker represents a global macro feature. A revision
     becomes visible only from its own available_at; no backfill is performed.
+    Optional expires_at is inclusive. An expired latest event stays unknown;
+    an older value is not revived. Missing expiry means no declared expiry.
     """
     result = decisions.copy()
     if events is None or events.empty:
@@ -79,9 +82,13 @@ def point_in_time_join(decisions: pd.DataFrame, events: pd.DataFrame) -> pd.Data
     data["ticker"] = data.ticker.astype(str)
     data["published_at"] = _timestamps(data.published_at, "published_at")
     data["available_at"] = _timestamps(data.available_at, "available_at")
+    data['expires_at'] = (_timestamps(data.expires_at, 'expires_at', allow_missing=True)
+                          if 'expires_at' in data else pd.Series(pd.NaT, index=data.index, dtype='datetime64[ns, UTC]'))
     result["decision_ts"] = _timestamps(result.decision_ts, "decision_ts", allow_missing=True)
     if (data.published_at > data.available_at).any():
         raise ValueError("published_at must be <= available_at")
+    if (data.expires_at.notna() & data.expires_at.lt(data.available_at)).any():
+        raise ValueError('expires_at must not precede available_at')
     if not data.feature.map(lambda value: isinstance(value, str) and bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", value))).all():
         raise ValueError("feature names must be short alphanumeric identifiers")
     data["value"] = pd.to_numeric(data.value, errors="raise")
@@ -109,11 +116,12 @@ def point_in_time_join(decisions: pd.DataFrame, events: pd.DataFrame) -> pd.Data
             left = group[["decision_ts"]].copy()
             left["position"] = group.index
             merged = pd.merge_asof(left.sort_values("decision_ts"),
-                                   candidates[["available_at", "value"]],
+                                   candidates[["available_at", "value", "expires_at"]],
                                    left_on="decision_ts", right_on="available_at", direction="backward")
             positions = merged.position.to_numpy()
-            positional.loc[positions, col] = merged.value.to_numpy()
-            positional.loc[positions, ages] = ((merged.decision_ts - merged.available_at).dt.total_seconds() / 86_400).to_numpy()
+            active = merged.expires_at.isna() | merged.decision_ts.le(merged.expires_at)
+            positional.loc[positions, col] = merged.value.where(active).to_numpy()
+            positional.loc[positions, ages] = ((merged.decision_ts - merged.available_at).dt.total_seconds() / 86_400).where(active).to_numpy()
     positional.index = result.index
     return positional
 

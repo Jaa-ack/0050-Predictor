@@ -5,6 +5,18 @@ import pytest
 from twquant.universe import TRAINING_TICKERS
 
 
+def test_taifex_context_enters_the_shared_factor_only_when_broadcast_across_fixed_ten():
+    from twquant.direction import DirectionCandidate
+    from twquant.direction_models import fit_direction_model
+    frame = exposure_training_frame(noise=.01)
+    frame['f_ext_taifex_tx_night_return'] = frame.f_market_return_1
+    frame['f_ext_taifex_tf_night_return'] = frame.f_beta_60
+    columns = [c for c in frame if c.startswith('f_')]
+    model, _ = fit_direction_model(DirectionCandidate('factor_ridge'), frame, columns, 1, 42)
+    assert 'f_ext_taifex_tx_night_return' in model.training_details['market_features']
+    assert 'f_ext_taifex_tf_night_return' not in model.training_details['market_features']
+
+
 def exposure_training_frame(noise=0.):
     dates = pd.bdate_range('2023-01-02', periods=160)
     frame = pd.DataFrame([(d, t) for d in dates for t in TRAINING_TICKERS], columns=['date', 'ticker'])

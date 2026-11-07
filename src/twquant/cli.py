@@ -119,6 +119,8 @@ def parser():
                            help='盤後20:00或下一實際市場日盤前08:30；兩者維持同一收盤價錨點')
     direction.add_argument('--overseas-window', action='store_true',
                            help='另加錨點20:00至決策截止的海外累積變動與新收件指標；需全球FMP收盤事件')
+    direction.add_argument('--taifex-history', type=Path,
+                           help='官方歷史CSV或單一CSV的ZIP；夜盤收件假設06:00、有效至08:30，不是原始PIT證據')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
     direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure'], default='base',
@@ -267,6 +269,16 @@ def execute(args):
             config = replace(config, evaluation_tickers=tuple(dict.fromkeys([*config.evaluation_tickers, *external])))
             write_json(folder / 'membership_snapshot.json', membership)
         prices, events = store.read_prices(), load_events(args.events)
+        taifex_sha = None
+        if args.taifex_history:
+            import pandas as pd
+            from .taifex_history import parse_taifex_history, taifex_night_events
+            history = parse_taifex_history(args.taifex_history.read_bytes())
+            night_events = taifex_night_events(history)
+            if night_events.empty:
+                raise ValueError('No paired TAIFEX night prices in the supplied history')
+            taifex_sha = history.attrs['input_sha256']
+            events = pd.concat([events, night_events], ignore_index=True) if events is not None else night_events
         kind = data_kind(prices)
         if events is not None and data_kind(events) == 'synthetic':
             kind = 'synthetic'
@@ -274,6 +286,15 @@ def execute(args):
         if args.overseas_window:
             from .overseas import add_overseas_window_features
             frame = add_overseas_window_features(frame, events)
+        provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind, mode=args.mode,
+            overseas_window=args.overseas_window, taifex_history_sha256=taifex_sha,
+            availability_basis=sorted(prices.availability_basis.unique().tolist()),
+            external_availability_basis=(sorted(events.availability_basis.dropna().astype(str).unique().tolist())
+                if events is not None and 'availability_basis' in events else []),
+            external_expiring_features=(sorted(events.loc[events.expires_at.notna(), 'feature'].unique().tolist())
+                if events is not None and 'expires_at' in events else []),
+            limitation='Historical receipt timestamps and latest adjusted prices do not establish original point-in-time data.')
+        write_json(folder / 'data_provenance.json', provenance)
         result = search_direction_models(frame, config,
             holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder,
             candidates={'base': DEFAULT_CANDIDATES, 'factor': FACTOR_CANDIDATES,
@@ -281,16 +302,12 @@ def execute(args):
             selection_policy=args.selection_policy, mode=args.mode,
             constituents=membership['tickers'] if membership is not None else None,
             membership_as_of=membership['as_of'] if membership is not None else None)
-        provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind, mode=args.mode,
-            overseas_window=args.overseas_window,
-            availability_basis=sorted(prices.availability_basis.unique().tolist()),
-            limitation='Historical receipt timestamps and latest adjusted prices do not establish original point-in-time data.')
-        write_json(folder / 'data_provenance.json', provenance)
         fields_to_report = ('overall_accuracy', 'minimum_stock_accuracy', 'worst_five_accuracy', 'coverage', 'empirical_target_met')
         summary = dict(run_id=run_id, report=str((folder / 'report.json').relative_to(root)),
             evidence_kind=kind, holdout_opened=False, real_world_target_verified=False,
             selection_policy=args.selection_policy, candidate_count=result.report['candidate_count'], mode=args.mode,
             overseas_window=args.overseas_window,
+            taifex_history=bool(args.taifex_history),
             by_horizon={h: {k: m[k] for k in fields_to_report} for h, m in result.report['by_horizon'].items()})
         if membership is not None:
             audits = result.report['constituents']['by_horizon']
