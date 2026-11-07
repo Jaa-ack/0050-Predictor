@@ -230,3 +230,21 @@ LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membershi
 比較協定在擬合前保存六個新增欄位、原18個夜盤欄位、程式及資料摘要。仍比較原24候選與三規則，沿用相同50檔、全日期分母、預留期及先前宣告的資訊就緒次要診斷，不以選股或略過低信心日期取代每日完整預測。
 
 三組比較與逐筆核對已完成。純價格候選逐折校準分數、原欄位與答案均保持相同。一日期間部分規則的平均結果小幅改善，最弱五檔仍遠低於目標，其他規則與較長期間亦有退步；全部範圍仍未達75%。完整失敗結果與配對區塊診斷留在本機，沒有將探索性改善當成已驗證的未來預測能力。
+
+## 過去價格方向分布研究
+
+`direction-search --candidate-set path`沿用原24組候選，另加六組`portable_path`候選：logistic、hist、extra_trees、random_forest、factor_beta_ridge與factor_beta_vol_ridge，各使用756日訓練視窗。此模式自動加入13個`f_path_`欄位；原三種portable特徵組排除這些欄位，因此原24組輸入保持相同。`portable_path`採原`portable_market`價格及相對海外／期貨資訊，再加入這13欄。
+
+每檔只從其錨點日已知的`f_return_1/5/20`，分別計算60／252個主要市場日內的正報酬與持平比例，最少需要30／126筆有效觀察；另計算60日內相鄰單日報酬符號相同的比例，最少需要30對有效觀察。符號分成正、零、負，持平是獨立價格狀態；驗收目標仍為上漲與非上漲兩類。未知與非有限報酬不當成持平或下跌，缺報告會中斷相鄰配對，視窗按主要市場日滾動。
+
+新欄位不讀未來答案，也不擬合各股專屬參數、門檻或校準模型。外部股票只提供自己的已知價格作機械特徵，不能供應主要日曆、固定十檔同儕、訓練、校準或選模；全體仍沿用同一已選模型與門檻。決策須在錨點日20:00假設收件時間之後，終端盤前NaT及主要日曆以外的外部日期保持未知。
+
+```bash
+LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membership-transfer-20261107 direction-search --config configs/research_direction.json --events artifacts/fixed-ten/sources/events.csv --candidate-set path --selection-policy pooled_brier --membership artifacts/current-membership/20261107/membership.json --mode preopen --overseas-window --taifex-history artifacts/taifex-night-research-20261107/futures_selected_2017_2026.csv --taifex-exposure
+```
+
+原價格、答案、夜盤與曝險欄位逐筆相同的核對，以及新增欄位、全部候選與三種選模規則，均在擬合前保存。沿用相同50檔、全部日期分母、126日預留期與原資訊就緒次要診斷；已多次檢視的開發歷史及重建資料交付時間仍是結論限制。
+
+三規則比較與核對已完成，原24組候選的逐折校準分數完全相同。部分資訊就緒弱股診斷小幅改善，整體與較長期間未一致改善；固定十檔、完整50檔與原資訊就緒範圍均未達75%。全部候選、退步方案、缺漏與配對診斷保存於本機，正式模型仍維持原狀。
+
+另為後續研究獨立準備XLF、XLP、XLC、XLI、XLB、XLE及SMH的海外產業代理歷史；標的角色可參考[State Street產業目錄](https://www.ssga.com/us/en/individual/capabilities/equities/sector-investing/select-sector-etfs)與[VanEck半導體基金說明](https://www.vaneck.com/us/en/investments/semiconductor-etf-smh-fact-sheet.pdf)。FMP回覆402的失敗紀錄保留，替代資料來自Yahoo公開歷史圖表回應，不能冒稱FMP交付。已核對商品、時區日期、價格範圍、唯一日鍵與原檔雜湊；較短歷史保持缺漏。這批資料不進入本輪價格分布比較，原始檔與實際數據只存本機；最新還原價亦不證明原始PIT資料或歷史收件時間。

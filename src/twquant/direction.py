@@ -27,7 +27,7 @@ class DirectionCandidate:
         if self.model not in {'prior', 'logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist',
                               'factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist'}:
             raise ValueError('Unknown direction model')
-        if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all'}:
+        if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path'}:
             raise ValueError('Unknown direction feature profile')
         if self.window_dates is not None and self.window_dates < 10:
             raise ValueError('Direction training window needs at least ten dates')
@@ -59,6 +59,10 @@ EXPOSURE_CANDIDATES = MARKET_CANDIDATES + tuple(
     DirectionCandidate(model, profile, 756)
     for model in ('factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist')
     for profile in ('portable_all', 'portable_market')
+)
+PATH_CANDIDATES = EXPOSURE_CANDIDATES + tuple(
+    DirectionCandidate(model, 'portable_path', 756)
+    for model in ('logistic', 'hist', 'extra_trees', 'random_forest', 'factor_beta_ridge', 'factor_beta_vol_ridge')
 )
 THRESHOLDS = (.4, .45, .5, .55, .6)
 SELECTION_POLICIES = ('worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier')
@@ -147,6 +151,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
     for h in config.horizons:
         split_frame.loc[split_frame[f'label_end_{h}'].ge(start), f'label_end_{h}'] = pd.NaT
     protocol = dict(config=asdict(config), candidates=[asdict(c) for c in candidates],
+        price_path_features=sorted(c for c in get_feature_columns(fixed) if c.startswith('f_path_')),
         taifex_night_features=sorted(c for c in get_feature_columns(fixed) if c.startswith('f_ext_taifex_')),
         taifex_exposure_features=sorted(c for c in get_feature_columns(fixed)
             if c.startswith('f_ext_taifex_') and c.endswith(('_beta60', '_beta_night_return'))),

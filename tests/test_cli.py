@@ -39,6 +39,7 @@ def test_cli_error_boundary_never_echoes_configured_secret(monkeypatch,capsys):
     ('exposure', 'worst_stock_brier', 'preopen', True, False, False),
     ('exposure', 'pooled_brier', 'preopen', True, True, False),
     ('exposure', 'pooled_brier', 'preopen', True, True, True),
+    ('path', 'pooled_brier', 'preopen', True, True, True),
 ])
 def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, candidate_set, policy, mode, overseas_window, taifex, taifex_exposure):
     import pandas as pd
@@ -81,7 +82,8 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
     assert result['overseas_window'] == overseas_window
     assert result['taifex_history'] == taifex
     assert result['taifex_exposure'] == taifex_exposure
-    assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16, 'exposure': 24}[candidate_set]
+    assert result['price_path'] == (candidate_set == 'path')
+    assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16, 'exposure': 24, 'path': 30}[candidate_set]
     assert (tmp_path / result['report']).exists()
     report = json.loads((tmp_path / result['report']).read_text())
     assert report['protocol']['selection_policy'] == policy
@@ -89,6 +91,20 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
     expected_windows = ['f_ext_fmp_spy_window_return', 'f_ext_fmp_spy_window_updated'] if overseas_window else []
     assert report['protocol']['overseas_window_features'] == expected_windows
     provenance = json.loads((tmp_path / result['report']).with_name('data_provenance.json').read_text())
+    assert provenance['price_path'] == (candidate_set == 'path')
+    path_features = report['protocol']['price_path_features']
+    if candidate_set == 'path':
+        assert len(path_features) == 13
+        assert 'f_path_flat_1_60' in path_features
+        assert 'f_path_up_20_252' in path_features
+        assert 'f_path_same_sign_1_60' in path_features
+        added = [c for c in report['protocol']['candidates'] if c['feature_profile'] == 'portable_path']
+        assert {c['model'] for c in added} == {'logistic','hist','extra_trees','random_forest','factor_beta_ridge','factor_beta_vol_ridge'}
+        assert all(c['window_dates'] == 756 for c in added)
+        scored = {s['candidate'] for s in report['selections'][0]['candidate_scores']}
+        assert all(f"{c['model']}:portable_path:756" in scored for c in added)
+    else:
+        assert path_features == []
     assert provenance['taifex_exposure'] == taifex_exposure
     expected_exposures = sorted('f_ext_taifex_' + code + suffix for code in ('tx', 'te', 'tf')
                                 for suffix in ('_beta60', '_beta_night_return')) if taifex_exposure else []

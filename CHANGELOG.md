@@ -2,6 +2,10 @@
 
 ## Unreleased — 2026-11-07
 
+- Added causal own-price positive/flat return fractions and sign persistence with finite-observation minima, trusted-session windows and unknown-data preservation.
+- Added an opt-in thirty-candidate path comparison with six explicit feature ablations, retaining every original candidate's inputs and fixed-ten-only model selection.
+- Completed three matched path-policy comparisons, verifying every original candidate's calibration scores exactly while retaining mixed changes and failed daily full-coverage target evidence locally.
+- Prepared isolated public overseas sector histories after recording vendor entitlement rejections, preserving source identity, shorter histories and reconstructed-availability limitations for subsequent research.
 - Added opt-in past-only stock responses to TX/TE/TF regular-session returns and interactions with valid preopen night moves, preserving original features and full daily evaluation.
 - Required paired observations, same-expiry consecutive primary-session references and explicit assumed regular-quote receipt; retained unknown histories and isolated external stocks from primary calendars and model selection.
 - Completed all three exposure-interaction comparisons with matched answers, unchanged price-only calibration controls and shared-model verification; preserved mixed changes and unsuccessful full-coverage target evidence locally.

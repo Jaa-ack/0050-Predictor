@@ -125,8 +125,8 @@ def parser():
                            help='需歷史檔；加入個股過去60日對日盤期貨的反應及夜盤交互作用，日盤假設20:00可得')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
-    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure'], default='base',
-                           help='base八組；factor十組；market十六組；exposure再加個股反應係數與波動評分共二十四組')
+    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path'], default='base',
+                           help='base八組；factor十組；market十六組；exposure二十四組；path另加六組價格方向分布候選')
     direction.add_argument('--selection-policy', choices=['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'],
                            default='worst_stock_accuracy', help='Brier規則固定0.5門檻；只以校準期選模')
     simulation = subs.add_parser('direction-simulate', help='模擬假設資訊量、延遲及缺漏；合成結果不是真實預測證據')
@@ -252,7 +252,7 @@ def execute(args):
         return dict(selected_profile=result["selected_profile"], scores=result["scores"], holdout_opened=False)
     if args.command in {'direction-search', 'direction-simulate'}:
         import uuid
-        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, search_direction_models, simulate_information_scenarios
+        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, search_direction_models, simulate_information_scenarios
         from .direction_audit import load_membership_snapshot
         from .features import build_features
         from .workflows import data_kind, load_events
@@ -293,7 +293,12 @@ def execute(args):
         if args.taifex_exposure:
             from .taifex_exposure import add_taifex_exposure_features
             frame = add_taifex_exposure_features(frame, history)
+        price_path = args.candidate_set == 'path'
+        if price_path:
+            from .price_path import add_price_path_features
+            frame = add_price_path_features(frame)
         provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind, mode=args.mode,
+            price_path=price_path,
             overseas_window=args.overseas_window, taifex_history_sha256=taifex_sha,
             taifex_exposure=args.taifex_exposure,
             taifex_regular_receipt_assumption=('anchor date 20:00; original receipt unverified' if args.taifex_exposure else None),
@@ -307,7 +312,8 @@ def execute(args):
         result = search_direction_models(frame, config,
             holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder,
             candidates={'base': DEFAULT_CANDIDATES, 'factor': FACTOR_CANDIDATES,
-                        'market': MARKET_CANDIDATES, 'exposure': EXPOSURE_CANDIDATES}[args.candidate_set],
+                        'market': MARKET_CANDIDATES, 'exposure': EXPOSURE_CANDIDATES,
+                        'path': PATH_CANDIDATES}[args.candidate_set],
             selection_policy=args.selection_policy, mode=args.mode,
             constituents=membership['tickers'] if membership is not None else None,
             membership_as_of=membership['as_of'] if membership is not None else None)
@@ -318,6 +324,7 @@ def execute(args):
             overseas_window=args.overseas_window,
             taifex_history=bool(args.taifex_history),
             taifex_exposure=args.taifex_exposure,
+            price_path=price_path,
             by_horizon={h: {k: m[k] for k in fields_to_report} for h, m in result.report['by_horizon'].items()})
         if membership is not None:
             audits = result.report['constituents']['by_horizon']
