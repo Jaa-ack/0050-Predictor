@@ -2,6 +2,9 @@
 
 ## Unreleased — 2026-11-07
 
+- Added opt-in past-only stock responses to TX/TE/TF regular-session returns and interactions with valid preopen night moves, preserving original features and full daily evaluation.
+- Required paired observations, same-expiry consecutive primary-session references and explicit assumed regular-quote receipt; retained unknown histories and isolated external stocks from primary calendars and model selection.
+- Completed all three exposure-interaction comparisons with matched answers, unchanged price-only calibration controls and shared-model verification; preserved mixed changes and unsuccessful full-coverage target evidence locally.
 - Added offline TAIFEX CSV/ZIP parsing and relative night-session context using strictly earlier same-contract regular closes, with explicit reconstructed receipt times and no settlement/open-interest inputs.
 - Added inclusive event expiry and canonical timestamp resolution to point-in-time joins; stale night context stays unknown, while permanent events retain their previous behavior.
 - Exposed opt-in historical-night research provenance and shared market inputs, preserving the fixed-ten universe, original price features and complete daily evaluation.

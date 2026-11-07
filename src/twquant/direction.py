@@ -148,6 +148,8 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
         split_frame.loc[split_frame[f'label_end_{h}'].ge(start), f'label_end_{h}'] = pd.NaT
     protocol = dict(config=asdict(config), candidates=[asdict(c) for c in candidates],
         taifex_night_features=sorted(c for c in get_feature_columns(fixed) if c.startswith('f_ext_taifex_')),
+        taifex_exposure_features=sorted(c for c in get_feature_columns(fixed)
+            if c.startswith('f_ext_taifex_') and c.endswith(('_beta60', '_beta_night_return'))),
         overseas_window_features=sorted(c for c in get_feature_columns(fixed)
             if c.startswith('f_ext_fmp_') and c.endswith(('_window_return', '_window_updated'))),
         mode=mode, decision_contract='20:00 on anchor session' if mode == 'postclose' else '08:30 on next observed market session; price anchor remains previous close',

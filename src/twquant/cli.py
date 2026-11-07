@@ -121,6 +121,8 @@ def parser():
                            help='另加錨點20:00至決策截止的海外累積變動與新收件指標；需全球FMP收盤事件')
     direction.add_argument('--taifex-history', type=Path,
                            help='官方歷史CSV或單一CSV的ZIP；夜盤收件假設06:00、有效至08:30，不是原始PIT證據')
+    direction.add_argument('--taifex-exposure', action='store_true',
+                           help='需歷史檔；加入個股過去60日對日盤期貨的反應及夜盤交互作用，日盤假設20:00可得')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
     direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure'], default='base',
@@ -261,6 +263,8 @@ def execute(args):
                 seeds=tuple(int(s.strip()) for s in args.seeds.split(',')), output=folder)
             return dict(run_id=run_id, report=str((folder / 'report.json').relative_to(root)),
                 evidence_kind='synthetic', scenarios=report['scenarios'], real_world_target_verified=False)
+        if args.taifex_exposure and not args.taifex_history:
+            raise ValueError('--taifex-exposure requires --taifex-history')
         store = PriceStore(root / 'data')
         membership = load_membership_snapshot(args.membership) if args.membership else None
         config = config_from(args.config)
@@ -286,8 +290,13 @@ def execute(args):
         if args.overseas_window:
             from .overseas import add_overseas_window_features
             frame = add_overseas_window_features(frame, events)
+        if args.taifex_exposure:
+            from .taifex_exposure import add_taifex_exposure_features
+            frame = add_taifex_exposure_features(frame, history)
         provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind, mode=args.mode,
             overseas_window=args.overseas_window, taifex_history_sha256=taifex_sha,
+            taifex_exposure=args.taifex_exposure,
+            taifex_regular_receipt_assumption=('anchor date 20:00; original receipt unverified' if args.taifex_exposure else None),
             availability_basis=sorted(prices.availability_basis.unique().tolist()),
             external_availability_basis=(sorted(events.availability_basis.dropna().astype(str).unique().tolist())
                 if events is not None and 'availability_basis' in events else []),
@@ -308,6 +317,7 @@ def execute(args):
             selection_policy=args.selection_policy, candidate_count=result.report['candidate_count'], mode=args.mode,
             overseas_window=args.overseas_window,
             taifex_history=bool(args.taifex_history),
+            taifex_exposure=args.taifex_exposure,
             by_horizon={h: {k: m[k] for k in fields_to_report} for h, m in result.report['by_horizon'].items()})
         if membership is not None:
             audits = result.report['constituents']['by_horizon']
