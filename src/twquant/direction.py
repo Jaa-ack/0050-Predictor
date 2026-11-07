@@ -24,7 +24,8 @@ class DirectionCandidate:
     window_dates: int | None = None
 
     def __post_init__(self):
-        if self.model not in {'prior', 'logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist'}:
+        if self.model not in {'prior', 'logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist',
+                              'factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist'}:
             raise ValueError('Unknown direction model')
         if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all'}:
             raise ValueError('Unknown direction feature profile')
@@ -53,6 +54,11 @@ FACTOR_CANDIDATES = DEFAULT_CANDIDATES + (
 MARKET_CANDIDATES = FACTOR_CANDIDATES + tuple(
     DirectionCandidate(model, 'portable_market', 756)
     for model in ('logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist')
+)
+EXPOSURE_CANDIDATES = MARKET_CANDIDATES + tuple(
+    DirectionCandidate(model, profile, 756)
+    for model in ('factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist')
+    for profile in ('portable_all', 'portable_market')
 )
 THRESHOLDS = (.4, .45, .5, .55, .6)
 SELECTION_POLICIES = ('worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier')

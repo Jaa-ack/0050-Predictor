@@ -2,6 +2,9 @@
 
 ## Unreleased — 2026-11-07
 
+- Added opt-in beta-projected shared-factor candidates, using decision-time fixed-ten market exposures and pooled stock residuals without external-asset fitting.
+- Added training-only volatility-scaled Gaussian scores, explicit missing-input fallbacks and unavailable-candidate diagnostics; exposed twenty-four-candidate research while retaining original sets and daily full-coverage gates.
+- Compared all three exposure policies against frozen controls, reconstructing selected models' training statistics and preserving unsuccessful target evidence; separately acquired official daily/after-hours archive evidence for future input research without changing the experiment matrix.
 - Added opt-in incremental overseas-window context: two as-of global FMP close joins measure new cumulative information after the Taiwan anchor cutoff, distinguish updated receipts from stale quotes, and preserve unknown starting history.
 - Recorded window feature names and CLI provenance while preserving original price inputs, labels, candidate parameters and default research behavior; added causal, boundary, scale and transfer-isolation tests.
 - Verified unchanged price-only calibration controls across all three overseas-window policies; retained inconclusive one-day paired improvements and failed full-coverage target evidence in local reports.

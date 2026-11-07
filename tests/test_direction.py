@@ -249,7 +249,8 @@ def test_a_whole_missing_core_test_fold_stays_in_coverage_and_keeps_transfer_dat
     assert set(missing_dates) <= set(b.transfer_predictions.date.unique())
 
 
-@pytest.mark.parametrize('model', ['factor_ridge', 'factor_hist'])
+@pytest.mark.parametrize('model', ['factor_ridge', 'factor_hist', 'factor_beta_ridge', 'factor_beta_hist',
+                                  'factor_beta_vol_ridge', 'factor_beta_vol_hist'])
 def test_market_and_stock_residual_model_learns_both_signals_without_test_or_transfer_refitting(model):
     from test_research import small_config
     from twquant.direction import DirectionCandidate, search_direction_models
@@ -258,6 +259,8 @@ def test_market_and_stock_residual_model_learns_both_signals_without_test_or_tra
     dates = sorted(frame.date.unique())
     market = dict(zip(dates, rng.normal(size=len(dates))))
     frame['f_market_return_1'] = frame.date.map(market)
+    frame['f_beta_60'] = 1.
+    frame['f_volatility_20'] = .02
     frame['f_signal'] = rng.normal(size=len(frame))
     frame['target_1'] = .02 * (frame.f_market_return_1 + frame.f_signal) + rng.normal(0, .0001, len(frame))
     frame.loc[frame.label_end_1.isna(), 'target_1'] = np.nan
@@ -276,6 +279,7 @@ def test_market_and_stock_residual_model_learns_both_signals_without_test_or_tra
     changed = frame.copy()
     changed.loc[changed.date.isin(a.predictions.date), 'target_1'] = -.9
     changed.loc[changed.ticker.isin(['0050', '1216']), ['f_signal', 'f_market_return_1']] = 999.
+    changed.loc[changed.ticker.isin(['0050', '1216']), ['f_beta_60', 'f_volatility_20']] = 999.
     changed.loc[changed.ticker.isin(['0050', '1216']), 'target_1'] = -.9
     b = search_direction_models(changed, cfg, candidates=candidate, holdout_dates=15,
                                 bootstrap_samples=10, selection_policy='pooled_brier')

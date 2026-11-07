@@ -121,8 +121,8 @@ def parser():
                            help='另加錨點20:00至決策截止的海外累積變動與新收件指標；需全球FMP收盤事件')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
-    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market'], default='base',
-                           help='base為原八組；factor加兩組殘差模型；market再加六組價格＋美股資訊消融')
+    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure'], default='base',
+                           help='base八組；factor十組；market十六組；exposure再加個股反應係數與波動評分共二十四組')
     direction.add_argument('--selection-policy', choices=['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'],
                            default='worst_stock_accuracy', help='Brier規則固定0.5門檻；只以校準期選模')
     simulation = subs.add_parser('direction-simulate', help='模擬假設資訊量、延遲及缺漏；合成結果不是真實預測證據')
@@ -248,7 +248,7 @@ def execute(args):
         return dict(selected_profile=result["selected_profile"], scores=result["scores"], holdout_opened=False)
     if args.command in {'direction-search', 'direction-simulate'}:
         import uuid
-        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, search_direction_models, simulate_information_scenarios
+        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, search_direction_models, simulate_information_scenarios
         from .direction_audit import load_membership_snapshot
         from .features import build_features
         from .workflows import data_kind, load_events
@@ -276,7 +276,8 @@ def execute(args):
             frame = add_overseas_window_features(frame, events)
         result = search_direction_models(frame, config,
             holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder,
-            candidates={'base': DEFAULT_CANDIDATES, 'factor': FACTOR_CANDIDATES, 'market': MARKET_CANDIDATES}[args.candidate_set],
+            candidates={'base': DEFAULT_CANDIDATES, 'factor': FACTOR_CANDIDATES,
+                        'market': MARKET_CANDIDATES, 'exposure': EXPOSURE_CANDIDATES}[args.candidate_set],
             selection_policy=args.selection_policy, mode=args.mode,
             constituents=membership['tickers'] if membership is not None else None,
             membership_as_of=membership['as_of'] if membership is not None else None)

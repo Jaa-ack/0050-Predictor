@@ -36,6 +36,7 @@ def test_cli_error_boundary_never_echoes_configured_secret(monkeypatch,capsys):
     ('factor', 'pooled_brier', 'preopen', False),
     ('market', 'worst_stock_brier', 'preopen', False),
     ('market', 'pooled_brier', 'preopen', True),
+    ('exposure', 'worst_stock_brier', 'preopen', True),
 ])
 def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, candidate_set, policy, mode, overseas_window):
     import pandas as pd
@@ -64,7 +65,7 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
     assert result['selection_policy'] == policy
     assert result['mode'] == mode
     assert result['overseas_window'] == overseas_window
-    assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16}[candidate_set]
+    assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16, 'exposure': 24}[candidate_set]
     assert (tmp_path / result['report']).exists()
     report = json.loads((tmp_path / result['report']).read_text())
     assert report['protocol']['selection_policy'] == policy
@@ -78,6 +79,12 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
         assert all(c['window_dates'] == 756 for c in market)
         scored = {s['candidate'] for s in report['selections'][0]['candidate_scores']}
         assert all(f"{c['model']}:portable_market:756" in scored for c in market)
+    if candidate_set == 'exposure':
+        added = [c for c in report['protocol']['candidates'] if c['model'].startswith('factor_beta_')]
+        assert len(added) == 8
+        assert {c['feature_profile'] for c in added} == {'portable_all', 'portable_market'}
+        scored = {s['candidate'] for s in report['selections'][0]['candidate_scores']}
+        assert all(f"{c['model']}:{c['feature_profile']}:756" in scored for c in added)
     assert not (tmp_path / 'current.json').exists()
 
 
