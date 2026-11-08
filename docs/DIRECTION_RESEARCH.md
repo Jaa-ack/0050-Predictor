@@ -248,3 +248,23 @@ LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membershi
 三規則比較與核對已完成，原24組候選的逐折校準分數完全相同。部分資訊就緒弱股診斷小幅改善，整體與較長期間未一致改善；固定十檔、完整50檔與原資訊就緒範圍均未達75%。全部候選、退步方案、缺漏與配對診斷保存於本機，正式模型仍維持原狀。
 
 另為後續研究獨立準備XLF、XLP、XLC、XLI、XLB、XLE及SMH的海外產業代理歷史；標的角色可參考[State Street產業目錄](https://www.ssga.com/us/en/individual/capabilities/equities/sector-investing/select-sector-etfs)與[VanEck半導體基金說明](https://www.vaneck.com/us/en/investments/semiconductor-etf-smh-fact-sheet.pdf)。FMP回覆402的失敗紀錄保留，替代資料來自Yahoo公開歷史圖表回應，不能冒稱FMP交付。已核對商品、時區日期、價格範圍、唯一日鍵與原檔雜湊；較短歷史保持缺漏。這批資料不進入本輪價格分布比較，原始檔與實際數據只存本機；最新還原價亦不證明原始PIT資料或歷史收件時間。
+
+## 海外產業相對資訊研究
+
+`--candidate-set sector --sector-history PATH`在原30組候選之外，新增六組`portable_sector`候選：logistic、hist、extra_trees、random_forest、factor_beta_ridge與factor_beta_vol_ridge，訓練視窗均756日。此組採`portable_path`加產業相對資訊；原四種portable組排除`f_ext_us_sector_`，保留原30組全部輸入。
+
+CSV須有`date,symbol,adj_close,source`，包含上述七個商品，來源明確標為`yahoo_historical_chart`或`synthetic`。轉換器拒絕重複鍵、非日日期、非有限／非正價格與不明來源，沒有網路或憑證讀取。以七條已觀測海外市場日期的聯集配對相鄰報價，個別缺報告會中斷報酬配對；尚無歷史的期間不補造。
+
+每商品產生調整收盤與單次報酬事件，**假設美東當日17:00收件**，按紐約當地時間處理夏令時間，`original_pit_verified=false`。`add_overseas_window_features(..., event_prefix='us_sector')`再比較臺灣錨點日20:00與盤前08:30可見的最新收盤，取得累積變動及新收件指標。預設`fmp`行為不變，Yahoo事件不冒稱FMP。每商品共六個新增欄位，包含值、年齡與視窗資訊；模型排除絕對收盤及其年齡，只用28個相對欄位。
+
+候選的市場因子僅接受在固定十檔間按日期一致的產業欄位；公司特有或不完整廣播的值留在殘差模型。七條美股序列只作全球輸入，沒有美股目標加入訓練。固定十檔唯一參與訓練、校準與選模，全體外部標的沿用同一模型及門檻。
+
+```bash
+LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membership-transfer-20261107 direction-search --config configs/research_direction.json --events artifacts/fixed-ten/sources/events.csv --candidate-set sector --sector-history artifacts/sector-context-research-20261107/sector_prices.csv --selection-policy pooled_brier --membership artifacts/current-membership/20261107/membership.json --mode preopen --overseas-window --taifex-history artifacts/taifex-night-research-20261107/futures_selected_2017_2026.csv --taifex-exposure
+```
+
+上述`sector_prices.csv`是本機已驗證報價加上誠實來源標籤的衍生檔。擬合前凍結原欄位逐筆相同核對、來源／價格／名單／程式摘要與全部36候選、三規則。仍使用相同50檔、完整日期分母、126日預留期與原資訊就緒次要診斷；最新還原價與重建收件時間不能證明及時未來實績。
+
+三規則實際比較及核對已完成，原30組候選的逐折校準分數完全相同。部分一日平均小幅改善，弱股及較長期間未一致改善；固定十檔、完整50檔及原資訊就緒範圍仍未達75%。全部退步方案、缺漏與配對診斷保存在本機。
+
+另已獨立取得完整50檔與0050／2002的FinMind法人歷史，逐檔核對原檔雜湊、商品／日期、非負數量及唯一分類日鍵，作為後續公司層級訊號研究；未放入本輪產業比較。保留原分類、缺漏與實際取得時間，不把缺少紀錄當成零，也不把當前下載回填成歷史原始收件。依[官方文件](https://finmind.github.io/tutor/TaiwanMarket/Chip/)，資料晚間更新，數值可能事後補計，並無固定最終定案時間；較長延遲假設亦不能證明原始PIT。原始與衍生數據僅存忽略目錄。

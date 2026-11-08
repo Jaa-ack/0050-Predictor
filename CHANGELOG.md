@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-08
+
+- Added offline, source-tagged US sector history conversion with explicit reconstructed New York receipts, DST handling and missing-history preservation.
+- Added a separate thirty-six-candidate sector comparison while preserving every original candidate's inputs; global sector context enters shared factors only when uniform across the fixed ten.
+- Extended overseas windows with an explicit source prefix and recorded sector hashes, feature names and receipt assumptions without changing default FMP behavior.
+- Completed three matched sector comparisons with every original candidate's calibration scores unchanged; retained mixed changes and failed full-coverage target evidence locally.
+- Acquired and verified isolated company-level institutional histories for later research, preserving observed retrieval times, category changes, missing records and revision limitations.
+
 ## Unreleased — 2026-11-07
 
 - Added causal own-price positive/flat return fractions and sign persistence with finite-observation minima, trusted-session windows and unknown-data preservation.

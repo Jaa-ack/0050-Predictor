@@ -123,7 +123,7 @@ def fit_direction_model(candidate, train, columns, horizon, seed):
     # Company-specific or partially populated external features remain solely
     # in the stock residual fit.
     for c in columns:
-        if c.startswith(('f_ext_fred_', 'f_ext_fmp_', 'f_ext_taifex_')) and train.groupby('date')[c].nunique(dropna=False).le(1).all():
+        if c.startswith(('f_ext_fred_', 'f_ext_fmp_', 'f_ext_taifex_', 'f_ext_us_sector_')) and train.groupby('date')[c].nunique(dropna=False).le(1).all():
             market_columns.append(c)
     if not market_columns:
         raise DirectionCandidateUnavailable('decision_time_market_features_missing')

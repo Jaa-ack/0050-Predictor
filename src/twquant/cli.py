@@ -123,10 +123,12 @@ def parser():
                            help='官方歷史CSV或單一CSV的ZIP；夜盤收件假設06:00、有效至08:30，不是原始PIT證據')
     direction.add_argument('--taifex-exposure', action='store_true',
                            help='需歷史檔；加入個股過去60日對日盤期貨的反應及夜盤交互作用，日盤假設20:00可得')
+    direction.add_argument('--sector-history', type=Path,
+                           help='sector候選必需；七條含source的正規化海外產業CSV，假設美東17:00收件')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
-    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path'], default='base',
-                           help='base八組；factor十組；market十六組；exposure二十四組；path另加六組價格方向分布候選')
+    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path', 'sector'], default='base',
+                           help='base八組；factor十組；market十六組；exposure二十四組；path三十組；sector三十六組')
     direction.add_argument('--selection-policy', choices=['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'],
                            default='worst_stock_accuracy', help='Brier規則固定0.5門檻；只以校準期選模')
     simulation = subs.add_parser('direction-simulate', help='模擬假設資訊量、延遲及缺漏；合成結果不是真實預測證據')
@@ -252,7 +254,7 @@ def execute(args):
         return dict(selected_profile=result["selected_profile"], scores=result["scores"], holdout_opened=False)
     if args.command in {'direction-search', 'direction-simulate'}:
         import uuid
-        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, search_direction_models, simulate_information_scenarios
+        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, SECTOR_CANDIDATES, search_direction_models, simulate_information_scenarios
         from .direction_audit import load_membership_snapshot
         from .features import build_features
         from .workflows import data_kind, load_events
@@ -265,6 +267,8 @@ def execute(args):
                 evidence_kind='synthetic', scenarios=report['scenarios'], real_world_target_verified=False)
         if args.taifex_exposure and not args.taifex_history:
             raise ValueError('--taifex-exposure requires --taifex-history')
+        if (args.candidate_set == 'sector') != bool(args.sector_history):
+            raise ValueError('--sector-history is required only with --candidate-set sector')
         store = PriceStore(root / 'data')
         membership = load_membership_snapshot(args.membership) if args.membership else None
         config = config_from(args.config)
@@ -283,6 +287,16 @@ def execute(args):
                 raise ValueError('No paired TAIFEX night prices in the supplied history')
             taifex_sha = history.attrs['input_sha256']
             events = pd.concat([events, night_events], ignore_index=True) if events is not None else night_events
+        sector_sha, sector_sources = None, []
+        if args.sector_history:
+            from io import BytesIO
+            import pandas as pd
+            from .us_sectors import sector_price_events
+            sector_bytes = args.sector_history.read_bytes()
+            sector_events = sector_price_events(pd.read_csv(BytesIO(sector_bytes)))
+            sector_sha = hashlib.sha256(sector_bytes).hexdigest()
+            sector_sources = sorted(sector_events.source.unique().tolist())
+            events = pd.concat([events, sector_events], ignore_index=True) if events is not None else sector_events
         kind = data_kind(prices)
         if events is not None and data_kind(events) == 'synthetic':
             kind = 'synthetic'
@@ -290,14 +304,19 @@ def execute(args):
         if args.overseas_window:
             from .overseas import add_overseas_window_features
             frame = add_overseas_window_features(frame, events)
+        if args.sector_history:
+            from .overseas import add_overseas_window_features
+            frame = add_overseas_window_features(frame, events, event_prefix='us_sector')
         if args.taifex_exposure:
             from .taifex_exposure import add_taifex_exposure_features
             frame = add_taifex_exposure_features(frame, history)
-        price_path = args.candidate_set == 'path'
+        price_path = args.candidate_set in {'path', 'sector'}
         if price_path:
             from .price_path import add_price_path_features
             frame = add_price_path_features(frame)
         provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind, mode=args.mode,
+            sector_history_sha256=sector_sha, sector_sources=sector_sources,
+            sector_receipt_assumption=('US17:00 local; original receipt unverified' if args.sector_history else None),
             price_path=price_path,
             overseas_window=args.overseas_window, taifex_history_sha256=taifex_sha,
             taifex_exposure=args.taifex_exposure,
@@ -313,7 +332,7 @@ def execute(args):
             holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder,
             candidates={'base': DEFAULT_CANDIDATES, 'factor': FACTOR_CANDIDATES,
                         'market': MARKET_CANDIDATES, 'exposure': EXPOSURE_CANDIDATES,
-                        'path': PATH_CANDIDATES}[args.candidate_set],
+                        'path': PATH_CANDIDATES, 'sector': SECTOR_CANDIDATES}[args.candidate_set],
             selection_policy=args.selection_policy, mode=args.mode,
             constituents=membership['tickers'] if membership is not None else None,
             membership_as_of=membership['as_of'] if membership is not None else None)
@@ -325,6 +344,7 @@ def execute(args):
             taifex_history=bool(args.taifex_history),
             taifex_exposure=args.taifex_exposure,
             price_path=price_path,
+            sector_history=bool(args.sector_history),
             by_horizon={h: {k: m[k] for k in fields_to_report} for h, m in result.report['by_horizon'].items()})
         if membership is not None:
             audits = result.report['constituents']['by_horizon']

@@ -5,6 +5,18 @@ import pytest
 from twquant.universe import TRAINING_TICKERS
 
 
+def test_sector_context_enters_the_shared_factor_only_when_uniform_across_fixed_ten():
+    from twquant.direction import DirectionCandidate
+    from twquant.direction_models import fit_direction_model
+    frame = exposure_training_frame(noise=.01)
+    frame['f_ext_us_sector_xlf_return1'] = frame.f_market_return_1
+    frame['f_ext_us_sector_xlp_return1'] = frame.f_beta_60
+    columns = [c for c in frame if c.startswith('f_')]
+    model,_ = fit_direction_model(DirectionCandidate('factor_ridge'),frame,columns,1,42)
+    assert 'f_ext_us_sector_xlf_return1' in model.training_details['market_features']
+    assert 'f_ext_us_sector_xlp_return1' not in model.training_details['market_features']
+
+
 def test_taifex_context_enters_the_shared_factor_only_when_broadcast_across_fixed_ten():
     from twquant.direction import DirectionCandidate
     from twquant.direction_models import fit_direction_model

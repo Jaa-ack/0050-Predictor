@@ -10,22 +10,26 @@ import pandas as pd
 from .features import point_in_time_join
 
 
-def add_overseas_window_features(frame, events):
+def add_overseas_window_features(frame, events, *, event_prefix='fmp'):
     """Append scale-free US close changes available after anchor-day 20:00.
 
-    Two backward as-of joins use the same global FMP close event stream. No new
+    Two backward as-of joins use the same global close event stream. The
+    explicit prefix selects FMP (default) or separately sourced US sectors. No new
     visible receipt gives a zero move; absent starting/ending data stays NaN.
     An updated receipt with an unchanged value is distinguished from no update.
     Existing inputs, targets, row order and index are preserved. Stock histories
     never fit these features or supply global context.
     """
+    if event_prefix not in {'fmp', 'us_sector'}:
+        raise ValueError('Unknown overseas event prefix')
+    label = 'FMP' if event_prefix == 'fmp' else 'US sector'
     if not {'ticker', 'date', 'decision_ts'}.issubset(frame.columns):
         raise ValueError('Overseas windows require ticker, date and decision_ts')
     if events is None or not {'ticker', 'feature', 'value'}.issubset(events.columns):
-        raise ValueError('Overseas windows require global FMP close events')
-    closes = events.loc[events.feature.astype(str).str.fullmatch(r'fmp_[A-Za-z0-9_]+_close')].copy()
+        raise ValueError(f'Overseas windows require global {label} close events')
+    closes = events.loc[events.feature.astype(str).str.fullmatch(rf'{event_prefix}_[A-Za-z0-9_]+_close')].copy()
     if closes.empty or not closes.ticker.astype(str).eq('*').all():
-        raise ValueError('Overseas windows require global FMP close events')
+        raise ValueError(f'Overseas windows require global {label} close events')
     closes['value'] = pd.to_numeric(closes.value, errors='raise')
     if closes.value.le(0).any():
         raise ValueError('Overseas close values must be positive')
