@@ -2,6 +2,9 @@
 
 ## Unreleased — 2026-11-08
 
+- Added own-stock foreign-main and investment-trust imbalance, activity and trailing means under an explicit market-session receipt lag, with daily expiry and missing/zero distinction.
+- Added an isolated forty-two-candidate flow comparison preserving all original inputs; receipt contracts enter research protocols/model versions and synthetic flow controls the experiment's evidence kind.
+- Completed the three delayed-flow comparisons and a preregistered same-day pooled-Brier sensitivity; paired controls match exactly and neither timing assumption reaches the full-coverage direction target.
 - Added offline, source-tagged US sector history conversion with explicit reconstructed New York receipts, DST handling and missing-history preservation.
 - Added a separate thirty-six-candidate sector comparison while preserving every original candidate's inputs; global sector context enters shared factors only when uniform across the fixed ten.
 - Extended overseas windows with an explicit source prefix and recorded sector hashes, feature names and receipt assumptions without changing default FMP behavior.

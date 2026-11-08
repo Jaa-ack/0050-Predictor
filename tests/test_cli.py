@@ -41,12 +41,15 @@ def test_cli_error_boundary_never_echoes_configured_secret(monkeypatch,capsys):
     ('exposure', 'pooled_brier', 'preopen', True, True, True),
     ('path', 'pooled_brier', 'preopen', True, True, True),
     ('sector', 'pooled_brier', 'preopen', True, True, True),
+    ('flow', 'pooled_brier', 'preopen', True, True, True),
 ])
 def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, candidate_set, policy, mode, overseas_window, taifex, taifex_exposure):
     import pandas as pd
     from twquant.data import PriceStore
     from twquant.demo import make_demo_prices
     prices = make_demo_prices(170)
+    if candidate_set=='flow':
+        prices['source']='historical_fixture'  # Verify that synthetic flow alone controls evidence kind.
     PriceStore(tmp_path / 'data').write_prices(prices)
     config = tmp_path / 'direction.json'
     config.write_text(json.dumps(dict(horizons=[1], min_train_dates=30, calibration_dates=10,
@@ -57,6 +60,7 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
         timestamps = (dates.tz_localize('Asia/Taipei') + pd.Timedelta(hours=6)).tz_convert('UTC')
         events = pd.DataFrame(dict(ticker='*', feature='fmp_spy_close', value=range(100, 100+len(dates)),
                                   published_at=timestamps, available_at=timestamps, source='synthetic'))
+        if candidate_set=='flow': events['source']='historical_fixture'
         path = tmp_path / 'events.csv'
         events.to_csv(path, index=False)
         extra = ['--overseas-window', '--events', str(path)]
@@ -72,14 +76,23 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
         extra.extend(['--taifex-history', str(history)])
     if taifex_exposure:
         extra.append('--taifex-exposure')
-    if candidate_set == 'sector':
+    if candidate_set in {'sector','flow'}:
         from test_us_sectors import SYMBOLS
         sector_dates = pd.DatetimeIndex(sorted(prices.date.unique()))
         sector = pd.concat([pd.DataFrame(dict(date=sector_dates,symbol=s,
-            adj_close=range(100,100+len(sector_dates)),source='synthetic')) for s in SYMBOLS],ignore_index=True)
+            adj_close=range(100,100+len(sector_dates)),source='yahoo_historical_chart' if candidate_set=='flow' else 'synthetic')) for s in SYMBOLS],ignore_index=True)
         sector_path = tmp_path/'sectors.csv'
         sector.to_csv(sector_path,index=False)
         extra.extend(['--sector-history',str(sector_path)])
+    if candidate_set=='flow':
+        rows=[]
+        for ticker in prices.ticker.unique():
+            if not ticker.isdigit(): continue
+            for date in sector_dates:
+                rows.extend([dict(date=date,stock_id=ticker,name='Foreign_Investor',buy=300,sell=100,source='synthetic'),
+                    dict(date=date,stock_id=ticker,name='Investment_Trust',buy=100,sell=300,source='synthetic')])
+        flow_path=tmp_path/'flow.csv';pd.DataFrame(rows).to_csv(flow_path,index=False)
+        extra.extend(['--flow-history',str(flow_path)])
     assert main(['--root', str(tmp_path), 'direction-search', '--config', str(config),
                  '--holdout-dates', '20', '--candidate-set', candidate_set, '--selection-policy', policy, '--mode', mode, *extra]) == 0
     result = json.loads(capsys.readouterr().out)
@@ -91,9 +104,10 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
     assert result['overseas_window'] == overseas_window
     assert result['taifex_history'] == taifex
     assert result['taifex_exposure'] == taifex_exposure
-    assert result['price_path'] == (candidate_set in {'path','sector'})
-    assert result['sector_history'] == (candidate_set == 'sector')
-    assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16, 'exposure': 24, 'path': 30, 'sector': 36}[candidate_set]
+    assert result['price_path'] == (candidate_set in {'path','sector','flow'})
+    assert result['sector_history'] == (candidate_set in {'sector','flow'})
+    assert result['flow_history'] == (candidate_set=='flow')
+    assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16, 'exposure': 24, 'path': 30, 'sector': 36, 'flow': 42}[candidate_set]
     assert (tmp_path / result['report']).exists()
     report = json.loads((tmp_path / result['report']).read_text())
     assert report['protocol']['selection_policy'] == policy
@@ -101,10 +115,23 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
     expected_windows = ['f_ext_fmp_spy_window_return', 'f_ext_fmp_spy_window_updated'] if overseas_window else []
     assert report['protocol']['overseas_window_features'] == expected_windows
     provenance = json.loads((tmp_path / result['report']).with_name('data_provenance.json').read_text())
-    assert provenance['price_path'] == (candidate_set in {'path','sector'})
-    if candidate_set == 'sector':
+    assert provenance['price_path'] == (candidate_set in {'path','sector','flow'})
+    if candidate_set=='flow':
+        assert provenance['flow_history_sha256'] and provenance['flow_sources']==['synthetic']
+        assert len(report['protocol']['institutional_flow_features'])==8
+        assert report['protocol']['flow_receipt_contract']['lag_sessions']==2
+        assert provenance['flow_receipt_contract']==report['protocol']['flow_receipt_contract']
+        added=[c for c in report['protocol']['candidates'] if c['feature_profile']=='portable_flow']
+        assert len(added)==6 and all(c['window_dates']==756 for c in added)
+        scored={s['candidate'] for s in report['selections'][0]['candidate_scores']}
+        assert all(f"{c['model']}:portable_flow:756" in scored for c in added)
+    else:
+        assert provenance['flow_history_sha256'] is None and provenance['flow_sources']==[]
+        assert report['protocol']['institutional_flow_features']==[]
+        assert report['protocol']['flow_receipt_contract'] is None
+    if candidate_set in {'sector','flow'}:
         assert provenance['sector_history_sha256']
-        assert provenance['sector_sources'] == ['synthetic']
+        assert provenance['sector_sources'] == (['yahoo_historical_chart'] if candidate_set=='flow' else ['synthetic'])
         assert provenance['sector_receipt_assumption'] == 'US17:00 local; original receipt unverified'
         assert len(report['protocol']['us_sector_features']) == 42
         added = [c for c in report['protocol']['candidates'] if c['feature_profile']=='portable_sector']
@@ -116,7 +143,7 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
         assert provenance['sector_sources'] == []
         assert report['protocol']['us_sector_features'] == []
     path_features = report['protocol']['price_path_features']
-    if candidate_set in {'path','sector'}:
+    if candidate_set in {'path','sector','flow'}:
         assert len(path_features) == 13
         assert 'f_path_flat_1_60' in path_features
         assert 'f_path_up_20_252' in path_features
@@ -160,6 +187,12 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
 def test_sector_search_requires_its_explicit_history_argument(tmp_path,capsys):
     assert main(['--root',str(tmp_path),'direction-search','--candidate-set','sector']) == 2
     assert '--sector-history' in capsys.readouterr().err
+
+
+def test_flow_search_requires_its_explicit_history_argument(tmp_path,capsys):
+    assert main(['--root',str(tmp_path),'direction-search','--candidate-set','flow',
+                 '--sector-history',str(tmp_path/'unused.csv')])==2
+    assert '--flow-history' in capsys.readouterr().err
 
 
 def test_direction_simulation_cli_labels_every_result_synthetic(tmp_path, capsys):

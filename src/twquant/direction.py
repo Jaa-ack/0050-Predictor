@@ -27,7 +27,7 @@ class DirectionCandidate:
         if self.model not in {'prior', 'logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist',
                               'factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist'}:
             raise ValueError('Unknown direction model')
-        if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path', 'portable_sector'}:
+        if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path', 'portable_sector', 'portable_flow'}:
             raise ValueError('Unknown direction feature profile')
         if self.window_dates is not None and self.window_dates < 10:
             raise ValueError('Direction training window needs at least ten dates')
@@ -66,6 +66,10 @@ PATH_CANDIDATES = EXPOSURE_CANDIDATES + tuple(
 )
 SECTOR_CANDIDATES = PATH_CANDIDATES + tuple(
     DirectionCandidate(model, 'portable_sector', 756)
+    for model in ('logistic', 'hist', 'extra_trees', 'random_forest', 'factor_beta_ridge', 'factor_beta_vol_ridge')
+)
+FLOW_CANDIDATES = SECTOR_CANDIDATES + tuple(
+    DirectionCandidate(model, 'portable_flow', 756)
     for model in ('logistic', 'hist', 'extra_trees', 'random_forest', 'factor_beta_ridge', 'factor_beta_vol_ridge')
 )
 THRESHOLDS = (.4, .45, .5, .55, .6)
@@ -115,6 +119,16 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
     from .direction_models import DirectionCandidateUnavailable, fit_direction_model
     from .research import _numeric, _positive_probability, _validate, temporal_splits
     from .workflows import source_digest, write_json
+    flow_features = sorted(c for c in get_feature_columns(frame) if c.startswith('f_flow_'))
+    flow_contract = frame.attrs.get('flow_receipt_contract')
+    if flow_features and (not isinstance(flow_contract, dict)
+            or isinstance(flow_contract.get('lag_sessions'), bool)
+            or not isinstance(flow_contract.get('lag_sessions'), int)
+            or not 0 <= flow_contract['lag_sessions'] <= 5
+            or flow_contract.get('original_pit_verified') is not False
+            or not flow_contract.get('assumed_receipt') or not flow_contract.get('expiry')):
+        raise ValueError('Institutional flow requires its declared receipt contract')
+    flow_contract = dict(flow_contract) if flow_contract is not None else None
     if config.objective != 'close_return':
         raise ValueError('Direction goal requires the close_return objective')
     if not candidates or len({c.name for c in candidates}) != len(candidates):
@@ -155,6 +169,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
     for h in config.horizons:
         split_frame.loc[split_frame[f'label_end_{h}'].ge(start), f'label_end_{h}'] = pd.NaT
     protocol = dict(config=asdict(config), candidates=[asdict(c) for c in candidates],
+        institutional_flow_features=flow_features, flow_receipt_contract=flow_contract,
         us_sector_features=sorted(c for c in get_feature_columns(fixed) if c.startswith('f_ext_us_sector_')),
         price_path_features=sorted(c for c in get_feature_columns(fixed) if c.startswith('f_path_')),
         taifex_night_features=sorted(c for c in get_feature_columns(fixed) if c.startswith('f_ext_taifex_')),
@@ -222,7 +237,8 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
                 random_state=config.random_state, threshold=threshold, features=columns,
                 selection_policy=selection_policy,
                 mode=mode,
-                source_sha256=protocol['source_sha256']), sort_keys=True).encode()
+                source_sha256=protocol['source_sha256'],
+                flow_receipt_contract=flow_contract), sort_keys=True).encode()
             model_version = hashlib.sha256(pd.util.hash_pandas_object(
                 subset[['ticker', 'date', *columns, f'target_{horizon}']], index=False).to_numpy().tobytes()
                 + pd.util.hash_pandas_object(calibration[['ticker', 'date', *columns, f'target_{horizon}']],

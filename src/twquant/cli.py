@@ -125,10 +125,14 @@ def parser():
                            help='需歷史檔；加入個股過去60日對日盤期貨的反應及夜盤交互作用，日盤假設20:00可得')
     direction.add_argument('--sector-history', type=Path,
                            help='sector候選必需；七條含source的正規化海外產業CSV，假設美東17:00收件')
+    direction.add_argument('--flow-history', type=Path,
+                           help='flow候選必需；含source的個股法人分類日CSV，不改寫原實際收件時間')
+    direction.add_argument('--flow-lag-sessions', type=int, choices=[0, 2], default=2,
+                           help='法人資料20:00假設收件延遲，預設兩個主要市場日；零延遲僅供獨立敏感度研究')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
-    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path', 'sector'], default='base',
-                           help='base八組；factor十組；market十六組；exposure二十四組；path三十組；sector三十六組')
+    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path', 'sector', 'flow'], default='base',
+                           help='base八組；factor十組；market十六組；exposure二十四組；path三十組；sector三十六組；flow四十二組')
     direction.add_argument('--selection-policy', choices=['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'],
                            default='worst_stock_accuracy', help='Brier規則固定0.5門檻；只以校準期選模')
     simulation = subs.add_parser('direction-simulate', help='模擬假設資訊量、延遲及缺漏；合成結果不是真實預測證據')
@@ -254,7 +258,7 @@ def execute(args):
         return dict(selected_profile=result["selected_profile"], scores=result["scores"], holdout_opened=False)
     if args.command in {'direction-search', 'direction-simulate'}:
         import uuid
-        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, SECTOR_CANDIDATES, search_direction_models, simulate_information_scenarios
+        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, SECTOR_CANDIDATES, FLOW_CANDIDATES, search_direction_models, simulate_information_scenarios
         from .direction_audit import load_membership_snapshot
         from .features import build_features
         from .workflows import data_kind, load_events
@@ -267,8 +271,10 @@ def execute(args):
                 evidence_kind='synthetic', scenarios=report['scenarios'], real_world_target_verified=False)
         if args.taifex_exposure and not args.taifex_history:
             raise ValueError('--taifex-exposure requires --taifex-history')
-        if (args.candidate_set == 'sector') != bool(args.sector_history):
-            raise ValueError('--sector-history is required only with --candidate-set sector')
+        if (args.candidate_set in {'sector', 'flow'}) != bool(args.sector_history):
+            raise ValueError('--sector-history is required only with --candidate-set sector or flow')
+        if (args.candidate_set == 'flow') != bool(args.flow_history):
+            raise ValueError('--flow-history is required only with --candidate-set flow')
         store = PriceStore(root / 'data')
         membership = load_membership_snapshot(args.membership) if args.membership else None
         config = config_from(args.config)
@@ -310,11 +316,25 @@ def execute(args):
         if args.taifex_exposure:
             from .taifex_exposure import add_taifex_exposure_features
             frame = add_taifex_exposure_features(frame, history)
-        price_path = args.candidate_set in {'path', 'sector'}
+        price_path = args.candidate_set in {'path', 'sector', 'flow'}
         if price_path:
             from .price_path import add_price_path_features
             frame = add_price_path_features(frame)
+        flow_sha, flow_sources = None, []
+        if args.flow_history:
+            from io import BytesIO
+            import pandas as pd
+            from .institutional_flow import add_institutional_flow_features
+            flow_bytes = args.flow_history.read_bytes()
+            flow_history = pd.read_csv(BytesIO(flow_bytes), dtype={'stock_id': str})
+            frame = add_institutional_flow_features(frame, flow_history, lag_sessions=args.flow_lag_sessions)
+            flow_sha = hashlib.sha256(flow_bytes).hexdigest()
+            flow_sources = sorted(flow_history.source.unique().tolist())
+            if data_kind(flow_history) == 'synthetic':
+                kind = 'synthetic'
         provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind, mode=args.mode,
+            flow_history_sha256=flow_sha, flow_sources=flow_sources,
+            flow_receipt_contract=frame.attrs.get('flow_receipt_contract'),
             sector_history_sha256=sector_sha, sector_sources=sector_sources,
             sector_receipt_assumption=('US17:00 local; original receipt unverified' if args.sector_history else None),
             price_path=price_path,
@@ -332,7 +352,8 @@ def execute(args):
             holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder,
             candidates={'base': DEFAULT_CANDIDATES, 'factor': FACTOR_CANDIDATES,
                         'market': MARKET_CANDIDATES, 'exposure': EXPOSURE_CANDIDATES,
-                        'path': PATH_CANDIDATES, 'sector': SECTOR_CANDIDATES}[args.candidate_set],
+                        'path': PATH_CANDIDATES, 'sector': SECTOR_CANDIDATES,
+                        'flow': FLOW_CANDIDATES}[args.candidate_set],
             selection_policy=args.selection_policy, mode=args.mode,
             constituents=membership['tickers'] if membership is not None else None,
             membership_as_of=membership['as_of'] if membership is not None else None)
@@ -345,6 +366,7 @@ def execute(args):
             taifex_exposure=args.taifex_exposure,
             price_path=price_path,
             sector_history=bool(args.sector_history),
+            flow_history=bool(args.flow_history),
             by_horizon={h: {k: m[k] for k in fields_to_report} for h, m in result.report['by_horizon'].items()})
         if membership is not None:
             audits = result.report['constituents']['by_horizon']

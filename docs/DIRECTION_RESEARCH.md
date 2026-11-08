@@ -268,3 +268,23 @@ LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membershi
 三規則實際比較及核對已完成，原30組候選的逐折校準分數完全相同。部分一日平均小幅改善，弱股及較長期間未一致改善；固定十檔、完整50檔及原資訊就緒範圍仍未達75%。全部退步方案、缺漏與配對診斷保存在本機。
 
 另已獨立取得完整50檔與0050／2002的FinMind法人歷史，逐檔核對原檔雜湊、商品／日期、非負數量及唯一分類日鍵，作為後續公司層級訊號研究；未放入本輪產業比較。保留原分類、缺漏與實際取得時間，不把缺少紀錄當成零，也不把當前下載回填成歷史原始收件。依[官方文件](https://finmind.github.io/tutor/TaiwanMarket/Chip/)，資料晚間更新，數值可能事後補計，並無固定最終定案時間；較長延遲假設亦不能證明原始PIT。原始與衍生數據僅存忽略目錄。
+
+## 個股法人流向研究
+
+`--candidate-set flow --flow-history PATH`沿用全部36組控制，另加六組`portable_flow`候選：logistic、hist、extra_trees、random_forest、factor_beta_ridge與factor_beta_vol_ridge，訓練視窗均756日。此組採`portable_sector`加八個`f_flow_`欄位，原五種portable組排除法人欄位。仍須提供`--sector-history`，讓原控制組輸入保持一致。
+
+CSV須包含`date,stock_id,name,buy,sell,source`，股票代碼以字串讀取並保留0050的前導零，來源明確為`finmind_historical_institutional`或`synthetic`。只使用原表報導的`Foreign_Investor`與`Investment_Trust`分類，沒有將舊制Dealer與後來拆分項目重複相加。各類別計算買賣不平衡`(buy-sell)/(buy+sell)`、完整5／20個主要市場日的平均及是否有交易；明確的零買賣是中性值且活動為零，沒有報告則保持未知，缺漏會中斷滾動平均。
+
+主要研究**假設延遲兩個固定十檔／0050已觀測市場日，於20:00收到**，有效至下一已觀測市場日08:30含截止瞬間。直接按日曆延遲對齊，每筆只供應指定決策日，不會將消失的分類或缺報告無限延續。未來資料、外部股票與未來答案不參與當前個股特徵的計算，市場因子與同儕亦不接收法人欄位；指數沒有法人資料時保持未知。
+
+這些是可用時間假設，不能證明初次公布或最終定案時間。`--flow-lag-sessions 0`僅提供另一個明確記錄的敏感度設定，未執行的設定不能宣稱有績效。收件契約寫入協定與模型版本，合成法人資料會使整次實驗標為合成證據；原始快照的實際取得時間不被改寫。
+
+```bash
+LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membership-transfer-20261107 direction-search --config configs/research_direction.json --events artifacts/fixed-ten/sources/events.csv --candidate-set flow --sector-history artifacts/sector-context-research-20261107/sector_prices.csv --flow-history artifacts/institutional-flow-research-20261108/institutional_history.csv --flow-lag-sessions 2 --selection-policy pooled_brier --membership artifacts/current-membership/20261107/membership.json --mode preopen --overseas-window --taifex-history artifacts/taifex-night-research-20261107/futures_selected_2017_2026.csv --taifex-exposure
+```
+
+擬合前凍結來源雜湊、八個新增欄位、收件假設、全部42候選與三規則，核對原36組所有輸入與未來答案保持相同。固定十檔唯一參與訓練、校準及選模，全50檔沿用同模型與門檻，完整日期分母、缺值、126日預留期與原資訊就緒診斷保持原樣。
+
+本輪主比較使用兩個市場日延遲及三規則，另在檢視主結果前凍結一組同日20:00敏感度，只使用預先指定的`pooled_brier`。兩者使用相同42候選及全部股票／日期，收件契約分別保存，不將較早可得的假設當成實際歷史交付。
+
+四組實驗與配對核對均已完成。原36組候選逐折校準分數完全相同，兩種收件假設的答案、日期與決策時間也一致。新增法人訊號沒有帶來一致改善；固定十檔、完整50檔及原資訊就緒範圍的1／5／20日驗收全部未達75%，完整日期與缺漏均保留。實際數字、退步方案及日期區塊配對區間只存本機，不發布供應商資料。少量舊快照未見修訂，也不能證明歷史08:30以前已可取得或已定案。
