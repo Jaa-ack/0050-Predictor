@@ -27,7 +27,7 @@ class DirectionCandidate:
         if self.model not in {'prior', 'logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist',
                               'factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist'}:
             raise ValueError('Unknown direction model')
-        if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path', 'portable_sector', 'portable_flow'}:
+        if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path', 'portable_sector', 'portable_flow', 'portable_opening'}:
             raise ValueError('Unknown direction feature profile')
         if self.window_dates is not None and self.window_dates < 10:
             raise ValueError('Direction training window needs at least ten dates')
@@ -71,6 +71,13 @@ SECTOR_CANDIDATES = PATH_CANDIDATES + tuple(
 FLOW_CANDIDATES = SECTOR_CANDIDATES + tuple(
     DirectionCandidate(model, 'portable_flow', 756)
     for model in ('logistic', 'hist', 'extra_trees', 'random_forest', 'factor_beta_ridge', 'factor_beta_vol_ridge')
+)
+OPENING_CANDIDATES = (
+    DirectionCandidate('prior'),
+    DirectionCandidate('logistic', 'portable_price', 756),
+    DirectionCandidate('logistic', 'portable_flow', 756),
+    DirectionCandidate('logistic', 'portable_opening', 756),
+    DirectionCandidate('hist', 'portable_opening', 756),
 )
 THRESHOLDS = (.4, .45, .5, .55, .6)
 SELECTION_POLICIES = ('worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier')
@@ -129,6 +136,19 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
             or not flow_contract.get('assumed_receipt') or not flow_contract.get('expiry')):
         raise ValueError('Institutional flow requires its declared receipt contract')
     flow_contract = dict(flow_contract) if flow_contract is not None else None
+    opening_features = sorted(c for c in get_feature_columns(frame) if c.startswith('f_openref_'))
+    opening_contract = frame.attrs.get('opening_proxy_contract')
+    if opening_features or opening_contract is not None:
+        if (not isinstance(opening_contract, dict)
+                or opening_contract.get('evidence_kind') != 'synthetic'
+                or opening_contract.get('source') != 'historical_next_raw_open_as_unobserved_reference'
+                or opening_contract.get('uses_future_open') is not True
+                or opening_contract.get('uses_future_closing_labels') is not False
+                or opening_contract.get('original_pit_verified') is not False
+                or mode != 'preopen'):
+            raise ValueError('Synthetic opening proxy requires its preopen contract')
+        opening_contract = dict(opening_contract)
+        evidence_kind = 'synthetic'
     if config.objective != 'close_return':
         raise ValueError('Direction goal requires the close_return objective')
     if not candidates or len({c.name for c in candidates}) != len(candidates):
@@ -169,6 +189,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
     for h in config.horizons:
         split_frame.loc[split_frame[f'label_end_{h}'].ge(start), f'label_end_{h}'] = pd.NaT
     protocol = dict(config=asdict(config), candidates=[asdict(c) for c in candidates],
+        opening_proxy_features=opening_features, opening_proxy_contract=opening_contract,
         institutional_flow_features=flow_features, flow_receipt_contract=flow_contract,
         us_sector_features=sorted(c for c in get_feature_columns(fixed) if c.startswith('f_ext_us_sector_')),
         price_path_features=sorted(c for c in get_feature_columns(fixed) if c.startswith('f_path_')),
@@ -238,7 +259,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
                 selection_policy=selection_policy,
                 mode=mode,
                 source_sha256=protocol['source_sha256'],
-                flow_receipt_contract=flow_contract), sort_keys=True).encode()
+                flow_receipt_contract=flow_contract, opening_proxy_contract=opening_contract), sort_keys=True).encode()
             model_version = hashlib.sha256(pd.util.hash_pandas_object(
                 subset[['ticker', 'date', *columns, f'target_{horizon}']], index=False).to_numpy().tobytes()
                 + pd.util.hash_pandas_object(calibration[['ticker', 'date', *columns, f'target_{horizon}']],

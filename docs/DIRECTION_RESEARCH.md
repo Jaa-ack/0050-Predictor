@@ -288,3 +288,23 @@ LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membershi
 本輪主比較使用兩個市場日延遲及三規則，另在檢視主結果前凍結一組同日20:00敏感度，只使用預先指定的`pooled_brier`。兩者使用相同42候選及全部股票／日期，收件契約分別保存，不將較早可得的假設當成實際歷史交付。
 
 四組實驗與配對核對均已完成。原36組候選逐折校準分數完全相同，兩種收件假設的答案、日期與決策時間也一致。新增法人訊號沒有帶來一致改善；固定十檔、完整50檔及原資訊就緒範圍的1／5／20日驗收全部未達75%，完整日期與缺漏均保留。實際數字、退步方案及日期區塊配對區間只存本機，不發布供應商資料。少量舊快照未見修訂，也不能證明歷史08:30以前已可取得或已定案。
+
+## 第十三輪：合成盤前開盤參考價
+
+`--candidate-set opening-proxy --mode preopen`是獨立的**合成可得性研究**。依[證交所說明](https://shl.twse.com.tw/page/library/trade/2.html)，盤前接受委託時會揭示試撮價格；試撮價格不能當成最終開盤價。本輪沒有取得歷史試撮報價，而是明確假設08:30可得到帶誤差的下一市場日原始開盤參考，檢查這類額外公司資訊是否值得進一步取得。
+
+`add_opening_reference_proxy`刻意使用研究矩陣的`next_open`評估欄位。其輸入為下一日原始開盤與已知前收盤的對數比值，加上以基點表示的獨立常態對數誤差；另產生按比例隨機缺報的情境。隨機值按種子、股票及錨點日期固定，不隨資料排序、外部股票或未來答案改變。它不讀未來收盤、高低價、成交量或調整因子；使用原始價格也表示除權息等原始價差保留在代理中。誤差與缺報分布尚未由真實試撮歷史校準。
+
+三個新增欄位為`f_openref_log_gap`、按已知20日波動度縮放的`f_openref_scaled_gap`及`f_openref_present`。原六種portable特徵組全部排除這三欄；`portable_opening`沿用`portable_flow`再加代理欄位。缺報、無開盤價及終端決策日未知時，代理保持未知且不刪列；模型仍以原有特徵或訓練期先驗給出預測。原價格、答案、08:30決策時鐘與126日保留期保持原樣。
+
+此組只有五個預先指定候選：prior、756日portable_price logistic、756日portable_flow logistic，以及756日portable_opening的logistic／hist。它是集中檢驗資訊假說的小型比較，並非原42候選再加兩組；前三組作為原比較的校準控制。固定十檔仍唯一用於擬合與選擇，全部50檔與延伸商品使用同一凍結模型及0.5門檻。
+
+```bash
+LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membership-transfer-20261107 direction-search --config configs/research_opening_proxy.json --events artifacts/fixed-ten/sources/events.csv --candidate-set opening-proxy --opening-noise-bps 50 --opening-missing-fraction .1 --opening-seed 17 --sector-history artifacts/sector-context-research-20261107/sector_prices.csv --flow-history artifacts/institutional-flow-research-20261108/institutional_history.csv --flow-lag-sessions 2 --selection-policy pooled_brier --membership artifacts/current-membership/20261107/membership.json --mode preopen --overseas-window --taifex-history artifacts/taifex-night-research-20261107/futures_selected_2017_2026.csv --taifex-exposure
+```
+
+收件假設、種子、誤差及缺報率寫入來源紀錄、協定與模型版本。研究引擎只要看到這類欄位就必須驗證合成契約，即使呼叫端傳入`historical`也會強制改為`synthetic`；沒有契約會拒絕執行。CLI也拒絕在其他候選組使用代理參數，或用盤後模式執行代理研究。這條路徑不加入正式預測工作流程。
+
+本輪於擬合前固定六種情境及17／29／43三個種子：無參考價、零誤差參考價、25／50／100基點誤差，以及50基點誤差加10%缺報。共18組只研究下一日原有收盤相對前收盤方向，保留完整50檔、每日分母與全部失敗結果；另用同一預測評估開盤至收盤方向作為對照，不能當成該目標的獨立選模成果，也不延伸宣稱5／20日表現。
+
+全部18組與核對已完成，前三個原始控制候選的逐折校準分數完全相同。相對於無參考價的同種子控制，參考假設改善了平均表現，但即使零誤差情境，固定十檔、完整50檔與原資訊就緒範圍仍未達75%。全部原始稽核由預測列和完整日期重算並完全相符；完整歷史的上市前日期、缺資料與未解答案沒有被刪除。實際數字、配對區間及所有種子結果只存本機。理想化情境不是數學效能上限，亦不能證明任何可取得報價具有這種精確度、時效或前瞻訊息。

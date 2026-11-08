@@ -2,6 +2,9 @@
 
 ## Unreleased — 2026-11-08
 
+- Added an isolated synthetic opening-reference study with independent keyed noise/missingness, forced synthetic evidence, unchanged historical feature profiles and versioned counterfactual assumptions.
+- Added a five-candidate opening-proxy comparison and one-day configuration, preserving daily fallback predictions and fixed-ten-only selection.
+- Completed all eighteen preregistered opening-proxy scenarios/seeds with exact calibration controls, full-calendar audits and paired diagnostics; even the ideal reference assumption remains below the target.
 - Added own-stock foreign-main and investment-trust imbalance, activity and trailing means under an explicit market-session receipt lag, with daily expiry and missing/zero distinction.
 - Added an isolated forty-two-candidate flow comparison preserving all original inputs; receipt contracts enter research protocols/model versions and synthetic flow controls the experiment's evidence kind.
 - Completed the three delayed-flow comparisons and a preregistered same-day pooled-Brier sensitivity; paired controls match exactly and neither timing assumption reaches the full-coverage direction target.
