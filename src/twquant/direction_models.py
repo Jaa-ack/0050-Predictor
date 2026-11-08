@@ -84,6 +84,63 @@ class _FactorDirectionModel:
         return np.column_stack([1 - p, p])
 
 
+@dataclass
+class _OpeningDirectionModel:
+    remaining: object
+    columns: list[str]
+    scale: float
+    training_details: dict
+    volatility_default: float | None = None
+    volatility_floor: float | None = None
+
+    @property
+    def classes_(self):
+        return np.array([0, 1])
+
+    def predict_proba(self, frame):
+        gap = _numeric(frame, ['f_openref_log_gap']).iloc[:, 0].fillna(0.).to_numpy()
+        center = gap + self.remaining.predict(_numeric(frame, self.columns))
+        denominator = self.scale
+        if self.volatility_default is not None:
+            denominator = self.scale * _decision_volatility(frame, self.volatility_default, self.volatility_floor).to_numpy()
+        p = ndtr(center / denominator)
+        return np.column_stack([1 - p, p])
+
+
+def _fit_opening_residual(candidate, train, columns, horizon, seed):
+    if 'f_openref_log_gap' not in columns or not _numeric(train, ['f_openref_log_gap']).notna().any().any():
+        raise DirectionCandidateUnavailable('opening_reference_training_missing')
+    gap = _numeric(train, ['f_openref_log_gap']).iloc[:, 0]
+    target = train[f'target_{horizon}'] - gap.fillna(0.)
+    if candidate.model.endswith('_ridge'):
+        estimator = Ridge(alpha=10.)
+    else:
+        estimator = HistGradientBoostingRegressor(max_iter=100, max_leaf_nodes=7,
+            min_samples_leaf=40, learning_rate=.05, l2_regularization=10., random_state=seed)
+    volatility_default, volatility_floor = None, None
+    if '_vol_' in candidate.model:
+        if 'f_volatility_20' not in columns:
+            raise DirectionCandidateUnavailable('decision_time_volatility_missing')
+        values = _numeric(train, ['f_volatility_20']).iloc[:, 0]
+        known = values.where(values.gt(0)).dropna()
+        if known.empty:
+            raise DirectionCandidateUnavailable('decision_time_volatility_missing')
+        volatility_default = float(known.median())
+        volatility_floor = max(volatility_default * .1, 1e-4)
+    model = _pipeline(estimator).fit(_numeric(train, columns), target)
+    error = target.to_numpy() - model.predict(_numeric(train, columns))
+    if volatility_default is not None:
+        error = error / _decision_volatility(train, volatility_default, volatility_floor).to_numpy()
+    scale = max(float(np.sqrt(np.mean(error ** 2))), 1e-8)
+    details = dict(method='assumed_opening_gap_plus_shared_remaining_log_return',
+        gap_feature='f_openref_log_gap', gap_missing_fallback=0.,
+        gap_missing_training_rows=int(gap.isna().sum()), residual_training_rows=len(train),
+        probability_method='training_residual_volatility_scaled_gaussian_approximation' if volatility_default is not None else 'training_residual_gaussian_approximation',
+        probability_scale=scale, volatility_default=volatility_default, volatility_floor=volatility_floor,
+        limitation='Counterfactual raw opening reference, not archived preopen information. Raw corporate-action effects remain. Training residual scale is not calibrated uncertainty.')
+    return _OpeningDirectionModel(model, columns, scale, details, volatility_default, volatility_floor), train
+
+
 def fit_direction_model(candidate, train, columns, horizon, seed):
     """Fit only the supplied mature training rows and return rows actually used.
 
@@ -98,6 +155,8 @@ def fit_direction_model(candidate, train, columns, horizon, seed):
     if candidate.window_dates is not None:
         dates = pd.DatetimeIndex(train.date.unique()).sort_values()
         train = train.loc[train.date >= dates[-min(candidate.window_dates, len(dates))]]
+    if candidate.model.startswith('opening_residual_'):
+        return _fit_opening_residual(candidate, train, columns, horizon, seed)
     if not candidate.model.startswith('factor_'):
         labels = train[f'target_{horizon}'].gt(0).to_numpy(dtype=int)
         model = _classifier(candidate, seed, labels).fit(_numeric(train, columns), labels)

@@ -25,7 +25,8 @@ class DirectionCandidate:
 
     def __post_init__(self):
         if self.model not in {'prior', 'logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist',
-                              'factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist'}:
+                              'factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist',
+                              'opening_residual_ridge', 'opening_residual_hist', 'opening_residual_vol_ridge', 'opening_residual_vol_hist'}:
             raise ValueError('Unknown direction model')
         if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path', 'portable_sector', 'portable_flow', 'portable_opening'}:
             raise ValueError('Unknown direction feature profile')
@@ -78,6 +79,11 @@ OPENING_CANDIDATES = (
     DirectionCandidate('logistic', 'portable_flow', 756),
     DirectionCandidate('logistic', 'portable_opening', 756),
     DirectionCandidate('hist', 'portable_opening', 756),
+)
+OPENING_RESIDUAL_CANDIDATES = OPENING_CANDIDATES + tuple(
+    DirectionCandidate(model, 'portable_opening', 756)
+    for model in ('opening_residual_ridge', 'opening_residual_hist',
+                  'opening_residual_vol_ridge', 'opening_residual_vol_hist')
 )
 THRESHOLDS = (.4, .45, .5, .55, .6)
 SELECTION_POLICIES = ('worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier')

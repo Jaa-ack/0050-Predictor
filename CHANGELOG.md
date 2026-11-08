@@ -2,6 +2,9 @@
 
 ## Unreleased — 2026-11-08
 
+- Added four shared opening-residual return heads combining the assumed gap with a training-only remaining-return distribution, including volatility-scaled scores and explicit missing-reference handling.
+- Added a nine-candidate synthetic residual comparison preserving the original five opening candidates, the information assumptions and the full-coverage audit.
+- Completed all eighteen residual comparisons with exact original-candidate calibrations and reconstructed selected-model training statistics; results remain below the target without consistent weak-stock gains.
 - Added an isolated synthetic opening-reference study with independent keyed noise/missingness, forced synthetic evidence, unchanged historical feature profiles and versioned counterfactual assumptions.
 - Added a five-candidate opening-proxy comparison and one-day configuration, preserving daily fallback predictions and fixed-ten-only selection.
 - Completed all eighteen preregistered opening-proxy scenarios/seeds with exact calibration controls, full-calendar audits and paired diagnostics; even the ideal reference assumption remains below the target.
