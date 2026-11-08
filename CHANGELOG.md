@@ -2,6 +2,10 @@
 
 ## Unreleased — 2026-11-08
 
+- Added past-known own-stock US-sector response coefficients and current-window interactions with paired-observation minima, causal clock alignment and unchanged original feature profiles.
+- Added a separate fifty-four-candidate response comparison with versioned contracts and fixed-ten-only shared-model selection.
+- Added opt-in trusted-local reference pinning and reuse, requiring exact inputs, recipes, numerical environments, artifact hashes and selected-model probability replays before appending freshly fitted candidates.
+- Completed four response comparisons with exact original48 calibration controls and a full fresh54-candidate fold replay; independently recomputed audits retain the unmet daily full-coverage target.
 - Added own-stock financing and margin-short flow, position-change and capacity ratios with explicit21:00 receipt lags, daily expiry and observed-zero/missing-report distinctions.
 - Added a separate forty-eight-candidate margin comparison preserving the original42 inputs, with receipt/evidence contracts in research provenance and model versions.
 - Completed the delayed-margin comparisons and preregistered same-day sensitivity with exact original-candidate calibration controls; the full-coverage target remains unmet.

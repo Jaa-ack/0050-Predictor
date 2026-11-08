@@ -114,6 +114,10 @@ def parser():
     compare.add_argument("--holdout-dates", type=int, default=126)
     direction = subs.add_parser('direction-search', help='巢狀時間比較方向模型，檢查固定十檔全部252種五檔組合；不開封保留期')
     direction.add_argument('--config', type=Path)
+    direction.add_argument('--reference-run', type=Path,
+                           help='可信本機研究目錄；驗證完整輸入與配方後重用已固定模型及校準分數')
+    direction.add_argument('--pin-reference', action='store_true',
+                           help='只重播核對並固定reference-run的選中模型；不搜尋、不覆寫原結果')
     direction.add_argument('--events', type=Path)
     direction.add_argument('--mode', choices=['postclose', 'preopen'], default='postclose',
                            help='盤後20:00或下一實際市場日盤前08:30；兩者維持同一收盤價錨點')
@@ -141,8 +145,8 @@ def parser():
                            help='僅opening-proxy／opening-residual：依股票及日期固定的種子，預設17')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
-    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path', 'sector', 'flow', 'margin', 'opening-proxy', 'opening-residual'], default='base',
-                           help='base八組；factor十組；market十六組；exposure二十四組；path三十組；sector三十六組；flow四十二組；margin四十八組；opening-proxy五組；opening-residual九組合成參考假設')
+    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path', 'sector', 'flow', 'margin', 'response', 'opening-proxy', 'opening-residual'], default='base',
+                           help='base八組；factor十組；market十六組；exposure二十四組；path三十組；sector三十六組；flow四十二組；margin四十八組；response五十四組；opening-proxy五組；opening-residual九組合成參考假設')
     direction.add_argument('--selection-policy', choices=['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'],
                            default='worst_stock_accuracy', help='Brier規則固定0.5門檻；只以校準期選模')
     simulation = subs.add_parser('direction-simulate', help='模擬假設資訊量、延遲及缺漏；合成結果不是真實預測證據')
@@ -268,7 +272,7 @@ def execute(args):
         return dict(selected_profile=result["selected_profile"], scores=result["scores"], holdout_opened=False)
     if args.command in {'direction-search', 'direction-simulate'}:
         import uuid
-        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, SECTOR_CANDIDATES, FLOW_CANDIDATES, MARGIN_CANDIDATES, OPENING_CANDIDATES, OPENING_RESIDUAL_CANDIDATES, search_direction_models, simulate_information_scenarios
+        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, SECTOR_CANDIDATES, FLOW_CANDIDATES, MARGIN_CANDIDATES, RESPONSE_CANDIDATES, OPENING_CANDIDATES, OPENING_RESIDUAL_CANDIDATES, search_direction_models, simulate_information_scenarios
         from .direction_audit import load_membership_snapshot
         from .features import build_features
         from .workflows import data_kind, load_events
@@ -279,28 +283,30 @@ def execute(args):
                 seeds=tuple(int(s.strip()) for s in args.seeds.split(',')), output=folder)
             return dict(run_id=run_id, report=str((folder / 'report.json').relative_to(root)),
                 evidence_kind='synthetic', scenarios=report['scenarios'], real_world_target_verified=False)
+        if args.pin_reference and args.reference_run is None:
+            raise ValueError('--pin-reference requires --reference-run')
         if args.taifex_exposure and not args.taifex_history:
             raise ValueError('--taifex-exposure requires --taifex-history')
         opening_proxy = args.candidate_set in {'opening-proxy', 'opening-residual'}
-        if args.candidate_set == 'margin' and args.mode != 'preopen':
-            raise ValueError('margin requires --mode preopen for its21:00 receipt contract')
+        if args.candidate_set in {'margin','response'} and args.mode != 'preopen':
+            raise ValueError('margin/response requires --mode preopen for its21:00 receipt contract')
         if opening_proxy and args.mode != 'preopen':
             raise ValueError('Opening proxy studies require --mode preopen and are always synthetic')
         if not opening_proxy and any(v is not None for v in (args.opening_noise_bps, args.opening_missing_fraction, args.opening_seed)):
             raise ValueError('Opening simulation options require --candidate-set opening-proxy or opening-residual')
-        if (args.candidate_set in {'sector', 'flow', 'margin', 'opening-proxy', 'opening-residual'}) != bool(args.sector_history):
+        if (args.candidate_set in {'sector', 'flow', 'margin', 'response', 'opening-proxy', 'opening-residual'}) != bool(args.sector_history):
             raise ValueError('--sector-history is required only with sector, flow, margin or an opening study')
-        if (args.candidate_set in {'flow', 'margin', 'opening-proxy', 'opening-residual'}) != bool(args.flow_history):
+        if (args.candidate_set in {'flow', 'margin', 'response', 'opening-proxy', 'opening-residual'}) != bool(args.flow_history):
             raise ValueError('--flow-history is required only with flow, margin or an opening study')
-        if (args.candidate_set == 'margin') != bool(args.margin_history):
-            raise ValueError('--margin-history is required only with --candidate-set margin')
+        if (args.candidate_set in {'margin','response'}) != bool(args.margin_history):
+            raise ValueError('--margin-history is required only with --candidate-set margin or response')
         store = PriceStore(root / 'data')
         membership = load_membership_snapshot(args.membership) if args.membership else None
         config = config_from(args.config)
         if membership is not None:
             external = [t for t in membership['tickers'] if t not in TRAINING_TICKERS]
             config = replace(config, evaluation_tickers=tuple(dict.fromkeys([*config.evaluation_tickers, *external])))
-            write_json(folder / 'membership_snapshot.json', membership)
+            if not args.pin_reference:write_json(folder / 'membership_snapshot.json', membership)
         prices, events = store.read_prices(), load_events(args.events)
         taifex_sha = None
         if args.taifex_history:
@@ -335,7 +341,7 @@ def execute(args):
         if args.taifex_exposure:
             from .taifex_exposure import add_taifex_exposure_features
             frame = add_taifex_exposure_features(frame, history)
-        price_path = args.candidate_set in {'path', 'sector', 'flow', 'margin', 'opening-proxy', 'opening-residual'}
+        price_path = args.candidate_set in {'path', 'sector', 'flow', 'margin', 'response', 'opening-proxy', 'opening-residual'}
         if price_path:
             from .price_path import add_price_path_features
             frame = add_price_path_features(frame)
@@ -362,6 +368,9 @@ def execute(args):
             margin_sha = hashlib.sha256(margin_bytes).hexdigest()
             margin_sources = sorted(margin_history.source.unique().tolist())
             if data_kind(margin_history) == 'synthetic': kind = 'synthetic'
+        if args.candidate_set=='response':
+            from .sector_response import add_sector_response_features
+            frame=add_sector_response_features(frame)
         if opening_proxy:
             from .opening_proxy import add_opening_reference_proxy
             frame = add_opening_reference_proxy(frame,
@@ -370,6 +379,7 @@ def execute(args):
                 seed=args.opening_seed if args.opening_seed is not None else 17)
             kind = 'synthetic'
         provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind, mode=args.mode,
+            sector_response_contract=frame.attrs.get('sector_response_contract'),
             margin_history_sha256=margin_sha, margin_sources=margin_sources,
             margin_receipt_contract=frame.attrs.get('margin_receipt_contract'),
             opening_proxy_contract=frame.attrs.get('opening_proxy_contract'),
@@ -387,17 +397,23 @@ def execute(args):
             external_expiring_features=(sorted(events.loc[events.expires_at.notna(), 'feature'].unique().tolist())
                 if events is not None and 'expires_at' in events else []),
             limitation='Historical receipt timestamps and latest adjusted prices do not establish original point-in-time data.')
+        if args.pin_reference:
+            from .direction_reference import pin_direction_reference
+            pinned=pin_direction_reference(frame,config,args.reference_run)
+            return dict(reference_candidate_count=pinned['reference_candidate_count'],
+                selected_models_replayed_exactly=pinned['selected_models_replayed_exactly'],
+                pinned_models=len(pinned['models']),real_world_target_verified=False)
         write_json(folder / 'data_provenance.json', provenance)
         result = search_direction_models(frame, config,
             holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder,
             candidates={'base': DEFAULT_CANDIDATES, 'factor': FACTOR_CANDIDATES,
                         'market': MARKET_CANDIDATES, 'exposure': EXPOSURE_CANDIDATES,
                         'path': PATH_CANDIDATES, 'sector': SECTOR_CANDIDATES,
-                        'flow': FLOW_CANDIDATES, 'margin': MARGIN_CANDIDATES, 'opening-proxy': OPENING_CANDIDATES,
+                        'flow': FLOW_CANDIDATES, 'margin': MARGIN_CANDIDATES, 'response': RESPONSE_CANDIDATES, 'opening-proxy': OPENING_CANDIDATES,
                         'opening-residual': OPENING_RESIDUAL_CANDIDATES}[args.candidate_set],
             selection_policy=args.selection_policy, mode=args.mode,
             constituents=membership['tickers'] if membership is not None else None,
-            membership_as_of=membership['as_of'] if membership is not None else None)
+            membership_as_of=membership['as_of'] if membership is not None else None,reference_run=args.reference_run)
         fields_to_report = ('overall_accuracy', 'minimum_stock_accuracy', 'worst_five_accuracy', 'coverage', 'empirical_target_met')
         summary = dict(run_id=run_id, report=str((folder / 'report.json').relative_to(root)),
             evidence_kind=kind, holdout_opened=False, real_world_target_verified=False,

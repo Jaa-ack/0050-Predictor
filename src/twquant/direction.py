@@ -28,7 +28,7 @@ class DirectionCandidate:
                               'factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist',
                               'opening_residual_ridge', 'opening_residual_hist', 'opening_residual_vol_ridge', 'opening_residual_vol_hist'}:
             raise ValueError('Unknown direction model')
-        if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path', 'portable_sector', 'portable_flow', 'portable_opening', 'portable_margin'}:
+        if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path', 'portable_sector', 'portable_flow', 'portable_opening', 'portable_margin', 'portable_response'}:
             raise ValueError('Unknown direction feature profile')
         if self.window_dates is not None and self.window_dates < 10:
             raise ValueError('Direction training window needs at least ten dates')
@@ -77,6 +77,10 @@ MARGIN_CANDIDATES = FLOW_CANDIDATES + tuple(
     DirectionCandidate(model, 'portable_margin', 756)
     for model in ('logistic', 'hist', 'extra_trees', 'random_forest', 'factor_beta_ridge', 'factor_beta_vol_ridge')
 )
+RESPONSE_CANDIDATES = MARGIN_CANDIDATES + tuple(
+    DirectionCandidate(model, 'portable_response', 756)
+    for model in ('logistic', 'hist', 'extra_trees', 'random_forest', 'factor_beta_ridge', 'factor_beta_vol_ridge')
+)
 OPENING_CANDIDATES = (
     DirectionCandidate('prior'),
     DirectionCandidate('logistic', 'portable_price', 756),
@@ -123,7 +127,7 @@ def _selection_key(metrics, threshold, policy):
 def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, holdout_dates=126,
                             evidence_kind='unknown', bootstrap_samples=500, output=None,
                             selection_policy='worst_stock_accuracy', constituents=None, membership_as_of=None,
-                            mode='postclose'):
+                            mode='postclose',reference_run=None):
     """Nested chronological selection of a shared direction model per fold.
 
     Candidate transforms and classifiers fit training rows only. The subsequent
@@ -173,6 +177,13 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
             raise ValueError('Synthetic opening proxy requires its preopen contract')
         opening_contract = dict(opening_contract)
         evidence_kind = 'synthetic'
+    response_features=sorted(c for c in get_feature_columns(frame) if c.startswith('f_response_'))
+    response_contract=frame.attrs.get('sector_response_contract')
+    if response_features or response_contract is not None:
+        from .sector_response import RESPONSE_CONTRACT
+        if response_contract!=RESPONSE_CONTRACT or mode!='preopen':
+            raise ValueError('Sector response requires its declared preopen contract')
+        response_contract=dict(response_contract)
     if config.objective != 'close_return':
         raise ValueError('Direction goal requires the close_return objective')
     if not candidates or len({c.name for c in candidates}) != len(candidates):
@@ -213,6 +224,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
     for h in config.horizons:
         split_frame.loc[split_frame[f'label_end_{h}'].ge(start), f'label_end_{h}'] = pd.NaT
     protocol = dict(config=asdict(config), candidates=[asdict(c) for c in candidates],
+        sector_response_features=response_features,sector_response_contract=response_contract,
         margin_features=margin_features, margin_receipt_contract=margin_contract,
         opening_proxy_features=opening_features, opening_proxy_contract=opening_contract,
         institutional_flow_features=flow_features, flow_receipt_contract=flow_contract,
@@ -239,6 +251,11 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
     if constituents is not None:
         protocol['constituent_audit'] = dict(tickers=list(constituents), membership_as_of=membership_as_of,
             selection_scope='fixed_ten_only', historical_membership_verified=False)
+    reference=None
+    if reference_run is not None:
+        from .direction_reference import DirectionReference
+        reference=DirectionReference(reference_run,frame,protocol)
+        protocol['reference']=reference.info
     if output is not None:
         output = Path(output)
         if (output / 'protocol.json').exists():
@@ -252,7 +269,9 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
             winner, winner_key, candidate_scores = None, None, []
             # Parallelism is bounded to avoid native numerical oversubscription.
             with threadpool_limits(limits=1):
-                for candidate in candidates:
+                if reference is not None:
+                    winner,winner_key,candidate_scores=reference.fold(horizon,fold,train,calibration)
+                for candidate in candidates[reference.count if reference is not None else 0:]:
                     columns = select_feature_columns(train, candidate.feature_profile)
                     try:
                         model, subset = fit_direction_model(candidate, train, columns, horizon, config.random_state)
@@ -285,7 +304,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
                 mode=mode,
                 source_sha256=protocol['source_sha256'],
                 flow_receipt_contract=flow_contract, margin_receipt_contract=margin_contract,
-                opening_proxy_contract=opening_contract), sort_keys=True).encode()
+                opening_proxy_contract=opening_contract,sector_response_contract=response_contract), sort_keys=True).encode()
             model_version = hashlib.sha256(pd.util.hash_pandas_object(
                 subset[['ticker', 'date', *columns, f'target_{horizon}']], index=False).to_numpy().tobytes()
                 + pd.util.hash_pandas_object(calibration[['ticker', 'date', *columns, f'target_{horizon}']],

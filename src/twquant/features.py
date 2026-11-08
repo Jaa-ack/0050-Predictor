@@ -47,21 +47,22 @@ def get_feature_columns(frame: pd.DataFrame) -> list[str]:
 def select_feature_columns(frame,profile='legacy'):
     columns=get_feature_columns(frame)
     if profile=='legacy':return columns
-    if profile not in {'portable_price','portable_market','portable_all','portable_path','portable_sector','portable_flow','portable_opening','portable_margin'}:
+    if profile not in {'portable_price','portable_market','portable_all','portable_path','portable_sector','portable_flow','portable_opening','portable_margin','portable_response'}:
         raise ValueError('Unknown feature profile')
     result=[]
     for column in columns:
         if column.startswith('f_openref_') and profile != 'portable_opening':continue
-        if column.startswith('f_margin_') and profile != 'portable_margin':continue
-        if column.startswith('f_flow_') and profile not in {'portable_flow','portable_opening','portable_margin'}:continue
-        if column.startswith('f_path_') and profile not in {'portable_path','portable_sector','portable_flow','portable_opening','portable_margin'}:continue
-        if column.startswith('f_ext_us_sector_') and profile not in {'portable_sector','portable_flow','portable_opening','portable_margin'}:continue
+        if column.startswith('f_response_') and profile != 'portable_response':continue
+        if column.startswith('f_margin_') and profile not in {'portable_margin','portable_response'}:continue
+        if column.startswith('f_flow_') and profile not in {'portable_flow','portable_opening','portable_margin','portable_response'}:continue
+        if column.startswith('f_path_') and profile not in {'portable_path','portable_sector','portable_flow','portable_opening','portable_margin','portable_response'}:continue
+        if column.startswith('f_ext_us_sector_') and profile not in {'portable_sector','portable_flow','portable_opening','portable_margin','portable_response'}:continue
         if column in {'f_log_volume','f_amihud_20'}:continue
         if column.startswith('f_ext_'):
             if profile=='portable_price':continue
             if '_close' in column:continue
             if profile in {'portable_market','portable_path'} and not column.startswith(('f_ext_fmp_', 'f_ext_taifex_')):continue
-            if profile in {'portable_sector','portable_flow','portable_opening','portable_margin'} and not column.startswith(('f_ext_fmp_','f_ext_taifex_','f_ext_us_sector_')):continue
+            if profile in {'portable_sector','portable_flow','portable_opening','portable_margin','portable_response'} and not column.startswith(('f_ext_fmp_','f_ext_taifex_','f_ext_us_sector_')):continue
         result.append(column)
     return result
 
