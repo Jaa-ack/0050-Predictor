@@ -320,3 +320,25 @@ LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membershi
 本輪於擬合前凍結相同六種情境、三個代理種子、九候選與單一`pooled_brier`規則，共18組。資訊、原有答案、完整50檔、0.5門檻、每日日期分母與126日保留期不變；只改模型的報酬參數化方式，不把上一輪理想化參考結果當成效能上限。
 
 全部18組與核對已完成。原五候選的逐折校準分數完全相同，已選剩餘模型的訓練統計也重新擬合核對一致；無參考價時，新增候選全部不可用，原預測保持相同。固定十檔、完整50檔及原資訊就緒診斷仍未達75%，弱股未見一致改善。所有新增模型、退步情境、配對差異、未解答案與完整日期分母均保存在本機，沒有開封保留期或更改正式模型。
+
+## 第十五輪：融資融券部位與流向
+
+`--candidate-set margin --mode preopen --margin-history PATH`沿用全部42組法人控制，再加六組756日`portable_margin`候選：logistic、hist、extra_trees、random_forest、factor_beta_ridge與factor_beta_vol_ridge。仍須提供原`--sector-history`與`--flow-history`，原七種portable特徵組全部排除新增的`f_margin_`欄位。`portable_margin`是`portable_flow`加18個融資融券比率，不接收任何合成開盤參考價。
+
+CSV須含`date,stock_id,source`、兩組`MarginPurchase`／`ShortSale`的`Buy,Sell,CashRepayment,Limit,TodayBalance,YesterdayBalance`及`OffsetLoanAndShort`。股票代碼以字串讀入並保留0050前導零；來源為`finmind_historical_margin_short`或`synthetic`，日期須為單一市場日，股票／日期鍵唯一，數量有限且非負。原始註記、實際取得時間與修訂界線保留在本機來源快照。
+
+融資以買減賣、融券以賣減買，除以同類買賣總量；每組再產生完整5／20個主要市場日的不平衡平均、是否有買賣、今日餘額除以正限額、`(今日-昨日)/(今日+昨日)`、償還占買賣加償還總量、限額是否為正及完整20日餘額變化平均。明確零買賣為中性零，沒有報告維持未知並中斷滾動平均；零限額的利用率保持未知。正限額旗標不代表當日交易許可，融券不混稱借券，也不跨用未核實單位的股票成交股數。
+
+[FinMind文件](https://finmind.github.io/tutor/TaiwanMarket/Chip/)列示平日21:00更新、實際完成依API為準。本輪主比較假設延遲兩個主要市場日，於21:00收件，有效至下一已觀測市場日08:30含截止瞬間。`--margin-lag-sessions 0`是另一個事前凍結的同日21:00敏感度，只採`pooled_brier`；主比較保留三種原有規則。兩者都不是原始歷史收件或定案證據。
+
+[證交所說明](https://www.twse.com.tw/exchangeReport/MI_MARGN?date=&response=html&selectType=MS)指出資料彙整受授信機構傳輸與調帳影響，次日仍可能修正，後續表的前日餘額可能反映較完整的結果。因此不強行修補今日／昨日餘額恆等式，也不將較長延遲自動視為已核實的原始PIT。
+
+```bash
+LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membership-transfer-20261107 direction-search --config configs/research_direction.json --events artifacts/fixed-ten/sources/events.csv --candidate-set margin --margin-history artifacts/margin-research-20261108/margin_history.csv --margin-lag-sessions 2 --sector-history artifacts/sector-context-research-20261107/sector_prices.csv --flow-history artifacts/institutional-flow-research-20261108/institutional_history.csv --flow-lag-sessions 2 --selection-policy pooled_brier --membership artifacts/current-membership/20261107/membership.json --mode preopen --overseas-window --taifex-history artifacts/taifex-night-research-20261107/futures_selected_2017_2026.csv --taifex-exposure
+```
+
+收件契約、資料雜湊與新增欄位寫入協定、來源紀錄及模型版本；缺契約或時鐘不符會拒絕執行。合成融資融券來源會使整個實驗標為合成，即使直接呼叫研究引擎也不能覆寫成歷史證據。固定十檔唯一用於擬合、校準、選擇及同儕；外部股票只提供自己的已知機械特徵，全部50檔沿用同模型與門檻，保留完整日期、缺漏、弱股、原資訊就緒診斷與126日保留期。
+
+兩日延遲三規則與事前凍結的同日單規則均已完成。原42候選每折校準分數完全相同，原十檔與50檔稽核均由完整預測列及日期重算且相符；新增比率沒有帶來一致優勢，所有期間／原資訊就緒範圍仍未達75%。同日配對差異及全部退步情境只存本機，沒有開封保留期或更改正式模型。
+
+另以[證交所每日市場成交資訊](https://www.twse.com.tw/zh/trading/historical/fmtqik.html)獨立核對全段歷史的市場日期，與原固定十檔／0050日曆完全一致。未解報價亦與官方個股月報逐欄核對：有日期列不等於有有效OHLC或收盤價，沒有以空白列補造行情、推定停止交易原因或將缺值算成命中。原始月報、檢查紀錄及完整實際數字都保留於忽略目錄，沒有回填本輪資料。事後日曆一致並非歷史盤前交付或未來交易日曆已核實的證明。

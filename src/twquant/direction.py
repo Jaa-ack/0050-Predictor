@@ -28,7 +28,7 @@ class DirectionCandidate:
                               'factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist',
                               'opening_residual_ridge', 'opening_residual_hist', 'opening_residual_vol_ridge', 'opening_residual_vol_hist'}:
             raise ValueError('Unknown direction model')
-        if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path', 'portable_sector', 'portable_flow', 'portable_opening'}:
+        if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path', 'portable_sector', 'portable_flow', 'portable_opening', 'portable_margin'}:
             raise ValueError('Unknown direction feature profile')
         if self.window_dates is not None and self.window_dates < 10:
             raise ValueError('Direction training window needs at least ten dates')
@@ -71,6 +71,10 @@ SECTOR_CANDIDATES = PATH_CANDIDATES + tuple(
 )
 FLOW_CANDIDATES = SECTOR_CANDIDATES + tuple(
     DirectionCandidate(model, 'portable_flow', 756)
+    for model in ('logistic', 'hist', 'extra_trees', 'random_forest', 'factor_beta_ridge', 'factor_beta_vol_ridge')
+)
+MARGIN_CANDIDATES = FLOW_CANDIDATES + tuple(
+    DirectionCandidate(model, 'portable_margin', 756)
     for model in ('logistic', 'hist', 'extra_trees', 'random_forest', 'factor_beta_ridge', 'factor_beta_vol_ridge')
 )
 OPENING_CANDIDATES = (
@@ -142,6 +146,20 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
             or not flow_contract.get('assumed_receipt') or not flow_contract.get('expiry')):
         raise ValueError('Institutional flow requires its declared receipt contract')
     flow_contract = dict(flow_contract) if flow_contract is not None else None
+    margin_features = sorted(c for c in get_feature_columns(frame) if c.startswith('f_margin_'))
+    margin_contract = frame.attrs.get('margin_receipt_contract')
+    if margin_features or margin_contract is not None:
+        if (not isinstance(margin_contract, dict)
+                or isinstance(margin_contract.get('lag_sessions'), bool)
+                or not isinstance(margin_contract.get('lag_sessions'), int)
+                or not 0 <= margin_contract['lag_sessions'] <= 5
+                or margin_contract.get('original_pit_verified') is not False
+                or margin_contract.get('evidence_kind') not in {'historical', 'synthetic'}
+                or margin_contract.get('assumed_receipt') != '21:00 Asia/Taipei on lagged primary session'
+                or not margin_contract.get('expiry') or mode != 'preopen'):
+            raise ValueError('Margin requires its preopen receipt contract')
+        margin_contract = dict(margin_contract)
+        if margin_contract['evidence_kind'] == 'synthetic': evidence_kind = 'synthetic'
     opening_features = sorted(c for c in get_feature_columns(frame) if c.startswith('f_openref_'))
     opening_contract = frame.attrs.get('opening_proxy_contract')
     if opening_features or opening_contract is not None:
@@ -195,6 +213,7 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
     for h in config.horizons:
         split_frame.loc[split_frame[f'label_end_{h}'].ge(start), f'label_end_{h}'] = pd.NaT
     protocol = dict(config=asdict(config), candidates=[asdict(c) for c in candidates],
+        margin_features=margin_features, margin_receipt_contract=margin_contract,
         opening_proxy_features=opening_features, opening_proxy_contract=opening_contract,
         institutional_flow_features=flow_features, flow_receipt_contract=flow_contract,
         us_sector_features=sorted(c for c in get_feature_columns(fixed) if c.startswith('f_ext_us_sector_')),
@@ -265,7 +284,8 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
                 selection_policy=selection_policy,
                 mode=mode,
                 source_sha256=protocol['source_sha256'],
-                flow_receipt_contract=flow_contract, opening_proxy_contract=opening_contract), sort_keys=True).encode()
+                flow_receipt_contract=flow_contract, margin_receipt_contract=margin_contract,
+                opening_proxy_contract=opening_contract), sort_keys=True).encode()
             model_version = hashlib.sha256(pd.util.hash_pandas_object(
                 subset[['ticker', 'date', *columns, f'target_{horizon}']], index=False).to_numpy().tobytes()
                 + pd.util.hash_pandas_object(calibration[['ticker', 'date', *columns, f'target_{horizon}']],

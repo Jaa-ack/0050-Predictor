@@ -2,6 +2,10 @@
 
 ## Unreleased — 2026-11-08
 
+- Added own-stock financing and margin-short flow, position-change and capacity ratios with explicit21:00 receipt lags, daily expiry and observed-zero/missing-report distinctions.
+- Added a separate forty-eight-candidate margin comparison preserving the original42 inputs, with receipt/evidence contracts in research provenance and model versions.
+- Completed the delayed-margin comparisons and preregistered same-day sensitivity with exact original-candidate calibration controls; the full-coverage target remains unmet.
+- Independently verified the historical session calendar against official monthly records and checked unresolved quotes without inventing prices or changing the frozen experiments.
 - Added four shared opening-residual return heads combining the assumed gap with a training-only remaining-return distribution, including volatility-scaled scores and explicit missing-reference handling.
 - Added a nine-candidate synthetic residual comparison preserving the original five opening candidates, the information assumptions and the full-coverage audit.
 - Completed all eighteen residual comparisons with exact original-candidate calibrations and reconstructed selected-model training statistics; results remain below the target without consistent weak-stock gains.

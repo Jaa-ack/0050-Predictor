@@ -124,11 +124,15 @@ def parser():
     direction.add_argument('--taifex-exposure', action='store_true',
                            help='需歷史檔；加入個股過去60日對日盤期貨的反應及夜盤交互作用，日盤假設20:00可得')
     direction.add_argument('--sector-history', type=Path,
-                           help='sector候選必需；七條含source的正規化海外產業CSV，假設美東17:00收件')
+                           help='sector／flow／margin及開盤研究必需；七條含source的海外產業CSV，假設美東17:00收件')
     direction.add_argument('--flow-history', type=Path,
-                           help='flow候選必需；含source的個股法人分類日CSV，不改寫原實際收件時間')
+                           help='flow／margin及開盤研究必需；含source的個股法人分類日CSV，不改寫原收件')
     direction.add_argument('--flow-lag-sessions', type=int, choices=[0, 2], default=2,
                            help='法人資料20:00假設收件延遲，預設兩個主要市場日；零延遲僅供獨立敏感度研究')
+    direction.add_argument('--margin-history', type=Path,
+                           help='margin候選必需；含source的融資融券日CSV，21:00假設收件，不代表原始PIT')
+    direction.add_argument('--margin-lag-sessions', type=int, choices=[0,2], default=2,
+                           help='融資融券21:00收件假設的主要市場日延遲，預設2；零延遲僅供獨立敏感度')
     direction.add_argument('--opening-noise-bps', type=float, default=None,
                            help='僅opening-proxy／opening-residual：獨立對數雜訊，預設0基點；一律合成可得性假設')
     direction.add_argument('--opening-missing-fraction', type=float, default=None,
@@ -137,8 +141,8 @@ def parser():
                            help='僅opening-proxy／opening-residual：依股票及日期固定的種子，預設17')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
-    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path', 'sector', 'flow', 'opening-proxy', 'opening-residual'], default='base',
-                           help='base八組；factor十組；market十六組；exposure二十四組；path三十組；sector三十六組；flow四十二組；opening-proxy五組；opening-residual九組合成參考假設')
+    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path', 'sector', 'flow', 'margin', 'opening-proxy', 'opening-residual'], default='base',
+                           help='base八組；factor十組；market十六組；exposure二十四組；path三十組；sector三十六組；flow四十二組；margin四十八組；opening-proxy五組；opening-residual九組合成參考假設')
     direction.add_argument('--selection-policy', choices=['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'],
                            default='worst_stock_accuracy', help='Brier規則固定0.5門檻；只以校準期選模')
     simulation = subs.add_parser('direction-simulate', help='模擬假設資訊量、延遲及缺漏；合成結果不是真實預測證據')
@@ -264,7 +268,7 @@ def execute(args):
         return dict(selected_profile=result["selected_profile"], scores=result["scores"], holdout_opened=False)
     if args.command in {'direction-search', 'direction-simulate'}:
         import uuid
-        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, SECTOR_CANDIDATES, FLOW_CANDIDATES, OPENING_CANDIDATES, OPENING_RESIDUAL_CANDIDATES, search_direction_models, simulate_information_scenarios
+        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, SECTOR_CANDIDATES, FLOW_CANDIDATES, MARGIN_CANDIDATES, OPENING_CANDIDATES, OPENING_RESIDUAL_CANDIDATES, search_direction_models, simulate_information_scenarios
         from .direction_audit import load_membership_snapshot
         from .features import build_features
         from .workflows import data_kind, load_events
@@ -278,14 +282,18 @@ def execute(args):
         if args.taifex_exposure and not args.taifex_history:
             raise ValueError('--taifex-exposure requires --taifex-history')
         opening_proxy = args.candidate_set in {'opening-proxy', 'opening-residual'}
+        if args.candidate_set == 'margin' and args.mode != 'preopen':
+            raise ValueError('margin requires --mode preopen for its21:00 receipt contract')
         if opening_proxy and args.mode != 'preopen':
             raise ValueError('Opening proxy studies require --mode preopen and are always synthetic')
         if not opening_proxy and any(v is not None for v in (args.opening_noise_bps, args.opening_missing_fraction, args.opening_seed)):
             raise ValueError('Opening simulation options require --candidate-set opening-proxy or opening-residual')
-        if (args.candidate_set in {'sector', 'flow', 'opening-proxy', 'opening-residual'}) != bool(args.sector_history):
-            raise ValueError('--sector-history is required only with sector, flow or an opening study')
-        if (args.candidate_set in {'flow', 'opening-proxy', 'opening-residual'}) != bool(args.flow_history):
-            raise ValueError('--flow-history is required only with flow or an opening study')
+        if (args.candidate_set in {'sector', 'flow', 'margin', 'opening-proxy', 'opening-residual'}) != bool(args.sector_history):
+            raise ValueError('--sector-history is required only with sector, flow, margin or an opening study')
+        if (args.candidate_set in {'flow', 'margin', 'opening-proxy', 'opening-residual'}) != bool(args.flow_history):
+            raise ValueError('--flow-history is required only with flow, margin or an opening study')
+        if (args.candidate_set == 'margin') != bool(args.margin_history):
+            raise ValueError('--margin-history is required only with --candidate-set margin')
         store = PriceStore(root / 'data')
         membership = load_membership_snapshot(args.membership) if args.membership else None
         config = config_from(args.config)
@@ -327,7 +335,7 @@ def execute(args):
         if args.taifex_exposure:
             from .taifex_exposure import add_taifex_exposure_features
             frame = add_taifex_exposure_features(frame, history)
-        price_path = args.candidate_set in {'path', 'sector', 'flow', 'opening-proxy', 'opening-residual'}
+        price_path = args.candidate_set in {'path', 'sector', 'flow', 'margin', 'opening-proxy', 'opening-residual'}
         if price_path:
             from .price_path import add_price_path_features
             frame = add_price_path_features(frame)
@@ -343,6 +351,17 @@ def execute(args):
             flow_sources = sorted(flow_history.source.unique().tolist())
             if data_kind(flow_history) == 'synthetic':
                 kind = 'synthetic'
+        margin_sha, margin_sources = None, []
+        if args.margin_history:
+            from io import BytesIO
+            import pandas as pd
+            from .margin_flow import add_margin_features
+            margin_bytes = args.margin_history.read_bytes()
+            margin_history = pd.read_csv(BytesIO(margin_bytes), dtype={'stock_id':str})
+            frame = add_margin_features(frame, margin_history, lag_sessions=args.margin_lag_sessions)
+            margin_sha = hashlib.sha256(margin_bytes).hexdigest()
+            margin_sources = sorted(margin_history.source.unique().tolist())
+            if data_kind(margin_history) == 'synthetic': kind = 'synthetic'
         if opening_proxy:
             from .opening_proxy import add_opening_reference_proxy
             frame = add_opening_reference_proxy(frame,
@@ -351,6 +370,8 @@ def execute(args):
                 seed=args.opening_seed if args.opening_seed is not None else 17)
             kind = 'synthetic'
         provenance = dict(snapshot_id=store.latest_snapshot_id(), evidence_kind=kind, mode=args.mode,
+            margin_history_sha256=margin_sha, margin_sources=margin_sources,
+            margin_receipt_contract=frame.attrs.get('margin_receipt_contract'),
             opening_proxy_contract=frame.attrs.get('opening_proxy_contract'),
             flow_history_sha256=flow_sha, flow_sources=flow_sources,
             flow_receipt_contract=frame.attrs.get('flow_receipt_contract'),
@@ -372,7 +393,7 @@ def execute(args):
             candidates={'base': DEFAULT_CANDIDATES, 'factor': FACTOR_CANDIDATES,
                         'market': MARKET_CANDIDATES, 'exposure': EXPOSURE_CANDIDATES,
                         'path': PATH_CANDIDATES, 'sector': SECTOR_CANDIDATES,
-                        'flow': FLOW_CANDIDATES, 'opening-proxy': OPENING_CANDIDATES,
+                        'flow': FLOW_CANDIDATES, 'margin': MARGIN_CANDIDATES, 'opening-proxy': OPENING_CANDIDATES,
                         'opening-residual': OPENING_RESIDUAL_CANDIDATES}[args.candidate_set],
             selection_policy=args.selection_policy, mode=args.mode,
             constituents=membership['tickers'] if membership is not None else None,
@@ -387,6 +408,7 @@ def execute(args):
             price_path=price_path,
             sector_history=bool(args.sector_history),
             flow_history=bool(args.flow_history),
+            margin_history=bool(args.margin_history),
             opening_proxy=opening_proxy,
             by_horizon={h: {k: m[k] for k in fields_to_report} for h, m in result.report['by_horizon'].items()})
         if membership is not None:
