@@ -158,8 +158,8 @@ def parser():
                            help='僅opening-proxy／opening-residual：依股票及日期固定的種子，預設17')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
-    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path', 'sector', 'flow', 'margin', 'response', 'similarity', 'opening-proxy', 'opening-residual'], default='base',
-                           help='base八組；factor十組；market十六組；exposure二十四組；path三十組；sector三十六組；flow四十二組；margin四十八組；response五十四組；similarity七組共享近鄰比較；opening-proxy五組；opening-residual九組合成參考假設')
+    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'fusion', 'exposure', 'path', 'sector', 'flow', 'margin', 'response', 'similarity', 'opening-proxy', 'opening-residual'], default='base',
+                           help='base八組；factor十組；market十六組；fusion五組價格／美股／夜盤融合；exposure二十四組；path三十組；sector三十六組；flow四十二組；margin四十八組；response五十四組；similarity七組共享近鄰比較；opening-proxy五組；opening-residual九組合成參考假設')
     direction.add_argument('--selection-policy', choices=['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'],
                            default='worst_stock_accuracy', help='Brier規則固定0.5門檻；只以校準期選模')
     simulation = subs.add_parser('direction-simulate', help='模擬假設資訊量、延遲及缺漏；合成結果不是真實預測證據')
@@ -374,7 +374,7 @@ def execute(args):
         return dict(selected_profile=result["selected_profile"], scores=result["scores"], holdout_opened=False)
     if args.command in {'direction-search', 'direction-simulate'}:
         import uuid
-        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, SECTOR_CANDIDATES, FLOW_CANDIDATES, MARGIN_CANDIDATES, RESPONSE_CANDIDATES, SIMILARITY_CANDIDATES, OPENING_CANDIDATES, OPENING_RESIDUAL_CANDIDATES, search_direction_models, simulate_information_scenarios
+        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, FUSION_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, SECTOR_CANDIDATES, FLOW_CANDIDATES, MARGIN_CANDIDATES, RESPONSE_CANDIDATES, SIMILARITY_CANDIDATES, OPENING_CANDIDATES, OPENING_RESIDUAL_CANDIDATES, search_direction_models, simulate_information_scenarios
         from .direction_audit import load_membership_snapshot
         from .features import build_features
         from .workflows import data_kind, load_events
@@ -509,7 +509,7 @@ def execute(args):
         result = search_direction_models(frame, config,
             holdout_dates=args.holdout_dates, evidence_kind=kind, output=folder,
             candidates={'base': DEFAULT_CANDIDATES, 'factor': FACTOR_CANDIDATES,
-                        'market': MARKET_CANDIDATES, 'exposure': EXPOSURE_CANDIDATES,
+                        'market': MARKET_CANDIDATES, 'fusion': FUSION_CANDIDATES, 'exposure': EXPOSURE_CANDIDATES,
                         'path': PATH_CANDIDATES, 'sector': SECTOR_CANDIDATES,
                         'flow': FLOW_CANDIDATES, 'margin': MARGIN_CANDIDATES, 'response': RESPONSE_CANDIDATES, 'similarity': SIMILARITY_CANDIDATES, 'opening-proxy': OPENING_CANDIDATES,
                         'opening-residual': OPENING_RESIDUAL_CANDIDATES}[args.candidate_set],

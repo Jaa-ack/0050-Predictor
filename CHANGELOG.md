@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-13 — Source-weighted direction research
+
+- Added shared price, US-market and night-session logistic experts with purged chronological inner weight fitting, convex regularized Brier fusion, equal-weight controls and explicit missing-source prior fallbacks.
+- Exposed an opt-in five-candidate fusion search and recorded all fusion candidates' source weights, actual training dates and maturity diagnostics; bound cached recipes to the fusion implementation without changing default candidates or production models.
+- Added a reproducible six-arm offline study with source ablations, immutable input/source fingerprints, independent complete-grid score checks and matched market-date block diagnostics; retained mixed historical results and failed full-coverage targets locally.
+- Reviewed primary TFT, StockNet, Qlib, FinGPT and stacking implementations and official data documentation; documented phased dynamic-weight, announcement, volatility and prospective-validation work with explicit resource gates.
+- Added a manual keyless official-announcement plan and completed a single local TWSE snapshot and readiness assessment, preserving actual receipt and the shortage of continuous historical evidence. No subscriptions, background schedules, orders or frontend publication were enabled.
+
 ## Unreleased — 2026-11-12 — Bounded first-change direction
 
 - Recorded the user's acceptance of daily fixed-clock forecasts for the first price change within60seconds, retaining timeouts as incorrect and separating this target from clock endpoints.

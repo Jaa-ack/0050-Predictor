@@ -36,6 +36,7 @@ def test_cli_error_boundary_never_echoes_configured_secret(monkeypatch,capsys):
     ('factor', 'pooled_brier', 'preopen', False, False, False),
     ('market', 'worst_stock_brier', 'preopen', False, False, False),
     ('market', 'pooled_brier', 'preopen', True, False, False),
+    ('fusion', 'pooled_brier', 'preopen', True, True, False),
     ('exposure', 'worst_stock_brier', 'preopen', True, False, False),
     ('exposure', 'pooled_brier', 'preopen', True, True, False),
     ('exposure', 'pooled_brier', 'preopen', True, True, True),
@@ -57,7 +58,7 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
         prices['source']='historical_fixture'  # Verify that synthetic flow alone controls evidence kind.
     PriceStore(tmp_path / 'data').write_prices(prices)
     config = tmp_path / 'direction.json'
-    config.write_text(json.dumps(dict(horizons=[1], min_train_dates=30, calibration_dates=10,
+    config.write_text(json.dumps(dict(horizons=[1], min_train_dates=60 if candidate_set == 'fusion' else 30, calibration_dates=10,
                                      test_dates=15, max_folds=1)))
     extra = []
     if overseas_window:
@@ -128,9 +129,14 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
     assert result['price_path'] == (candidate_set in {'path','sector','flow','opening-proxy','opening-residual','margin','response','similarity'})
     assert result['sector_history'] == (candidate_set in {'sector','flow','opening-proxy','opening-residual','margin','response','similarity'})
     assert result['flow_history'] == (candidate_set in {'flow','opening-proxy','opening-residual','margin','response','similarity'})
-    assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16, 'exposure': 24, 'path': 30, 'sector': 36, 'flow': 42, 'opening-proxy':5, 'opening-residual':9, 'margin':48,'response':54,'similarity':7}[candidate_set]
+    assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16, 'fusion':5, 'exposure': 24, 'path': 30, 'sector': 36, 'flow': 42, 'opening-proxy':5, 'opening-residual':9, 'margin':48,'response':54,'similarity':7}[candidate_set]
     assert (tmp_path / result['report']).exists()
     report = json.loads((tmp_path / result['report']).read_text())
+    if candidate_set == 'fusion':
+        assert report['protocol']['fusion_recipe']['groups'] == ['price', 'us', 'night']
+        scores = report['selections'][0]['candidate_scores']
+        assert sum(s['candidate'].startswith('fusion_') and 'selection_score' in s for s in scores) == 2
+        assert all('weights' in s['model_details'] for s in scores if s['candidate'].startswith('fusion_'))
     assert report['protocol']['selection_policy'] == policy
     assert report['protocol']['mode'] == mode
     expected_windows = ['f_ext_fmp_spy_window_return', 'f_ext_fmp_spy_window_updated'] if overseas_window else []

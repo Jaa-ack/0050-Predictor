@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "notes": "Manual keyless TWSE material-disclosure snapshot only. Preserve actual receipt and revisions; no historical backfill or scheduler.",
+  "jobs": [
+    {
+      "id": "twse-announcements",
+      "provider": "twse",
+      "dataset": "announcements",
+      "enabled": true
+    }
+  ]
+}

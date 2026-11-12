@@ -27,10 +27,13 @@ class DirectionCandidate:
         if self.model not in {'prior', 'logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist',
                               'factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist',
                               'opening_residual_ridge', 'opening_residual_hist', 'opening_residual_vol_ridge', 'opening_residual_vol_hist',
-                              'similarity_tight', 'similarity_local', 'similarity_wide'}:
+                              'similarity_tight', 'similarity_local', 'similarity_wide',
+                              'fusion_equal', 'fusion_learned'}:
             raise ValueError('Unknown direction model')
         if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path', 'portable_sector', 'portable_flow', 'portable_opening', 'portable_margin', 'portable_response'}:
             raise ValueError('Unknown direction feature profile')
+        if self.model.startswith('fusion_') and self.feature_profile != 'portable_market':
+            raise ValueError('Source fusion currently requires portable_market')
         if self.window_dates is not None and self.window_dates < 10:
             raise ValueError('Direction training window needs at least ten dates')
 
@@ -89,6 +92,13 @@ SIMILARITY_CANDIDATES = (
     DirectionCandidate('hist', 'portable_response', 756),
     *(DirectionCandidate(model, 'portable_response', 756)
       for model in ('similarity_tight', 'similarity_local', 'similarity_wide')),
+)
+FUSION_CANDIDATES = (
+    DirectionCandidate('prior'),
+    DirectionCandidate('logistic', 'portable_price', 756),
+    DirectionCandidate('logistic', 'portable_market', 756),
+    DirectionCandidate('fusion_equal', 'portable_market', 756),
+    DirectionCandidate('fusion_learned', 'portable_market', 756),
 )
 OPENING_CANDIDATES = (
     DirectionCandidate('prior'),
@@ -257,6 +267,9 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
             'Minimize worst-stock calibration Brier, then pooled Brier; fixed threshold 0.5.') + ' Candidate ties prefer declared order.',
         evaluation='Purged chronological train / candidate-selection calibration / outer test. Final reserved period is excluded.',
         limitation='Exploratory historical development, not an independently untouched or prospective test.')
+    if any(c.model.startswith('fusion_') for c in candidates):
+        from .direction_fusion import FUSION_RECIPE
+        protocol['fusion_recipe'] = dict(FUSION_RECIPE)
     if constituents is not None:
         protocol['constituent_audit'] = dict(tickers=list(constituents), membership_as_of=membership_as_of,
             selection_scope='fixed_ten_only', historical_membership_verified=False)
@@ -293,6 +306,8 @@ def search_direction_models(frame, config, *, candidates=DEFAULT_CANDIDATES, hol
                         key = _selection_key(metrics, threshold, selection_policy)
                         candidate_scores.append(dict(candidate=candidate.name, threshold=threshold,
                                                      **metrics, selection_score=list(key)))
+                        if candidate.model.startswith('fusion_'):
+                            candidate_scores[-1]['model_details'] = model.training_details
                         if winner_key is None or key > winner_key:
                             winner_key = key
                             winner = (candidate, model, columns, threshold, subset)

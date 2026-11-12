@@ -1,0 +1,12 @@
+{
+  "horizons": [1, 5, 20],
+  "min_train_dates": 252,
+  "calibration_dates": 126,
+  "test_dates": 252,
+  "max_folds": 8,
+  "embargo_dates": 1,
+  "random_state": 42,
+  "feature_profile": "portable_market",
+  "objective": "close_return",
+  "evaluation_tickers": ["0050", "1216", "2002", "2412", "IX0001"]
+}

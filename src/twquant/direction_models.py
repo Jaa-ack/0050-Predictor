@@ -155,6 +155,9 @@ def fit_direction_model(candidate, train, columns, horizon, seed):
     if candidate.window_dates is not None:
         dates = pd.DatetimeIndex(train.date.unique()).sort_values()
         train = train.loc[train.date >= dates[-min(candidate.window_dates, len(dates))]]
+    if candidate.model.startswith('fusion_'):
+        from .direction_fusion import fit_source_fusion
+        return fit_source_fusion(train, columns, horizon, seed, learned=candidate.model == 'fusion_learned')
     if candidate.model.startswith('opening_residual_'):
         return _fit_opening_residual(candidate, train, columns, horizon, seed)
     if candidate.model.startswith('similarity_'):

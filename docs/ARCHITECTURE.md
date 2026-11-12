@@ -32,6 +32,7 @@ flowchart LR
 | `source_store` / `source_workflows` / `source_verification` | 不可覆寫來源快照、事件／文件匯出、首次收件與修訂、逐端點格式及權限驗證 |
 | `credentials` / `secret_audit` | 伺服端Key、PKCS#12私人複本、原生SDK日誌隔離、遮罩與發布集合稽核 |
 | `universe` | 使用者固定十檔、延伸測試角色及指數點數語義 |
+| `direction_fusion` | 價格／美股／夜盤共享expert與內層時序權重；缺報先驗回退、等權及凸融合，獨立研究而不切換正式模型 |
 | `comparison` / `diagnostics` | 開發期特徵消融與以市場日期為單位的成對損失區塊抽樣 |
 | `skill_screener` / `skill_signals` / `skill_risk` / `skill_integration` | 獨立離線篩選、日線旗標、紙上目標組合檢查與 A/B/C/D/R 比較；不寫正式模型／帳本，不刪除方向評分樣本 |
 | `features` | `build_features`、`point_in_time_join`；只有 `f_` 欄位能進模型 |
