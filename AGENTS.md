@@ -4,6 +4,7 @@ These rules preserve the user's requirements for this repository and future upda
 
 - Build an executable, evidence-based 0050 research system. Synthetic demonstrations must remain clearly distinguished from real historical or live evidence.
 - The 75% direction-research goal requires predictions every trading day for any five constituents. Keep low-confidence days, missing answers and weak stocks in the audit; selective prediction cannot substitute for full coverage. The user reconfirmed this on 2026-11-07.
+- On 2026-11-12 the user also accepted shorter intraday future intervals. Daily full coverage and any five constituents still apply; distinguish each target and horizon, and never transfer intraday scores to daily close-direction claims.
 - The immutable training universe is 2330,2454,2317,2308,3711,1303,2383,2881,2891,3037. Use the same shared model for 0050,1216,2002,2412 and IX0001/TAIEX transfer tests. External targets never enter training, calibration, peer context or model selection; index points are not tradable. This supersedes any requirement to rotate the primary universe with ETF membership.
 - The canonical GitHub repository is `https://github.com/Jaa-ack/0050-Predictor.git`.
 - For substantive work the user authorizes, implement and verify it, update relevant documentation and `CHANGELOG.md`, make a descriptive commit, and push to the canonical repository. Preserve existing history; never force-push or discard unrelated changes. Use a requested branch/PR workflow when the user specifies one.

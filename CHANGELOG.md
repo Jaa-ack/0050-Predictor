@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — 2026-11-12 — Intraday research scope
+
+- Recorded authorization to research shorter intraday future intervals while retaining daily full coverage and the immutable training universe.
+- Added a fixed-clock 1/5/30/60-second accounting interface for all 50 constituents, preserving missing rows, receipt/emission timing, shared model rules and weak stocks.
+- Separated raw up/down credit from flat-price and up-versus-nonup diagnostics; supplied timestamps and passing sample counts cannot verify model training or raw quote provenance.
+- Documented a five-level shared sequence design, primary-source benchmark limitations and conditional requirements for a 75% design; no market-data subscription, acquisition or training was enabled.
+
 ## Unreleased — 2026-11-12 — Shared similarity research
 
 - Added a fixed-ten historical-state similarity classifier with training-only transforms, prior shrinkage, minimum distinct-date support and full daily fallbacks.
