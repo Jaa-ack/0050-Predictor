@@ -124,9 +124,10 @@ class _QueueHistory:
     flow_ema: np.ndarray
     persistent: np.ndarray
     columns: dict
+    last_trade_price: np.ndarray | None = None
 
 
-def _queue_history(dates,ticker,scenario,seed,market_pressure,size_weights=None):
+def _queue_history(dates,ticker,scenario,seed,market_pressure,size_weights=None,*,record_trades=False):
     """Observed history plus private Markov state; never an inference feature frame."""
     past=_draws(dates,ticker,seed,1,101)
     queues=_queues(past[:,0,:10])
@@ -142,10 +143,15 @@ def _queue_history(dates,ticker,scenario,seed,market_pressure,size_weights=None)
         indices=np.searchsorted(np.cumsum(weights),past[:,0,13],side='right')
         response=np.array(scenario.liquidity_regimes)[np.minimum(indices,len(weights)-1)]
     flow_ema=np.zeros(len(dates))
+    last_trade=np.where(past[:,0,14]<.5,-.5,.5) if record_trades else None
     history=np.zeros((len(dates),100))
     imbalance=np.zeros((len(dates),100,5))
     for step in range(100):
+        before=position.copy() if record_trades else None
         pressure,flow_ema=_step(queues,position,pressure,past[:,step+1],strength,scenario.flip_rate,flow_ema,response,size_weights)
+        if record_trades:
+            draw=past[:,step+1];buying=draw[:,1]<(.5+.5*strength*pressure)
+            last_trade=np.where(draw[:,2]<.65,before+np.where(buying,.5,-.5),last_trade)
         history[:,step]=position
         bid=np.cumsum(queues[:,0],axis=1);ask=np.cumsum(queues[:,1],axis=1)
         imbalance[:,step]=(bid-ask)/np.maximum(bid+ask,1)
@@ -159,7 +165,7 @@ def _queue_history(dates,ticker,scenario,seed,market_pressure,size_weights=None)
             columns[f'f_book_imbalance_{level+1}_change_{window}']=values[:,-1]-values[:,0]
         columns[f'f_book_mid_change_{window}']=history[:,-1]-history[:,-window]
         columns[f'f_book_mid_vol_{window}']=np.diff(history[:,-window:],axis=1).std(axis=1)
-    return _QueueHistory(queues,position,pressure,strength,response,flow_ema,persistent,columns)
+    return _QueueHistory(queues,position,pressure,strength,response,flow_ema,persistent,columns,last_trade)
 
 
 def simulate_queue_panel(tickers,dates,scenario,*,seed=17,future_seed=29,horizon_seconds=30):

@@ -1,0 +1,23 @@
+{
+  "train_dates": 600,
+  "calibration_dates": 200,
+  "test_dates": 2000,
+  "seeds": [17,29,43],
+  "max_wait_seconds": 60,
+  "max_events": 2048,
+  "candidates": ["prior","spread_bounce","trade_logistic","trade_hist"],
+  "scenarios": [
+    {"name":"neutral_lag0","latency_seconds":0.0},
+    {"name":"neutral_lag100us","latency_seconds":0.0001},
+    {"name":"neutral_lag1ms","latency_seconds":0.001},
+    {"name":"neutral_lag5ms","latency_seconds":0.005},
+    {"name":"neutral_lag20ms","latency_seconds":0.02},
+    {"name":"neutral_lag100ms","latency_seconds":0.1},
+    {"name":"slow_1eps","event_rate":1.0},
+    {"name":"timeout_01eps","event_rate":0.01},
+    {"name":"outage25","queue":{"flow_imbalance":0.0,"input_outage_fraction":0.25}},
+    {"name":"external_fast_5ms","external_event_rates":[["1216",1000.0],["2303",1000.0],["2327",1000.0],["2345",1000.0],["2357",1000.0]]},
+    {"name":"external_fast_100us","latency_seconds":0.0001,"external_event_rates":[["1216",1000.0],["2303",1000.0],["2327",1000.0],["2345",1000.0],["2357",1000.0]]},
+    {"name":"mixed_liquidity","queue":{"flow_imbalance":0.2,"liquidity_regimes":[0.0,1.5],"liquidity_weights":[0.5,0.5]}}
+  ]
+}

@@ -118,9 +118,9 @@ def simulate_first_change_panel(tickers,dates,scenario,*,seed=17,future_seed=29,
     return pd.concat(frames,ignore_index=True).sort_values(['date','ticker']).reset_index(drop=True)
 
 
-def _labels(frame,seconds):
+def _labels(frame,seconds,*,target_kind=TARGET):
     required={'ticker','decision_at','target_at','first_change_at','timeout','actual_return','target_kind'}
-    if not required<=set(frame) or not frame.target_kind.eq(TARGET).all():raise ValueError('First-change labels require their own target definition')
+    if not required<=set(frame) or not frame.target_kind.eq(target_kind).all():raise ValueError('First-change labels require their own target definition')
     p=frame.copy()
     for col in ['decision_at','target_at','first_change_at']:p[col]=_aware(p[col],col)
     if not p.target_at.eq(p.decision_at+pd.Timedelta(seconds=seconds)).all():raise ValueError('First-change target deadline is shifted')
@@ -173,11 +173,10 @@ class FirstChangeModel:
         return np.column_stack([1-probability,probability])
 
 
-def fit_first_change_model(frame,name,*,fit_at):
-    if name not in (*MODELS,*EXTRA_MODELS):raise ValueError('Unknown first-change model')
+def _validate_first_event_fit(frame,*,fit_at,target_kind):
     if set(frame.ticker.astype(str))!=set(TRAINING_TICKERS):raise ValueError('First-change fitting requires exactly the fixed ten')
     if frame.max_wait_seconds.nunique()!=1:raise ValueError('Declare one first-change deadline')
-    seconds=int(frame.max_wait_seconds.iloc[0]);_wait(seconds);p=_labels(frame,seconds)
+    seconds=int(frame.max_wait_seconds.iloc[0]);_wait(seconds);p=_labels(frame,seconds,target_kind=target_kind)
     stamp=pd.Timestamp(fit_at)
     if stamp.tzinfo is None or not np.isfinite(p.actual_return).all():raise ValueError('First-change fitting requires mature known labels')
     available=_aware(p.label_available_at,'label_available_at')
@@ -185,6 +184,12 @@ def fit_first_change_model(frame,name,*,fit_at):
     ready=p.input_ready.fillna(False).astype(bool)
     for col in ('prediction_at','max_input_available_at'):p[col]=_aware(p[col],col)
     if not (p.max_input_available_at.le(p.prediction_at)&p.prediction_at.le(p.decision_at))[ready].all():raise ValueError('First-change training inputs must be causal')
+    return seconds
+
+
+def fit_first_change_model(frame,name,*,fit_at):
+    if name not in (*MODELS,*EXTRA_MODELS):raise ValueError('Unknown first-change model')
+    seconds=_validate_first_event_fit(frame,fit_at=fit_at,target_kind=TARGET)
     if name=='event_history_logistic':
         from .queue_first_change import EventHistoryModel
         return EventHistoryModel(frame,seconds)
@@ -192,12 +197,17 @@ def fit_first_change_model(frame,name,*,fit_at):
 
 
 def audit_first_change_predictions(predictions,constituents,*,expected_decisions,max_wait_seconds,min_dates=126,evidence_kind='synthetic'):
+    return _audit_first_event_predictions(predictions,constituents,expected_decisions=expected_decisions,max_wait_seconds=max_wait_seconds,
+        min_dates=min_dates,evidence_kind=evidence_kind,target_kind=TARGET)
+
+
+def _audit_first_event_predictions(predictions,constituents,*,expected_decisions,max_wait_seconds,min_dates,evidence_kind,target_kind):
     _wait(max_wait_seconds);universe=constituent_universe(constituents);decisions=_aware(expected_decisions,'Decision calendar').sort_values()
     local=decisions.tz_convert('Asia/Taipei');seconds=(local-local.normalize()).total_seconds()
     if (len(universe)!=50 or not len(decisions) or decisions.hasnans or decisions.has_duplicates or local.normalize().has_duplicates
             or len(set(local.time))!=1 or (seconds<9*3600).any() or (seconds+max_wait_seconds>=13*3600+25*60).any()):raise ValueError('Declare a complete fixed-clock continuous-session calendar and50constituents')
     if evidence_kind not in ('synthetic','historical','unknown') or type(min_dates) is not int or min_dates<1:raise ValueError('Invalid first-change audit settings')
-    p=_labels(predictions,max_wait_seconds);required={'probability_up','model_version','decision_threshold','prediction_at','max_input_available_at'}
+    p=_labels(predictions,max_wait_seconds,target_kind=target_kind);required={'probability_up','model_version','decision_threshold','prediction_at','max_input_available_at'}
     if not required<=set(p):raise ValueError('Missing first-change prediction fields')
     for col in ('prediction_at','max_input_available_at'):p[col]=_aware(p[col],col)
     if (not set(p.ticker)<=set(universe) or not set(p.decision_at)<=set(decisions) or p.duplicated(['decision_at','ticker']).any()):raise ValueError('Duplicate or undeclared first-change predictions')
@@ -220,7 +230,7 @@ def audit_first_change_predictions(predictions,constituents,*,expected_decisions
     ranking=sorted(universe,key=lambda t:(stocks[t]['accuracy'],t));minimum=stocks[ranking[0]]['accuracy']
     edge=all(s['balanced_accuracy'] is not None and s['balanced_accuracy']>.5 and s['accuracy']>max(s['always_up_accuracy'],s['always_down_accuracy']) for s in stocks.values())
     gate=bool(valid.all() and known.all() and len(decisions)>=min_dates and minimum>=.75 and edge)
-    return dict(evidence_kind=evidence_kind,target_kind=TARGET,max_wait_seconds=max_wait_seconds,target_scope_confirmed=True,
+    return dict(evidence_kind=evidence_kind,target_kind=target_kind,max_wait_seconds=max_wait_seconds,target_scope_confirmed=True,
         expected_predictions=len(grid),test_dates=len(decisions),missing_predictions=int((~grid.isin(present)).sum()),invalid_predictions=int((~valid&grid.isin(present)).sum()),
         unresolved_answers=int((~known).sum()),timeout_predictions=int((known&actual.eq(0)).sum()),event_coverage=float(event.mean()),prediction_coverage=float(valid.mean()),answer_coverage=float(known.mean()),
         overall_accuracy=float(correct.mean()),minimum_stock_accuracy=minimum,worst_five_accuracy=float(np.mean([stocks[t]['accuracy'] for t in ranking[:5]])),

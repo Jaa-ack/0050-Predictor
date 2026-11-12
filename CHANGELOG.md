@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 2026-11-13 — Transaction first changes and spread bounce
+
+- Added the accepted transaction-price first-change target with a separate fitting/audit interface, emission-time last-trade anchors, same-price waiting and explicit unknown index answers.
+- Reused queue event timing and full-grid accounting while preserving legacy midquote features, predictions and audit counts; retained best-quote-only execution and reset rules as declared synthetic assumptions.
+- Added shared prior, spread-bounce, logistic and hist candidates with fixed-ten-only training and calibration, observable feature allowlisting and complete missing-input fallback predictions.
+- Completed36 frozen experiments and144 candidate audits. Fifteen passed the conditional synthetic sample gate; retained all adverse latency, timeout, missing-input and external-activity outcomes alongside the mechanical baseline.
+- Independently reconstructed scalar execution paths, all four primary-only refits and full daily audits; preserved numerical evidence across an unsupported-index diagnostic-anchor correction.
+- Measured the existing50-stock DataFrame inference path and documented its millisecond overhead, official matching/feed differences and the remaining microsecond-design requirements. No provider acquisition, subscription, schedule or trading was enabled.
+
 ## Unreleased — 2026-11-13 — Post-emission discrete first-change research
 
 - Added integer-queue first-midquote-change simulation with independent Poisson event clocks, configurable lot-size profiles and complete pre-emission evolution/reset handling.

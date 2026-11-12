@@ -63,12 +63,20 @@ def advance_first_change(state,draw_blocks,*,event_rate,latency_seconds,max_wait
     A finite iterator is an explicit compute budget. Unfinished paths remain
     unknown, never converted into verified timeouts or removed from the grid.
     """
+    return _advance_queue_price(state,draw_blocks,event_rate=event_rate,latency_seconds=latency_seconds,
+        max_wait_seconds=max_wait_seconds,flip_hazard=flip_hazard,size_weights=size_weights,price_kind='mid')
+
+
+def _advance_queue_price(state,draw_blocks,*,event_rate,latency_seconds,max_wait_seconds,flip_hazard,size_weights,price_kind):
     _wait(max_wait_seconds);weights=_weights(size_weights)
+    if price_kind not in ('mid','trade'):raise ValueError('Declare midquote or transaction event prices')
     if not _number(event_rate,.01,10000) or not _number(latency_seconds,0,5) or not _number(flip_hazard,0,1):raise ValueError('Invalid queue event-clock contract')
     queues=state.queues.copy();position=state.position.copy();pressure=state.pressure.copy();ema=state.flow_ema.copy()
     N=len(position);strength=np.broadcast_to(state.strength,(N,));response=np.broadcast_to(state.response,(N,))
     elapsed=np.zeros(N);resolved=np.zeros(N,bool);timeout=np.zeros(N,bool);anchored=np.zeros(N,bool)
-    anchor=position.copy();direction=np.full(N,np.nan);event=np.full(N,np.nan)
+    price=position.copy() if price_kind=='mid' else np.asarray(state.last_trade_price,dtype=float).copy()
+    if price.shape!=(N,) or not np.isfinite(price).all():raise ValueError('Transaction paths require an observed starting last trade')
+    anchor=price.copy();direction=np.full(N,np.nan);event=np.full(N,np.nan)
     pre_events=np.zeros(N,int);pre_moves=np.zeros(N,int);examined=np.zeros(N,int);applied=np.zeros(N,int)
     for block in draw_blocks:
         draw=np.asarray(block)
@@ -78,16 +86,20 @@ def advance_first_change(state,draw_blocks,*,event_rate,latency_seconds,max_wait
             if not len(ids):break
             values=draw[ids,j];next_at=elapsed[ids]-np.log1p(-values[:,16])/event_rate;examined[ids]+=1
             beyond=next_at>latency_seconds+max_wait_seconds
-            late_ids=ids[beyond];resolved[late_ids]=True;timeout[late_ids]=True;direction[late_ids]=0.;anchor[late_ids]=position[late_ids]
+            late_ids=ids[beyond];resolved[late_ids]=True;timeout[late_ids]=True;direction[late_ids]=0.;anchor[late_ids]=price[late_ids]
             ids=ids[~beyond];values=values[~beyond];next_at=next_at[~beyond]
             if not len(ids):continue
             after=next_at>latency_seconds
-            first=after&~anchored[ids];anchor[ids[first]]=position[ids[first]];anchored[ids[first]]=True
-            before=position[ids].copy();local_q=queues[ids].copy();local_p=before.copy()
+            first=after&~anchored[ids];anchor[ids[first]]=price[ids[first]];anchored[ids[first]]=True
+            before=position[ids].copy();before_price=price[ids].copy();local_q=queues[ids].copy();local_p=before.copy()
             press,flow=_step(local_q,local_p,pressure[ids],values[:,:16],strength[ids],flip_hazard,ema[ids],response[ids],weights)
             queues[ids]=local_q;position[ids]=local_p;pressure[ids]=press;ema[ids]=flow;elapsed[ids]=next_at;applied[ids]+=1
-            moved=local_p!=before;pre_events[ids[~after]]+=1;pre_moves[ids[~after&moved]]+=1
-            hit=after&moved;hit_ids=ids[hit];direction[hit_ids]=np.sign(local_p[hit]-before[hit]);event[hit_ids]=next_at[hit]-latency_seconds;resolved[hit_ids]=True
+            if price_kind=='trade':
+                buying=values[:,1]<(.5+.5*strength[ids]*press)
+                price[ids]=np.where(values[:,2]<.65,before+np.where(buying,.5,-.5),before_price)
+            else:price[ids]=local_p
+            moved=price[ids]!=before_price;pre_events[ids[~after]]+=1;pre_moves[ids[~after&moved]]+=1
+            hit=after&moved;hit_ids=ids[hit];direction[hit_ids]=np.sign(price[hit_ids]-before_price[hit]);event[hit_ids]=next_at[hit]-latency_seconds;resolved[hit_ids]=True
         if resolved.all():break
     return dict(resolved=resolved,timeout=timeout,direction=direction,event_after_emission_seconds=event,anchor_position=anchor,
         pre_emission_events=pre_events,pre_emission_price_changes=pre_moves,events_applied=applied,event_draws_examined=examined)
@@ -102,6 +114,11 @@ def _blocks(dates,ticker,seed,max_events,block_events):
 
 
 def simulate_queue_first_change_panel(tickers,dates,scenario,*,seed=17,future_seed=29,max_wait_seconds=60,max_events=2048,block_events=32):
+    return _simulate_queue_price_panel(tickers,dates,scenario,seed=seed,future_seed=future_seed,max_wait_seconds=max_wait_seconds,
+        max_events=max_events,block_events=block_events,price_kind='mid')
+
+
+def _simulate_queue_price_panel(tickers,dates,scenario,*,seed,future_seed,max_wait_seconds,max_events,block_events,price_kind):
     _wait(max_wait_seconds);universe=validate_tickers(tickers);dates=pd.DatetimeIndex(dates)
     if not isinstance(scenario,QueueFirstScenario) or not len(dates) or dates.hasnans or dates.has_duplicates or dates.tz is not None or not dates.equals(dates.normalize()):raise ValueError('Declare a scenario and distinct naive dates')
     if any(type(s) is not int or not 0<=s<2**32 for s in (seed,future_seed)):raise ValueError('Declare bounded integer seeds')
@@ -119,9 +136,11 @@ def simulate_queue_first_change_panel(tickers,dates,scenario,*,seed=17,future_se
             result=dict(resolved=np.ones(len(dates),bool),timeout=~hit,direction=np.where(hit,np.where(values[:,1]<.5,1.,-1.),0.),
                 event_after_emission_seconds=np.where(hit,wait,np.nan),anchor_position=np.zeros(len(dates),int),pre_emission_events=np.zeros(len(dates),int),
                 pre_emission_price_changes=np.zeros(len(dates),int),events_applied=np.zeros(len(dates),int),event_draws_examined=np.zeros(len(dates),int))
+            if price_kind=='trade':
+                result.update(resolved=np.zeros(len(dates),bool),timeout=np.zeros(len(dates),bool),direction=np.full(len(dates),np.nan),event_after_emission_seconds=np.full(len(dates),np.nan),anchor_position=np.full(len(dates),np.nan))
             features={c:np.full(len(dates),np.nan) for c in _feature_names()};bid=ask=np.full(len(dates),np.nan)
         else:
-            state=_queue_history(dates,ticker,qspec,seed,market_pressure,sizes)
+            state=_queue_history(dates,ticker,qspec,seed,market_pressure,sizes,record_trades=price_kind=='trade')
             bid=state.queues[:,0,0].copy();ask=state.queues[:,1,0].copy();features={}
             for level in range(1,6):
                 features[f'f_book_imbalance_{level}']=state.columns[f'f_book_imbalance_{level}']
@@ -130,8 +149,9 @@ def simulate_queue_first_change_panel(tickers,dates,scenario,*,seed=17,future_se
                 for level in (1,5):
                     for stat in ('mean','change'):features[f'f_event_imbalance_{level}_{stat}_{window}']=state.columns[f'f_book_imbalance_{level}_{stat}_{window}']
                 for stat in ('change','vol'):features[f'f_event_mid_{stat}_{window}']=state.columns[f'f_book_mid_{stat}_{window}']
-            result=advance_first_change(state,_blocks(dates,ticker,future_seed,max_events,block_events),event_rate=rate,latency_seconds=scenario.latency_seconds,
-                max_wait_seconds=max_wait_seconds,flip_hazard=qspec.flip_rate,size_weights=sizes)
+            result=_advance_queue_price(state,_blocks(dates,ticker,future_seed,max_events,block_events),event_rate=rate,latency_seconds=scenario.latency_seconds,
+                max_wait_seconds=max_wait_seconds,flip_hazard=qspec.flip_rate,size_weights=sizes,price_kind=price_kind)
+        if price_kind=='trade':features['f_trade_location']=np.full(len(dates),np.nan) if is_index else 2*(state.last_trade_price-state.position)
         ready=~outage if not is_index else np.zeros(len(dates),bool)
         duration=result['event_after_emission_seconds'];hit=np.isfinite(duration)
         ns=np.ceil(np.where(hit,np.clip(duration,1e-9,max_wait_seconds),max_wait_seconds)*1e9).astype('int64')
@@ -141,11 +161,14 @@ def simulate_queue_first_change_panel(tickers,dates,scenario,*,seed=17,future_se
         frame=frame.assign(ticker=ticker,date=dates,decision_at=decision,prediction_at=decision,max_input_available_at=cutoff,
             target_at=decision+pd.Timedelta(seconds=max_wait_seconds),label_available_at=decision+pd.Timedelta(seconds=max_wait_seconds,milliseconds=5),
             first_change_at=event,actual_return=actual,timeout=result['timeout'],simulation_resolved=result['resolved'],input_ready=ready,
-            bid_depth=np.where(ready,bid,np.nan),ask_depth=np.where(ready,ask,np.nan),max_wait_seconds=max_wait_seconds,target_kind=TARGET,
-            source='synthetic_poisson_queue_first_change',price_basis='abstract_index_points_no_book' if is_index else 'abstract_first_post_emission_mid_move',
+            bid_depth=np.where(ready,bid,np.nan),ask_depth=np.where(ready,ask,np.nan),max_wait_seconds=max_wait_seconds,
+            target_kind=TARGET if price_kind=='mid' else 'first_trade_change_before_deadline',
+            source='synthetic_poisson_queue_first_change' if price_kind=='mid' else 'synthetic_poisson_queue_trade_first_change',
+            price_basis=('abstract_index_points_no_book' if is_index else 'abstract_first_post_emission_mid_move') if price_kind=='mid' else ('index_no_transaction_target' if is_index else 'abstract_first_post_emission_trade_move'),
             diagnostic_anchor_position=result['anchor_position'],diagnostic_pre_emission_events=result['pre_emission_events'],
             diagnostic_pre_emission_price_changes=result['pre_emission_price_changes'],diagnostic_events_applied=result['events_applied'],
             diagnostic_event_draws_examined=result['event_draws_examined'],event_rate=rate,latency_seconds=scenario.latency_seconds,history_window_unit='events')
+        if price_kind=='trade':frame=frame.rename(columns={'diagnostic_anchor_position':'diagnostic_anchor_trade_price'})
         frame.loc[~ready,'max_input_available_at']=pd.NaT;frames.append(frame)
     return pd.concat(frames,ignore_index=True).sort_values(['date','ticker']).reset_index(drop=True)
 
