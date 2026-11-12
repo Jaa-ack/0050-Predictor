@@ -24,6 +24,7 @@ from .universe import TRAINING_TICKERS,asset_class,tickers as validate_tickers
 
 TARGET='first_mid_change_before_deadline'
 MODELS=('prior','logistic','symmetric_logistic')
+EXTRA_MODELS=('event_history_logistic',)
 
 
 def _number(value,low,high):
@@ -173,7 +174,7 @@ class FirstChangeModel:
 
 
 def fit_first_change_model(frame,name,*,fit_at):
-    if name not in MODELS:raise ValueError('Unknown first-change model')
+    if name not in (*MODELS,*EXTRA_MODELS):raise ValueError('Unknown first-change model')
     if set(frame.ticker.astype(str))!=set(TRAINING_TICKERS):raise ValueError('First-change fitting requires exactly the fixed ten')
     if frame.max_wait_seconds.nunique()!=1:raise ValueError('Declare one first-change deadline')
     seconds=int(frame.max_wait_seconds.iloc[0]);_wait(seconds);p=_labels(frame,seconds)
@@ -184,6 +185,9 @@ def fit_first_change_model(frame,name,*,fit_at):
     ready=p.input_ready.fillna(False).astype(bool)
     for col in ('prediction_at','max_input_available_at'):p[col]=_aware(p[col],col)
     if not (p.max_input_available_at.le(p.prediction_at)&p.prediction_at.le(p.decision_at))[ready].all():raise ValueError('First-change training inputs must be causal')
+    if name=='event_history_logistic':
+        from .queue_first_change import EventHistoryModel
+        return EventHistoryModel(frame,seconds)
     return FirstChangeModel(frame,name,seconds)
 
 

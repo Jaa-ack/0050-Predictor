@@ -92,7 +92,7 @@ def _queues(draw,flow_ema=None,response=0.):
     return queues
 
 
-def _step(queues,position,pressure,draw,strength,flip_rate,flow_ema,response):
+def _step(queues,position,pressure,draw,strength,flip_rate,flow_ema,response,size_weights=None):
     pressure=np.where(draw[:,0]<-np.expm1(-flip_rate),-pressure,pressure)
     buying=draw[:,1]<(.5+.5*strength*pressure)
     # Markets consume the best quote; cancellations and insertions also touch depth.
@@ -102,7 +102,8 @@ def _step(queues,position,pressure,draw,strength,flip_rate,flow_ema,response):
     side=np.where(market,buying,np.where(cancel,draw[:,3]<.5,~buying)).astype(int)
     level=np.where(market,0,np.floor(5*draw[:,4]).astype(int))
     rows=np.arange(len(queues))
-    size=1+np.floor(4*draw[:,5]).astype(int)
+    size=(1+np.floor(4*draw[:,5]).astype(int) if size_weights is None
+          else 1+np.minimum(np.searchsorted(np.cumsum(size_weights),draw[:,5],side='right'),len(size_weights)-1))
     queues[rows,side,level]+=np.where(market|cancel,-size,size)
     # Deeper empty levels are retained as empty; only a best-queue depletion moves price.
     depleted=queues[rows,side,0]<=0
@@ -125,7 +126,7 @@ class _QueueHistory:
     columns: dict
 
 
-def _queue_history(dates,ticker,scenario,seed,market_pressure):
+def _queue_history(dates,ticker,scenario,seed,market_pressure,size_weights=None):
     """Observed history plus private Markov state; never an inference feature frame."""
     past=_draws(dates,ticker,seed,1,101)
     queues=_queues(past[:,0,:10])
@@ -144,7 +145,7 @@ def _queue_history(dates,ticker,scenario,seed,market_pressure):
     history=np.zeros((len(dates),100))
     imbalance=np.zeros((len(dates),100,5))
     for step in range(100):
-        pressure,flow_ema=_step(queues,position,pressure,past[:,step+1],strength,scenario.flip_rate,flow_ema,response)
+        pressure,flow_ema=_step(queues,position,pressure,past[:,step+1],strength,scenario.flip_rate,flow_ema,response,size_weights)
         history[:,step]=position
         bid=np.cumsum(queues[:,0],axis=1);ask=np.cumsum(queues[:,1],axis=1)
         imbalance[:,step]=(bid-ask)/np.maximum(bid+ask,1)

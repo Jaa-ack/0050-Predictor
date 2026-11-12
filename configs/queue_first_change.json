@@ -1,0 +1,23 @@
+{
+  "train_dates": 600,
+  "calibration_dates": 200,
+  "test_dates": 2000,
+  "seeds": [17,29,43],
+  "max_wait_seconds": 60,
+  "max_events": 2048,
+  "candidates": ["prior","logistic","symmetric_logistic","event_history_logistic"],
+  "scenarios": [
+    {"name":"uniform_no_delay","size_weights":[0.25,0.25,0.25,0.25],"latency_seconds":0.0},
+    {"name":"majority_no_delay","latency_seconds":0.0},
+    {"name":"majority_lag1ms","latency_seconds":0.001},
+    {"name":"majority_lag5ms","latency_seconds":0.005},
+    {"name":"majority_lag20ms","latency_seconds":0.02},
+    {"name":"majority_lag100ms","latency_seconds":0.1},
+    {"name":"majority_slow_rate","event_rate":1.0},
+    {"name":"majority_feed_outage","queue":{"flow_imbalance":0.0,"input_outage_fraction":0.25}},
+    {"name":"majority_moderate_flow","queue":{"flow_imbalance":0.2}},
+    {"name":"majority_external_sizes","external_size_weights":[["1216",[0.25,0.25,0.25,0.25]],["2303",[0.25,0.25,0.25,0.25]],["2327",[0.25,0.25,0.25,0.25]],["2345",[0.25,0.25,0.25,0.25]],["2357",[0.25,0.25,0.25,0.25]]]},
+    {"name":"majority_external_rate","external_event_rates":[["1216",1000.0],["2303",1000.0],["2327",1000.0],["2345",1000.0],["2357",1000.0]]},
+    {"name":"majority_mixed_liquidity","queue":{"flow_imbalance":0.2,"liquidity_regimes":[0.0,1.5],"liquidity_weights":[0.5,0.5]}}
+  ]
+}

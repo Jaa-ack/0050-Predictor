@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-13 — Post-emission discrete first-change research
+
+- Added integer-queue first-midquote-change simulation with independent Poisson event clocks, configurable lot-size profiles and complete pre-emission evolution/reset handling.
+- Added an event-history shared logistic candidate with explicit event units, observable feature allowlisting, fixed-ten-only selection and prior fallbacks; legacy candidates and numerical outputs remain intact.
+- Completed36 frozen experiments and144 model audits, retaining full daily grids, missing inputs, timeouts and adverse external interventions. All36 failed75pct; uncalibrated Brownian depth assumptions cannot establish market feasibility by themselves.
+- Independently checked scalar transitions, event clocks, primary-only refits, matched controls and legacy outputs; preserved numerical snapshots across a metadata-only timeout-label correction.
+- Recorded acceptance of transaction-price first changes including spread bounce for separate research; reviewed official feed schemas without enabling acquisition, subscriptions, schedules or trading.
+
 ## Unreleased — 2026-11-13 — Source-weighted direction research
 
 - Added shared price, US-market and night-session logistic experts with purged chronological inner weight fitting, convex regularized Brier fusion, equal-weight controls and explicit missing-source prior fallbacks.
