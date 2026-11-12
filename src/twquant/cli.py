@@ -165,6 +165,9 @@ def parser():
     simulation = subs.add_parser('direction-simulate', help='模擬假設資訊量、延遲及缺漏；合成結果不是真實預測證據')
     simulation.add_argument('--sessions', type=int, default=1200)
     simulation.add_argument('--seeds', default='17,29,43', help='保留所有指定種子的結果，不挑選幸運種子')
+    feasibility = subs.add_parser('direction-feasibility', help='離線估算完整50檔的條件式資訊需求；假設通過不代表實際百分之75')
+    feasibility.add_argument('--config', type=Path, required=True, help='明確的訊號強度、可得率、缺答案與全部模擬種子')
+    feasibility.add_argument('--out', type=Path, help='必須尚未存在的獨立設計評估目錄')
     f = subs.add_parser("predict", help="保存不可覆寫的1/5/20日預測")
     f.add_argument("--as-of", required=True)
     f.add_argument("--paper", action="store_true")
@@ -212,8 +215,29 @@ def parser():
 
 def execute(args):
     from .data import PriceStore
-    default_root = {'demo': 'artifacts/demo', 'direction-simulate': 'artifacts/direction-synthetic'}
+    default_root = {'demo': 'artifacts/demo', 'direction-simulate': 'artifacts/direction-synthetic',
+                    'direction-feasibility': 'artifacts/direction-feasibility'}
     root = args.root or Path(default_root.get(args.command, 'artifacts/real'))
+    if args.command == 'direction-feasibility':
+        from .direction_feasibility import assess_feasibility
+        from .workflows import source_digest
+        from uuid import uuid4
+        output = args.out or root / uuid4().hex
+        if output.exists():
+            raise ValueError('Feasibility requires a fresh output directory')
+        body = args.config.read_bytes()
+        assumptions = json.loads(body)
+        report = assess_feasibility(assumptions)
+        protocol = dict(assumptions=assumptions, assumptions_sha256=hashlib.sha256(body).hexdigest(),
+                        source_sha256=source_digest(), evidence_kind='synthetic_assumptions',
+                        real_world_target_verified=False)
+        write_json(output / 'protocol.json', protocol)
+        write_json(output / 'report.json', report)
+        return dict(report=str(output / 'report.json'), evidence_kind=report['evidence_kind'],
+                    real_world_target_verified=False, unconditional_75_expectation_supported=False,
+                    scenarios=[dict(name=r['name'], expected=r['expected']['worst_five_accuracy'],
+                                    conditional_target_met=r['expected_target_met_under_assumptions'])
+                               for r in report['scenarios']])
     if args.command == 'screen':
         from .skill_screener import load_metrics, screen
         results = screen(load_metrics(args.metrics), json.loads(args.rules.read_text(encoding='utf-8')))
@@ -540,7 +564,7 @@ def main(argv=None):
     args = parser().parse_args(argv)
     credentials=None
     try:
-        if not (args.command=='secrets' and args.secret_command=='init'):
+        if args.command != 'direction-feasibility' and not (args.command=='secrets' and args.secret_command=='init'):
             credentials=load_dotenv()
         result = execute(args)
         if result is not None:

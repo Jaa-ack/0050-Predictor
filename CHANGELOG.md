@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — 2026-11-12 — Direction feasibility
+
+- Reviewed primary GitHub implementations and research, separating daily full-coverage direction from ranking, event-time order-book targets, sentiment classification and filtered-window results.
+- Designed a shared multimodal architecture with fixed-ten-only memory and one-way external queries, preserving daily predictions and the immutable training universe.
+- Added an offline direction-feasibility command with Gaussian information requirements, feed/answer penalties, exact worst-five expectations, correlated-vote sensitivity and all declared simulation seeds.
+- Kept conditional assumption success separate from empirical or supported unconditional75claims; the calculator reads no credentials, prices or reserved outcomes and never promotes a model.
+
 ## Unreleased — 2026-11-12
 
 - Evaluated pinned MIT Trader Skill and Day Trader Skill sources and reproduced nonfinite-input risk/screener defects despite passing upstream tests.
