@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "twquant-0050"
 version = "0.2.0"
 description = "Point-in-time Taiwan equity research, walk-forward validation and daily paper forecasts"
+license-files = ["docs/licenses/TRADER_SKILLS_MIT.txt"]
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=2.2,<3", "pandas>=2.2,<4", "scipy>=1.15,<2",

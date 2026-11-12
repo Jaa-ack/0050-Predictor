@@ -444,25 +444,60 @@ def _performance(returns: np.ndarray, equity: np.ndarray) -> dict:
     }
 
 
-def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tuple[pd.DataFrame, dict]:
+def select_portfolio_candidates(group, config, *, rule_only=False):
+    """Decision-time selection shared by the simulator and optional paper rules."""
+    eligible = group.get('_decision_eligible', pd.Series(True, index=group.index))
+    if rule_only:
+        return group.loc[eligible].sort_values(['_decision_score', 'ticker'], ascending=[False, True]).head(config.max_positions)
+    buy = config.commission + config.slippage
+    sell = config.commission + config.slippage + config.sell_tax
+    roundtrip = 1 - (1 - sell) / (1 + buy)
+    score = 'arithmetic_expected_return' if 'arithmetic_expected_return' in group else 'expected_return'
+    candidates = group.loc[eligible & group.probability_up.ge(config.min_probability)
+                           & group[score].gt(roundtrip + config.min_expected_return)]
+    return candidates.sort_values([score, 'ticker'], ascending=[False, True]).head(config.max_positions)
+
+
+def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig, *,
+                       decisions=None, rule_only=False) -> tuple[pd.DataFrame, dict]:
     """Long-only h=1 lots bought next open, sold that close, flat overnight.
 
     Fees apply to buy and sell notionals. Allocation includes the entry fee so
     the cash balance cannot become negative. 5/20-day forecasts are evaluated as
     prediction tasks; overlapping labels never become a compounded NAV.
+    Optional decisions contain a complete date/ticker/eligible/weight table
+    (and score for rule_only), computed without outcomes by the caller. Weight
+    includes entry costs. Missing decisions, invalid weights and extra columns
+    are rejected. Forecast rows and probabilities are never modified.
     """
     p = predictions.loc[predictions.horizon == 1].copy()
     required = {"trade_return_1", "benchmark_trade_return_1", "next_open", "next_open_date"}
     if p.empty or not required.issubset(p):
         return pd.DataFrame(columns=["date", "strategy_net", "benchmark_net", "equal_weight_net"]), {
             "status": "unavailable", "reason": "horizon 1 executable prices and benchmark required", "orders": 0}
+    if rule_only and decisions is None:
+        raise ValueError('Rule-only simulation requires explicit decisions')
+    if decisions is not None:
+        from .skill_screener import finite_number
+        required_decisions = {'date', 'ticker', 'eligible', 'weight'} | ({'score'} if rule_only else set())
+        if set(decisions) != required_decisions:
+            raise ValueError('Decision overlay has missing or unsupported columns')
+        if (decisions.duplicated(['date', 'ticker']).any() or p.duplicated(['date', 'ticker']).any()
+                or not decisions.eligible.map(lambda v: isinstance(v, (bool, np.bool_))).all()
+                or not decisions.weight.map(finite_number).all()
+                or not decisions.weight.between(0, config.max_weight).all()
+                or rule_only and not decisions.score.map(finite_number).all()):
+            raise ValueError('Invalid decision overlay keys, eligibility, weights or scores')
+        merged = p.merge(decisions, on=['date', 'ticker'], how='outer', validate='one_to_one', indicator=True)
+        if not merged['_merge'].eq('both').all():
+            raise ValueError('Decision overlay must cover exactly all h1 prediction rows')
+        p = merged.drop(columns='_merge').rename(columns={'eligible': '_decision_eligible',
+                     'weight': '_decision_weight', 'score': '_decision_score'})
+        p['_decision_eligible'] &= p._decision_weight.gt(0)
     p = p.sort_values(["date", "ticker"])
     buy = config.commission + config.slippage
     sell = config.commission + config.slippage + config.sell_tax
     etf_sell = config.commission + config.slippage + config.etf_sell_tax
-    # A conservative cost screen uses close-to-close return estimates, although
-    # the overnight gap cannot be captured by this open-to-close strategy.
-    roundtrip = 1 - (1 - sell) / (1 + buy)
     rows = []
     orders = 0
     unexecutable = 0
@@ -475,19 +510,22 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
                  & group.next_open.gt(0) & group.next_open_date.notna())
         if "trade_valid_1" in group:
             valid &= group.trade_valid_1.fillna(False).astype(bool)
-        score='arithmetic_expected_return' if 'arithmetic_expected_return' in group else 'expected_return'
-        candidates = group.loc[group.probability_up.ge(config.min_probability)
-                               & group[score].gt(roundtrip + config.min_expected_return)]
-        selected = candidates.sort_values([score, "ticker"], ascending=[False, True]).head(config.max_positions)
+        selected = select_portfolio_candidates(group, config, rule_only=rule_only)
+        if '_decision_weight' in selected and selected._decision_weight.sum() > 1 + 1e-12:
+            raise ValueError('Selected decision weights exceed available capital')
         # Select on decision-time information only. If a selected order cannot
         # execute, its allocation stays cash; future fillability cannot promote
         # another stock into the selected portfolio.
         eligible = selected.loc[valid.reindex(selected.index)]
         weight = min(config.max_weight, 1 / config.max_positions)
-        allocation = weight * len(eligible)
+        weights = eligible.get('_decision_weight', pd.Series(weight, index=eligible.index))
+        # Retain exact baseline arithmetic when all allocated weights coincide.
+        uniform = weights.nunique() <= 1
+        weight = float(weights.iloc[0]) if len(weights) else weight
+        allocation = weight * len(eligible) if uniform else float(weights.sum())
         lot_returns = ((1 + eligible.trade_return_1) * (1 - sell) / (1 + buy) - 1)
-        strategy_return = float(weight * lot_returns.sum())
-        strategy_gross=float(weight*eligible.trade_return_1.sum())
+        strategy_return = float(weight * lot_returns.sum() if uniform else (weights * lot_returns).sum())
+        strategy_gross=float(weight*eligible.trade_return_1.sum() if uniform else (weights * eligible.trade_return_1).sum())
         benchmark_gross=float(benchmark_vals.iloc[0]) if len(benchmark_vals) else np.nan
         # The overnight-flat ETF strategy stays cash when its opening trade is
         # unavailable. Stock trades still execute on the observed market day.
@@ -510,7 +548,8 @@ def simulate_portfolio(predictions: pd.DataFrame, config: ResearchConfig) -> tup
                      "benchmark_absolute_open": float(absolute_open.iloc[0]) if len(absolute_open) else np.nan,
                      "benchmark_absolute_close": float(absolute_close.iloc[0]) if len(absolute_close) else np.nan,
                      "exposure": allocation / (1 + buy), "positions": len(eligible),
-                     "turnover": float(weight * np.sum((2 + eligible.trade_return_1) / (1 + buy)))})
+                     "turnover": float(weight * np.sum((2 + eligible.trade_return_1) / (1 + buy)) if uniform
+                                       else np.sum(weights * (2 + eligible.trade_return_1) / (1 + buy)))})
     equity = pd.DataFrame(rows)
     if equity.empty:
         return equity, {"status": "unavailable", "reason": "no executable dated observations", "orders": 0}

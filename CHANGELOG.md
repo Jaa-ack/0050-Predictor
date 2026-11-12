@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 2026-11-12
+
+- Evaluated pinned MIT Trader Skill and Day Trader Skill sources and reproduced nonfinite-input risk/screener defects despite passing upstream tests.
+- Adapted explained offline screening and five causal daily setup flags; independently implemented fail-closed paper target-weight, cash, exposure, volatility and declared-asset checks.
+- Added opt-in matched A/B/C/D and independent rule experiments over existing snapshots, preserving all forecast rows, fixed-ten training, same-model transfer and sealed final dates.
+- Extended the existing simulator with validated optional eligibility/weights and rule-only selection, verifying exact original baseline predictions and accounting.
+- Completed historical comparisons without robust predictive gains; retained zero-trade filter/risk results, poor cost-adjusted breakout performance and failed daily full-coverage evidence.
+- Added boundary, causality, transfer/holdout-isolation and CLI tests, source attribution and MIT notices in both source and wheel distributions; no data acquisition, live orders, schedules or production-model changes.
+
 ## Unreleased — 2026-11-08
 
 - Added past-known own-stock US-sector response coefficients and current-window interactions with paired-observation minima, causal clock alignment and unchanged original feature profiles.

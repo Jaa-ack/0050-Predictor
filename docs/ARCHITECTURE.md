@@ -33,6 +33,7 @@ flowchart LR
 | `credentials` / `secret_audit` | 伺服端Key、PKCS#12私人複本、原生SDK日誌隔離、遮罩與發布集合稽核 |
 | `universe` | 使用者固定十檔、延伸測試角色及指數點數語義 |
 | `comparison` / `diagnostics` | 開發期特徵消融與以市場日期為單位的成對損失區塊抽樣 |
+| `skill_screener` / `skill_signals` / `skill_risk` / `skill_integration` | 獨立離線篩選、日線旗標、紙上目標組合檢查與 A/B/C/D/R 比較；不寫正式模型／帳本，不刪除方向評分樣本 |
 | `features` | `build_features`、`point_in_time_join`；只有 `f_` 欄位能進模型 |
 | `research` | `ResearchConfig`、`run_research`、`train_latest`、`simulate_portfolio` |
 | `holdout` | 固定資料時間界線之外的封存樣本評估 |

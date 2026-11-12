@@ -1,0 +1,9 @@
+{
+  "name": "past-known daily trend and activity",
+  "missing": "fail",
+  "rules": [
+    {"metric": "f_price_ma20", "op": ">", "value": 0},
+    {"metric": "f_rvol_20", "op": ">=", "value": 1}
+  ],
+  "rank": []
+}

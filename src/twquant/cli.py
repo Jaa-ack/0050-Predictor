@@ -112,6 +112,19 @@ def parser():
     compare.add_argument("--config", type=Path)
     compare.add_argument("--events", type=Path)
     compare.add_argument("--holdout-dates", type=int, default=126)
+    screen = subs.add_parser('screen', help='離線篩選既有特徵JSON/CSV，保留通過、失敗與缺失原因；不訓練或下單')
+    screen.add_argument('metrics', type=Path)
+    screen.add_argument('--rules', type=Path, required=True)
+    screen.add_argument('--out', type=Path, help='完整結果JSON或CSV；不只匯出通過者')
+    study = subs.add_parser('skill-study', help='既有快照的A/B/C/D與純日線規則比較；不開封保留期、不更新正式模型')
+    study.add_argument('--config', type=Path)
+    study.add_argument('--rules', type=Path)
+    study.add_argument('--risk-limits', type=Path)
+    study.add_argument('--events', type=Path)
+    study.add_argument('--snapshot', help='既有PriceStore快照ID；預設最新，不取得新資料')
+    study.add_argument('--mode', choices=['postclose', 'preopen'], default='postclose')
+    study.add_argument('--holdout-dates', type=int, default=126)
+    study.add_argument('--out', type=Path, help='必須是尚未存在的獨立實驗目錄')
     direction = subs.add_parser('direction-search', help='巢狀時間比較方向模型，檢查固定十檔全部252種五檔組合；不開封保留期')
     direction.add_argument('--config', type=Path)
     direction.add_argument('--reference-run', type=Path,
@@ -201,6 +214,42 @@ def execute(args):
     from .data import PriceStore
     default_root = {'demo': 'artifacts/demo', 'direction-simulate': 'artifacts/direction-synthetic'}
     root = args.root or Path(default_root.get(args.command, 'artifacts/real'))
+    if args.command == 'screen':
+        from .skill_screener import load_metrics, screen
+        results = screen(load_metrics(args.metrics), json.loads(args.rules.read_text(encoding='utf-8')))
+        if args.out:
+            if args.out.suffix.lower() == '.json':
+                write_json(args.out, results)
+            elif args.out.suffix.lower() == '.csv':
+                import pandas as pd
+                args.out.parent.mkdir(parents=True, exist_ok=True)
+                rows = [dict(r, checks=json.dumps(r['checks'], ensure_ascii=False),
+                             rank_parts=json.dumps(r['rank_parts']), rank_gaps=json.dumps(r['rank_gaps'])) for r in results]
+                pd.DataFrame(rows, columns=['ticker', 'passed', 'checks', 'score', 'rank_parts', 'rank_gaps']).to_csv(args.out, index=False)
+            else:
+                raise ValueError('Screen output must use .json or .csv')
+        return dict(total=len(results), passed=sum(r['passed'] for r in results), results=results)
+    if args.command == 'skill-study':
+        from .skill_integration import compare_skill_modules
+        from .skill_risk import RiskLimits
+        from .workflows import load_events
+        from uuid import uuid4
+        rules = json.loads(args.rules.read_text(encoding='utf-8')) if args.rules else None
+        risk = None
+        if args.risk_limits:
+            values = json.loads(args.risk_limits.read_text(encoding='utf-8'))
+            if not isinstance(values, dict) or set(values) - {f.name for f in fields(RiskLimits)}:
+                raise ValueError('Unknown risk limit configuration')
+            risk = RiskLimits(**values)
+        output = args.out or root / 'skill-studies' / uuid4().hex
+        if output.exists():
+            raise ValueError('Skill study requires a fresh output directory')
+        report = compare_skill_modules(PriceStore(root / 'data').read_prices(args.snapshot), config_from(args.config),
+            external=load_events(args.events), rule_spec=rules, risk_limits=risk,
+            mode=args.mode, holdout_dates=args.holdout_dates, output=output)
+        return dict(report=str(output / 'report.json'), data_kind=report['data_kind'],
+                    holdout_opened=False, variants=list(report['variants']),
+                    paired_brier_B_minus_A=report['paired_brier_B_minus_A'])
     if args.command=='export-web':
         from .web_export import export_dashboard
         return export_dashboard(root,args.out)

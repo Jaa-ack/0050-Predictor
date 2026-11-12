@@ -12,6 +12,8 @@
 
 [優化順序與驗收方法](docs/OPTIMIZATION_PLAN.md)列出基準／機率校準、可成交目標、因子消融、歷史版本、執行環境及每日營運的下一步；建議項目尚未全部實作。
 
+[Trader Skills 整合評估](docs/SKILL_INTEGRATION_EVALUATION.md)記錄兩個 MIT 來源的程式檢查、修改移植的離線篩選／五種日線訊號，以及參考重寫的紙上風控。`screen` 可獨立處理既有特徵 JSON／CSV；`skill-study` 只用既有快照比較 A/B/C/D 與純規則策略，不更新正式模型。歷史比較尚無穩健增益，預設不啟用至每日預測。
+
 富邦`.p12`／`.pfx`可透過`secrets import-cert --from /absolute/path/exported.p12`安全複製至本機私人目錄；API費用、免費替代與人工設定見[憑證及資源指南](docs/CERTIFICATES_AND_COSTS.md)。免費資料可直接執行：
 
 ```bash

@@ -1,5 +1,14 @@
 # 本機實作與驗證紀錄
 
+## Trader Skills 第一階段（2026-11-12）
+
+- `LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m pytest -q`：**472 passed in 103.91s**；其中新增 81 項篩選、訊號、紙上風控、投資組合、整合與 CLI 測試。`node --test tests/web_state.test.mjs`：**10 passed**。
+- 固定 SHA 的兩個來源相關離線 unittest 共 **265 passed**；另重現兩版 Risk 對 NaN 金額給 PASS 及 Screener 對 NaN 不等於零給 PASS，整合版對應邊界已拒絕。
+- 既有 2014–2026 歷史快照完成相同原設定的 A/B/C/D/R 比較，未開封 2026-05-05 起的最後126日，沒有更新正式模型、帳本或排程。B 的1日 Brier微降、5／20日惡化，三個成對區間皆跨零；C/D無交易，R成本後約-50.14%，沒有穩健增益或每日完整75%證據。
+- 修改前 `9aaf6e8` 的研究程式獨立重跑，baseline逐筆預測與原投資組合曲線／指標完全相同；最終研究再次重跑，保留資料／程式 hash、相同A/B答案與18項產物校驗。原始資料／逐筆成果僅在忽略的本機目錄。
+- `python -m twquant secrets audit` 工作樹檢查通過；提交前另核對staged集合。wheel／sdist成功建置，完整第三方MIT聲明均存在，未包含runtime資料、模型、私人.env或憑證。部分Arrow讀取會印出sandbox CPU sysctl權限診斷，不影響驗證。
+- 完整來源、評估表、公式、實驗數字與重現指令見 [SKILL_INTEGRATION_EVALUATION.md](SKILL_INTEGRATION_EVALUATION.md)。本次沒有修改前端或託管合成預覽。
+
 ## 任意五檔方向研究（2026-11-07）
 
 - 第八輪：`LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m pytest -q`：**270 passed**，沒有警告；`node --test tests/web_state.test.mjs`：**10 passed**。第七輪249項、第六輪234項、第五輪226項、第四輪225項、第三輪218項、第二輪195項、第一輪189項。
