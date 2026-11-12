@@ -176,6 +176,10 @@ def parser():
     ceiling.add_argument('--config',type=Path,required=True)
     ceiling.add_argument('--membership',type=Path,required=True)
     ceiling.add_argument('--out',type=Path,required=True)
+    first=subs.add_parser('direction-first-change-study',help='獨立探索有期限的首次價格變動方向；不替代固定端點目標')
+    first.add_argument('--config',type=Path,required=True)
+    first.add_argument('--membership',type=Path,required=True)
+    first.add_argument('--out',type=Path,required=True)
     f = subs.add_parser("predict", help="保存不可覆寫的1/5/20日預測")
     f.add_argument("--as-of", required=True)
     f.add_argument("--paper", action="store_true")
@@ -226,6 +230,11 @@ def execute(args):
     default_root = {'demo': 'artifacts/demo', 'direction-simulate': 'artifacts/direction-synthetic',
                     'direction-feasibility': 'artifacts/direction-feasibility'}
     root = args.root or Path(default_root.get(args.command, 'artifacts/real'))
+    if args.command=='direction-first-change-study':
+        from .first_change_study import run_first_change_study
+        report=run_first_change_study(json.loads(args.config.read_text()),args.membership,args.out)
+        return dict(report=str(args.out/'report.json'),evidence_kind=report['evidence_kind'],
+                    experiments=len(report['experiments']),models_trained=report['models_trained'],target_scope_confirmed=True,target_feasibility_established=False)
     if args.command=='direction-queue-ceiling':
         from .queue_ceiling import run_queue_ceiling
         report=run_queue_ceiling(json.loads(args.config.read_text()),args.membership,args.out)
@@ -584,7 +593,7 @@ def main(argv=None):
     args = parser().parse_args(argv)
     credentials=None
     try:
-        if args.command not in {'direction-feasibility','direction-queue-study','direction-queue-ceiling'} and not (args.command=='secrets' and args.secret_command=='init'):
+        if args.command not in {'direction-feasibility','direction-queue-study','direction-queue-ceiling','direction-first-change-study'} and not (args.command=='secrets' and args.secret_command=='init'):
             credentials=load_dotenv()
         result = execute(args)
         if result is not None:

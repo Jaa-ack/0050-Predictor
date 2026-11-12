@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-12 — Bounded first-change direction
+
+- Recorded the user's acceptance of daily fixed-clock forecasts for the first price change within60seconds, retaining timeouts as incorrect and separating this target from clock endpoints.
+- Added exact Brownian first-passage races, analytical finite-wait/missing-input bounds and fixed-ten-only shared imbalance classifiers without prescribing a probability of correctness.
+- Added independent first-event timing/coverage accounting and explicit guards against feeding first-event labels into clock-endpoint fitting or audits.
+- Completed42 frozen experiments and independently verified all126model audits, calibration choices, distribution-based labels, external isolation and actual fitted-policy bounds.
+- Preserved the numerical protocol across later scope confirmation, checked source equivalence and exact fresh probabilities, and documented latency sensitivity and adverse depth/activity cases without claiming market75feasibility.
+
 ## Unreleased — 2026-11-12 — Privileged-state queue ceilings
 
 - Extracted shared observed-history simulation while preserving original feature frames, endpoint labels and index behavior.

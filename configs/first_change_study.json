@@ -1,0 +1,16 @@
+{
+  "train_dates": 600,
+  "calibration_dates": 200,
+  "test_dates": 2000,
+  "seeds": [17,29,43],
+  "max_wait_seconds": [30,60],
+  "scenarios": [
+    {"name":"exponential_depths","queue_shape":1.0},
+    {"name":"heavy_tail_depths","queue_shape":0.5},
+    {"name":"balanced_depths","queue_shape":2.0},
+    {"name":"slow_activity","diffusion_scale":0.2},
+    {"name":"common_feed_outage","input_outage_fraction":0.25},
+    {"name":"balanced_external_five","external_queue_shapes":[["1216",4.0],["2303",4.0],["2327",4.0],["2345",4.0],["2357",4.0]]},
+    {"name":"slow_external_five","external_diffusion_scales":[["1216",0.2],["2303",0.2],["2327",0.2],["2345",0.2],["2357",0.2]]}
+  ]
+}

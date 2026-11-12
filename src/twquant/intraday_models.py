@@ -63,6 +63,8 @@ def fit_intraday_model(frame,name,*,fit_at):
     """Reject outside training rows, mixed horizons and unmatured answers."""
     if name not in (*MODELS,*EXTRA_MODELS):
         raise ValueError('Unknown intraday model')
+    if 'target_kind' in frame and not frame.target_kind.eq('fixed_endpoint').all():
+        raise ValueError('Clock-endpoint fitting rejects other target definitions')
     if set(frame.ticker.astype(str))!=set(TRAINING_TICKERS):
         raise ValueError('Intraday fitting requires exactly the fixed ten training stocks')
     stamp=pd.Timestamp(fit_at)

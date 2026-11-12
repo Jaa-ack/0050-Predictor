@@ -54,6 +54,8 @@ def audit_intraday_predictions(predictions, constituents, *, expected_decisions,
     if not required<=set(predictions):
         raise ValueError('Intraday predictions lack required columns')
     p=predictions.copy()
+    if 'target_kind' in p and not p.target_kind.eq('fixed_endpoint').all():
+        raise ValueError('Clock-endpoint audit rejects other target definitions')
     p['ticker']=p.ticker.astype(str)
     if not set(p.ticker)<=set(universe):
         raise ValueError('Predictions are outside the declared constituents')
