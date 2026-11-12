@@ -1,0 +1,15 @@
+{
+  "train_dates": 600,
+  "calibration_dates": 200,
+  "test_dates": 1000,
+  "seeds": [17, 29, 43],
+  "horizons_seconds": [1, 5, 30, 60],
+  "scenarios": [
+    {"name": "neutral_flow", "flow_imbalance": 0.0, "flip_rate": 0.02},
+    {"name": "persistent_flow", "flow_imbalance": 0.8, "flip_rate": 0.002},
+    {"name": "pressure_reversals", "flow_imbalance": 0.8, "flip_rate": 0.05},
+    {"name": "market_feed_outage", "flow_imbalance": 0.8, "flip_rate": 0.002, "input_outage_fraction": 0.25},
+    {"name": "weak_external_transfer", "flow_imbalance": 0.8, "flip_rate": 0.002,
+      "weak_tickers": ["1216", "2303", "2327", "2345", "2357"], "weak_flow_imbalance": 0.1}
+  ]
+}

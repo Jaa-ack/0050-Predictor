@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 2026-11-12 — Causal queue-process experiments
+
+- Added a finite-horizon, explicitly synthetic queue-depletion process with separate observed/future random streams, date-common feed outages and declared weak-transfer scenarios.
+- Added shared fixed-ten prior, snapshot and historical-path classifiers with mature-label and receipt-clock guards; flat training labels and daily fallback forecasts are retained.
+- Added an offline, credential-free study command that freezes its protocol before fitting, selects only on fixed-ten calibration and preserves every control's full50 results.
+- Documented the simplified process, its uncalibrated parameters and the distinction between conditional simulation success and a credible market75expectation.
+- Completed all60 declared comparisons and independently recomputed all240control audits; conditional persistent-flow success did not survive the five-stock weak-transfer intervention.
+- Verified a fresh fixed-ten-only replay and all12external-strength intervention pairs; retained numerical source snapshots across a subsequent endpoint-maturity guard extension and exact-probability replay.
+
 ## Unreleased — 2026-11-12 — Intraday research scope
 
 - Recorded authorization to research shorter intraday future intervals while retaining daily full coverage and the immutable training universe.
