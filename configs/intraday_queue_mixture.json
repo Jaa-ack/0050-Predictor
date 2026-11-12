@@ -1,0 +1,23 @@
+{
+  "train_dates": 600,
+  "calibration_dates": 200,
+  "test_dates": 1000,
+  "seeds": [17, 29, 43],
+  "horizons_seconds": [30],
+  "reference_training_scenario": {"name": "pure_reference", "persistent_fraction": 1.0},
+  "scenarios": [
+    {"name": "mix_00", "persistent_fraction": 0.0},
+    {"name": "mix_25", "persistent_fraction": 0.25},
+    {"name": "mix_50", "persistent_fraction": 0.5},
+    {"name": "mix_60", "persistent_fraction": 0.6},
+    {"name": "mix_70", "persistent_fraction": 0.7},
+    {"name": "mix_80", "persistent_fraction": 0.8},
+    {"name": "mix_100", "persistent_fraction": 1.0},
+    {"name": "mix_80_feed25", "persistent_fraction": 0.8, "input_outage_fraction": 0.25},
+    {"name": "mix_80_weakfive", "persistent_fraction": 0.8,
+      "external_persistent_fractions": [["1216",0.4],["2303",0.4],["2327",0.4],["2345",0.4],["2357",0.4]]},
+    {"name": "adaptive_05", "liquidity_response": 0.5},
+    {"name": "adaptive_10", "liquidity_response": 1.0},
+    {"name": "adaptive_15", "liquidity_response": 1.5}
+  ]
+}

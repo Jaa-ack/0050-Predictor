@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-12 — Queue regimes and liquidity response
+
+- Added hidden daily-window regime mixtures and external-only frequency overrides, keeping weak windows and all daily forecasts in the audit.
+- Added a causal liquidity-response counterfactual driven by already observed simulated order signs; its parameters remain uncalibrated.
+- Added an optional pure-training historical-logistic reference outside candidate selection, plus environment metadata in frozen study protocols.
+- Completed36 declared mixture/liquidity experiments and independently recomputed all180control audits; retained all weak windows, fallback days and adverse transfer outcomes.
+- Verified exact legacy pure baselines, hidden-regime counterfactual couplings, external-frequency isolation and a fresh fixed-ten-only replay; documented conditional requirements without treating order-flow memory as price-prediction accuracy.
+
 ## Unreleased — 2026-11-12 — Causal queue-process experiments
 
 - Added a finite-horizon, explicitly synthetic queue-depletion process with separate observed/future random streams, date-common feed outages and declared weak-transfer scenarios.

@@ -113,3 +113,34 @@ def test_a_premature_receipt_stamp_cannot_make_a_future_endpoint_a_mature_traini
     frame['label_available_at']=frame.decision_at-pd.Timedelta(seconds=1)
     with pytest.raises(ValueError,match='mature'):
         fit_model(frame,fit_at=frame.decision_at.max())
+
+
+def test_daily_regime_mixtures_are_coupled_to_endpoints_without_exposing_the_hidden_regime():
+    from twquant.intraday_queue import QueueScenario
+    strong=simulate(scenario=QueueScenario('strong',flow_imbalance=.8))
+    background=simulate(scenario=QueueScenario('background',flow_imbalance=.1))
+    mixed=simulate(scenario=QueueScenario('mixed',persistent_fraction=.5,background_flow_imbalance=.1))
+    mask=mixed.diagnostic_persistent_regime
+    assert mask.any() and not mask.all()
+    columns=[c for c in strong if c.startswith('f_book_')]+['actual_return']
+    pd.testing.assert_frame_equal(mixed.loc[mask,columns],strong.loc[mask,columns])
+    pd.testing.assert_frame_equal(mixed.loc[~mask,columns],background.loc[~mask,columns])
+    model=fit_model(mixed,fit_at=mixed.label_available_at.max()+pd.Timedelta(days=1))
+    np.testing.assert_array_equal(model.predict_proba(mixed),model.predict_proba(mixed.assign(diagnostic_persistent_regime=~mask)))
+
+
+def test_external_regime_frequencies_do_not_change_primary_history_and_liquidity_response_is_causal():
+    from twquant.intraday_queue import QueueScenario
+    universe=(*TRAINING_TICKERS,'1216')
+    a=simulate(universe,scenario=QueueScenario('base',persistent_fraction=.8))
+    b=simulate(universe,scenario=QueueScenario('weak',persistent_fraction=.8,
+        external_persistent_fractions=(('1216',0.),)))
+    pd.testing.assert_frame_equal(a[a.ticker.isin(TRAINING_TICKERS)].reset_index(drop=True),
+                                  b[b.ticker.isin(TRAINING_TICKERS)].reset_index(drop=True))
+    response=QueueScenario('adaptive',liquidity_response=1.)
+    c=simulate(scenario=response);d=simulate(scenario=response,future_seed=43)
+    pd.testing.assert_frame_equal(c.filter(like='f_book_'),d.filter(like='f_book_'))
+    assert not c.actual_return.equals(simulate().actual_return)
+    with pytest.raises(ValueError):QueueScenario('bad',persistent_fraction=1.1)
+    with pytest.raises(ValueError):QueueScenario('bad',liquidity_response=-1.)
+    with pytest.raises(ValueError):QueueScenario('bad',external_persistent_fractions=(('2330',.5),))
