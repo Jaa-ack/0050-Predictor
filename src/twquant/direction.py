@@ -26,7 +26,8 @@ class DirectionCandidate:
     def __post_init__(self):
         if self.model not in {'prior', 'logistic', 'hist', 'extra_trees', 'random_forest', 'factor_ridge', 'factor_hist',
                               'factor_beta_ridge', 'factor_beta_hist', 'factor_beta_vol_ridge', 'factor_beta_vol_hist',
-                              'opening_residual_ridge', 'opening_residual_hist', 'opening_residual_vol_ridge', 'opening_residual_vol_hist'}:
+                              'opening_residual_ridge', 'opening_residual_hist', 'opening_residual_vol_ridge', 'opening_residual_vol_hist',
+                              'similarity_tight', 'similarity_local', 'similarity_wide'}:
             raise ValueError('Unknown direction model')
         if self.feature_profile not in {'portable_price', 'portable_market', 'portable_all', 'portable_path', 'portable_sector', 'portable_flow', 'portable_opening', 'portable_margin', 'portable_response'}:
             raise ValueError('Unknown direction feature profile')
@@ -80,6 +81,14 @@ MARGIN_CANDIDATES = FLOW_CANDIDATES + tuple(
 RESPONSE_CANDIDATES = MARGIN_CANDIDATES + tuple(
     DirectionCandidate(model, 'portable_response', 756)
     for model in ('logistic', 'hist', 'extra_trees', 'random_forest', 'factor_beta_ridge', 'factor_beta_vol_ridge')
+)
+SIMILARITY_CANDIDATES = (
+    DirectionCandidate('prior'),
+    DirectionCandidate('logistic', 'portable_price', 756),
+    DirectionCandidate('logistic', 'portable_response', 756),
+    DirectionCandidate('hist', 'portable_response', 756),
+    *(DirectionCandidate(model, 'portable_response', 756)
+      for model in ('similarity_tight', 'similarity_local', 'similarity_wide')),
 )
 OPENING_CANDIDATES = (
     DirectionCandidate('prior'),

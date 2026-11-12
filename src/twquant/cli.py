@@ -158,8 +158,8 @@ def parser():
                            help='僅opening-proxy／opening-residual：依股票及日期固定的種子，預設17')
     direction.add_argument('--holdout-dates', type=int, default=126)
     direction.add_argument('--membership', type=Path, help='完整當期0050持股JSON快照；外部成分只作同模型測試')
-    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path', 'sector', 'flow', 'margin', 'response', 'opening-proxy', 'opening-residual'], default='base',
-                           help='base八組；factor十組；market十六組；exposure二十四組；path三十組；sector三十六組；flow四十二組；margin四十八組；response五十四組；opening-proxy五組；opening-residual九組合成參考假設')
+    direction.add_argument('--candidate-set', choices=['base', 'factor', 'market', 'exposure', 'path', 'sector', 'flow', 'margin', 'response', 'similarity', 'opening-proxy', 'opening-residual'], default='base',
+                           help='base八組；factor十組；market十六組；exposure二十四組；path三十組；sector三十六組；flow四十二組；margin四十八組；response五十四組；similarity七組共享近鄰比較；opening-proxy五組；opening-residual九組合成參考假設')
     direction.add_argument('--selection-policy', choices=['worst_stock_accuracy', 'pooled_brier', 'worst_stock_brier'],
                            default='worst_stock_accuracy', help='Brier規則固定0.5門檻；只以校準期選模')
     simulation = subs.add_parser('direction-simulate', help='模擬假設資訊量、延遲及缺漏；合成結果不是真實預測證據')
@@ -345,7 +345,7 @@ def execute(args):
         return dict(selected_profile=result["selected_profile"], scores=result["scores"], holdout_opened=False)
     if args.command in {'direction-search', 'direction-simulate'}:
         import uuid
-        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, SECTOR_CANDIDATES, FLOW_CANDIDATES, MARGIN_CANDIDATES, RESPONSE_CANDIDATES, OPENING_CANDIDATES, OPENING_RESIDUAL_CANDIDATES, search_direction_models, simulate_information_scenarios
+        from .direction import DEFAULT_CANDIDATES, FACTOR_CANDIDATES, MARKET_CANDIDATES, EXPOSURE_CANDIDATES, PATH_CANDIDATES, SECTOR_CANDIDATES, FLOW_CANDIDATES, MARGIN_CANDIDATES, RESPONSE_CANDIDATES, SIMILARITY_CANDIDATES, OPENING_CANDIDATES, OPENING_RESIDUAL_CANDIDATES, search_direction_models, simulate_information_scenarios
         from .direction_audit import load_membership_snapshot
         from .features import build_features
         from .workflows import data_kind, load_events
@@ -361,18 +361,18 @@ def execute(args):
         if args.taifex_exposure and not args.taifex_history:
             raise ValueError('--taifex-exposure requires --taifex-history')
         opening_proxy = args.candidate_set in {'opening-proxy', 'opening-residual'}
-        if args.candidate_set in {'margin','response'} and args.mode != 'preopen':
-            raise ValueError('margin/response requires --mode preopen for its21:00 receipt contract')
+        if args.candidate_set in {'margin','response','similarity'} and args.mode != 'preopen':
+            raise ValueError('margin/response/similarity requires --mode preopen for its21:00 receipt contract')
         if opening_proxy and args.mode != 'preopen':
             raise ValueError('Opening proxy studies require --mode preopen and are always synthetic')
         if not opening_proxy and any(v is not None for v in (args.opening_noise_bps, args.opening_missing_fraction, args.opening_seed)):
             raise ValueError('Opening simulation options require --candidate-set opening-proxy or opening-residual')
-        if (args.candidate_set in {'sector', 'flow', 'margin', 'response', 'opening-proxy', 'opening-residual'}) != bool(args.sector_history):
-            raise ValueError('--sector-history is required only with sector, flow, margin or an opening study')
-        if (args.candidate_set in {'flow', 'margin', 'response', 'opening-proxy', 'opening-residual'}) != bool(args.flow_history):
-            raise ValueError('--flow-history is required only with flow, margin or an opening study')
-        if (args.candidate_set in {'margin','response'}) != bool(args.margin_history):
-            raise ValueError('--margin-history is required only with --candidate-set margin or response')
+        if (args.candidate_set in {'sector', 'flow', 'margin', 'response', 'similarity', 'opening-proxy', 'opening-residual'}) != bool(args.sector_history):
+            raise ValueError('--sector-history is required only with sector, flow, margin, response, similarity or an opening study')
+        if (args.candidate_set in {'flow', 'margin', 'response', 'similarity', 'opening-proxy', 'opening-residual'}) != bool(args.flow_history):
+            raise ValueError('--flow-history is required only with flow, margin, response, similarity or an opening study')
+        if (args.candidate_set in {'margin','response','similarity'}) != bool(args.margin_history):
+            raise ValueError('--margin-history is required only with --candidate-set margin, response or similarity')
         store = PriceStore(root / 'data')
         membership = load_membership_snapshot(args.membership) if args.membership else None
         config = config_from(args.config)
@@ -414,7 +414,7 @@ def execute(args):
         if args.taifex_exposure:
             from .taifex_exposure import add_taifex_exposure_features
             frame = add_taifex_exposure_features(frame, history)
-        price_path = args.candidate_set in {'path', 'sector', 'flow', 'margin', 'response', 'opening-proxy', 'opening-residual'}
+        price_path = args.candidate_set in {'path', 'sector', 'flow', 'margin', 'response', 'similarity', 'opening-proxy', 'opening-residual'}
         if price_path:
             from .price_path import add_price_path_features
             frame = add_price_path_features(frame)
@@ -441,7 +441,7 @@ def execute(args):
             margin_sha = hashlib.sha256(margin_bytes).hexdigest()
             margin_sources = sorted(margin_history.source.unique().tolist())
             if data_kind(margin_history) == 'synthetic': kind = 'synthetic'
-        if args.candidate_set=='response':
+        if args.candidate_set in {'response','similarity'}:
             from .sector_response import add_sector_response_features
             frame=add_sector_response_features(frame)
         if opening_proxy:
@@ -482,7 +482,7 @@ def execute(args):
             candidates={'base': DEFAULT_CANDIDATES, 'factor': FACTOR_CANDIDATES,
                         'market': MARKET_CANDIDATES, 'exposure': EXPOSURE_CANDIDATES,
                         'path': PATH_CANDIDATES, 'sector': SECTOR_CANDIDATES,
-                        'flow': FLOW_CANDIDATES, 'margin': MARGIN_CANDIDATES, 'response': RESPONSE_CANDIDATES, 'opening-proxy': OPENING_CANDIDATES,
+                        'flow': FLOW_CANDIDATES, 'margin': MARGIN_CANDIDATES, 'response': RESPONSE_CANDIDATES, 'similarity': SIMILARITY_CANDIDATES, 'opening-proxy': OPENING_CANDIDATES,
                         'opening-residual': OPENING_RESIDUAL_CANDIDATES}[args.candidate_set],
             selection_policy=args.selection_policy, mode=args.mode,
             constituents=membership['tickers'] if membership is not None else None,

@@ -157,6 +157,10 @@ def fit_direction_model(candidate, train, columns, horizon, seed):
         train = train.loc[train.date >= dates[-min(candidate.window_dates, len(dates))]]
     if candidate.model.startswith('opening_residual_'):
         return _fit_opening_residual(candidate, train, columns, horizon, seed)
+    if candidate.model.startswith('similarity_'):
+        from .direction_similarity import RADII, SimilarityDirectionModel
+        labels = train[f'target_{horizon}'].gt(0).to_numpy(dtype=int)
+        return SimilarityDirectionModel(train, columns, labels, RADII[candidate.model]), train
     if not candidate.model.startswith('factor_'):
         labels = train[f'target_{horizon}'].gt(0).to_numpy(dtype=int)
         model = _classifier(candidate, seed, labels).fit(_numeric(train, columns), labels)

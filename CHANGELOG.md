@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 2026-11-12 — Shared similarity research
+
+- Added a fixed-ten historical-state similarity classifier with training-only transforms, prior shrinkage, minimum distinct-date support and full daily fallbacks.
+- Added a separate seven-candidate comparison with four matched controls and three declared radii, preserving the original targets, features, calendars and transfer roles.
+- Reproduced and corrected arbitrary neighbor-cutoff ties, retaining the initial evidence and replaying the study under a new source fingerprint.
+- Extended the primary-source feasibility review to Taiwan radius-neighbor, confidence-fusion and centroid-smoothing research without transferring incompatible accuracy claims.
+- Completed three matched-control and three similarity comparisons, independently recomputed all audits and verified exact original-control scores and tie-fix replay probabilities; all full-coverage target gates remain unmet.
+- Bound reference recipes to the imported similarity implementation and added a regression proving that changed dependency fingerprints reject cached model reuse.
+
 ## Unreleased — 2026-11-12 — Direction feasibility
 
 - Reviewed primary GitHub implementations and research, separating daily full-coverage direction from ranking, event-time order-book targets, sentiment classification and filtered-window results.

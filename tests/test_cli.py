@@ -46,13 +46,14 @@ def test_cli_error_boundary_never_echoes_configured_secret(monkeypatch,capsys):
     ('opening-residual', 'pooled_brier', 'preopen', True, True, True),
     ('margin', 'pooled_brier', 'preopen', True, True, True),
     ('response', 'pooled_brier', 'preopen', True, True, True),
+    ('similarity', 'pooled_brier', 'preopen', True, True, True),
 ])
 def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, candidate_set, policy, mode, overseas_window, taifex, taifex_exposure):
     import pandas as pd
     from twquant.data import PriceStore
     from twquant.demo import make_demo_prices
     prices = make_demo_prices(170)
-    if candidate_set in {'flow','opening-proxy','opening-residual','margin','response'}:
+    if candidate_set in {'flow','opening-proxy','opening-residual','margin','response','similarity'}:
         prices['source']='historical_fixture'  # Verify that synthetic flow alone controls evidence kind.
     PriceStore(tmp_path / 'data').write_prices(prices)
     config = tmp_path / 'direction.json'
@@ -64,7 +65,7 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
         timestamps = (dates.tz_localize('Asia/Taipei') + pd.Timedelta(hours=6)).tz_convert('UTC')
         events = pd.DataFrame(dict(ticker='*', feature='fmp_spy_close', value=range(100, 100+len(dates)),
                                   published_at=timestamps, available_at=timestamps, source='synthetic'))
-        if candidate_set in {'flow','opening-proxy','opening-residual','margin','response'}: events['source']='historical_fixture'
+        if candidate_set in {'flow','opening-proxy','opening-residual','margin','response','similarity'}: events['source']='historical_fixture'
         path = tmp_path / 'events.csv'
         events.to_csv(path, index=False)
         extra = ['--overseas-window', '--events', str(path)]
@@ -80,15 +81,15 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
         extra.extend(['--taifex-history', str(history)])
     if taifex_exposure:
         extra.append('--taifex-exposure')
-    if candidate_set in {'sector','flow','opening-proxy','opening-residual','margin','response'}:
+    if candidate_set in {'sector','flow','opening-proxy','opening-residual','margin','response','similarity'}:
         from test_us_sectors import SYMBOLS
         sector_dates = pd.DatetimeIndex(sorted(prices.date.unique()))
         sector = pd.concat([pd.DataFrame(dict(date=sector_dates,symbol=s,
-            adj_close=range(100,100+len(sector_dates)),source='yahoo_historical_chart' if candidate_set in {'flow','opening-proxy','opening-residual','margin','response'} else 'synthetic')) for s in SYMBOLS],ignore_index=True)
+            adj_close=range(100,100+len(sector_dates)),source='yahoo_historical_chart' if candidate_set in {'flow','opening-proxy','opening-residual','margin','response','similarity'} else 'synthetic')) for s in SYMBOLS],ignore_index=True)
         sector_path = tmp_path/'sectors.csv'
         sector.to_csv(sector_path,index=False)
         extra.extend(['--sector-history',str(sector_path)])
-    if candidate_set in {'flow','opening-proxy','opening-residual','margin','response'}:
+    if candidate_set in {'flow','opening-proxy','opening-residual','margin','response','similarity'}:
         rows=[]
         for ticker in prices.ticker.unique():
             if not ticker.isdigit(): continue
@@ -96,12 +97,12 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
                 rows.extend([dict(date=date,stock_id=ticker,name='Foreign_Investor',buy=300,sell=100,source='synthetic'),
                     dict(date=date,stock_id=ticker,name='Investment_Trust',buy=100,sell=300,source='synthetic')])
         flow_path=tmp_path/'flow.csv';pd.DataFrame(rows).to_csv(flow_path,index=False)
-        if candidate_set in {'opening-proxy','opening-residual','margin','response'}:
+        if candidate_set in {'opening-proxy','opening-residual','margin','response','similarity'}:
             data=pd.read_csv(flow_path,dtype={'stock_id':str});data['source']='finmind_historical_institutional';data.to_csv(flow_path,index=False)
         if candidate_set in {'opening-proxy','opening-residual'}:
             extra.extend(['--opening-noise-bps','50','--opening-missing-fraction','.1','--opening-seed','29'])
         extra.extend(['--flow-history',str(flow_path)])
-    if candidate_set in {'margin','response'}:
+    if candidate_set in {'margin','response','similarity'}:
         rows=[]
         for ticker in prices.ticker.unique():
             if not ticker.isdigit():continue
@@ -124,10 +125,10 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
     assert result['overseas_window'] == overseas_window
     assert result['taifex_history'] == taifex
     assert result['taifex_exposure'] == taifex_exposure
-    assert result['price_path'] == (candidate_set in {'path','sector','flow','opening-proxy','opening-residual','margin','response'})
-    assert result['sector_history'] == (candidate_set in {'sector','flow','opening-proxy','opening-residual','margin','response'})
-    assert result['flow_history'] == (candidate_set in {'flow','opening-proxy','opening-residual','margin','response'})
-    assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16, 'exposure': 24, 'path': 30, 'sector': 36, 'flow': 42, 'opening-proxy':5, 'opening-residual':9, 'margin':48,'response':54}[candidate_set]
+    assert result['price_path'] == (candidate_set in {'path','sector','flow','opening-proxy','opening-residual','margin','response','similarity'})
+    assert result['sector_history'] == (candidate_set in {'sector','flow','opening-proxy','opening-residual','margin','response','similarity'})
+    assert result['flow_history'] == (candidate_set in {'flow','opening-proxy','opening-residual','margin','response','similarity'})
+    assert result['candidate_count'] == {'base': 8, 'factor': 10, 'market': 16, 'exposure': 24, 'path': 30, 'sector': 36, 'flow': 42, 'opening-proxy':5, 'opening-residual':9, 'margin':48,'response':54,'similarity':7}[candidate_set]
     assert (tmp_path / result['report']).exists()
     report = json.loads((tmp_path / result['report']).read_text())
     assert report['protocol']['selection_policy'] == policy
@@ -135,14 +136,14 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
     expected_windows = ['f_ext_fmp_spy_window_return', 'f_ext_fmp_spy_window_updated'] if overseas_window else []
     assert report['protocol']['overseas_window_features'] == expected_windows
     provenance = json.loads((tmp_path / result['report']).with_name('data_provenance.json').read_text())
-    assert provenance['price_path'] == (candidate_set in {'path','sector','flow','opening-proxy','opening-residual','margin','response'})
-    if candidate_set in {'flow','margin','response'}:
+    assert provenance['price_path'] == (candidate_set in {'path','sector','flow','opening-proxy','opening-residual','margin','response','similarity'})
+    if candidate_set in {'flow','margin','response','similarity'}:
         assert provenance['flow_history_sha256'] and provenance['flow_sources']==(['synthetic'] if candidate_set=='flow' else ['finmind_historical_institutional'])
         assert len(report['protocol']['institutional_flow_features'])==8
         assert report['protocol']['flow_receipt_contract']['lag_sessions']==2
         assert provenance['flow_receipt_contract']==report['protocol']['flow_receipt_contract']
         added=[c for c in report['protocol']['candidates'] if c['feature_profile']=='portable_flow']
-        assert len(added)==6 and all(c['window_dates']==756 for c in added)
+        assert len(added)==(0 if candidate_set=='similarity' else 6) and all(c['window_dates']==756 for c in added)
         scored={s['candidate'] for s in report['selections'][0]['candidate_scores']}
         assert all(f"{c['model']}:portable_flow:756" in scored for c in added)
     elif candidate_set in {'opening-proxy','opening-residual'}:
@@ -155,26 +156,26 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
         assert provenance['flow_history_sha256'] is None and provenance['flow_sources']==[]
         assert report['protocol']['institutional_flow_features']==[]
         assert report['protocol']['flow_receipt_contract'] is None
-    if candidate_set in {'margin','response'}:
+    if candidate_set in {'margin','response','similarity'}:
         assert result['margin_history'] is True
         assert provenance['margin_history_sha256'] and provenance['margin_sources']==['synthetic']
         assert len(report['protocol']['margin_features'])==18
         assert report['protocol']['margin_receipt_contract']['lag_sessions']==2
         assert report['protocol']['margin_receipt_contract']==provenance['margin_receipt_contract']
         added=[c for c in report['protocol']['candidates'] if c['feature_profile']=='portable_margin']
-        assert len(added)==6 and all(c['window_dates']==756 for c in added)
-    if candidate_set=='response':
+        assert len(added)==(0 if candidate_set=='similarity' else 6) and all(c['window_dates']==756 for c in added)
+    if candidate_set in {'response','similarity'}:
         assert len(report['protocol']['sector_response_features'])==14
         assert provenance['sector_response_contract']==report['protocol']['sector_response_contract']
         added=[c for c in report['protocol']['candidates'] if c['feature_profile']=='portable_response']
-        assert len(added)==6 and all(c['window_dates']==756 for c in added)
-    if candidate_set in {'sector','flow','opening-proxy','opening-residual','margin','response'}:
+        assert len(added)==(5 if candidate_set=='similarity' else 6) and all(c['window_dates']==756 for c in added)
+    if candidate_set in {'sector','flow','opening-proxy','opening-residual','margin','response','similarity'}:
         assert provenance['sector_history_sha256']
-        assert provenance['sector_sources'] == (['yahoo_historical_chart'] if candidate_set in {'flow','opening-proxy','opening-residual','margin','response'} else ['synthetic'])
+        assert provenance['sector_sources'] == (['yahoo_historical_chart'] if candidate_set in {'flow','opening-proxy','opening-residual','margin','response','similarity'} else ['synthetic'])
         assert provenance['sector_receipt_assumption'] == 'US17:00 local; original receipt unverified'
         assert len(report['protocol']['us_sector_features']) == 42
         added = [c for c in report['protocol']['candidates'] if c['feature_profile']=='portable_sector']
-        assert len(added) == (0 if candidate_set in {'opening-proxy','opening-residual'} else 6) and all(c['window_dates']==756 for c in added)
+        assert len(added) == (0 if candidate_set in {'opening-proxy','opening-residual','similarity'} else 6) and all(c['window_dates']==756 for c in added)
         scored = {s['candidate'] for s in report['selections'][0]['candidate_scores']}
         assert all(f"{c['model']}:portable_sector:756" in scored for c in added)
     else:
@@ -182,13 +183,13 @@ def test_direction_search_cli_writes_a_separate_research_run(tmp_path, capsys, c
         assert provenance['sector_sources'] == []
         assert report['protocol']['us_sector_features'] == []
     path_features = report['protocol']['price_path_features']
-    if candidate_set in {'path','sector','flow','opening-proxy','opening-residual','margin','response'}:
+    if candidate_set in {'path','sector','flow','opening-proxy','opening-residual','margin','response','similarity'}:
         assert len(path_features) == 13
         assert 'f_path_flat_1_60' in path_features
         assert 'f_path_up_20_252' in path_features
         assert 'f_path_same_sign_1_60' in path_features
         added = [c for c in report['protocol']['candidates'] if c['feature_profile'] == 'portable_path']
-        assert {c['model'] for c in added} == (set() if candidate_set in {'opening-proxy','opening-residual'} else {'logistic','hist','extra_trees','random_forest','factor_beta_ridge','factor_beta_vol_ridge'})
+        assert {c['model'] for c in added} == (set() if candidate_set in {'opening-proxy','opening-residual','similarity'} else {'logistic','hist','extra_trees','random_forest','factor_beta_ridge','factor_beta_vol_ridge'})
         assert all(c['window_dates'] == 756 for c in added)
         scored = {s['candidate'] for s in report['selections'][0]['candidate_scores']}
         assert all(f"{c['model']}:portable_path:756" in scored for c in added)

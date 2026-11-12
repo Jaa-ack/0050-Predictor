@@ -362,3 +362,19 @@ LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membershi
 全部54候選、14欄、反應契約、四組基線及雜湊、三種主規則、同日敏感度及獨立重跑對照均在擬合前凍結。完整50檔、1／5／20日目標、每日分母、原資訊就緒次要診斷及126日保留期均沿用原設定；已重複檢視的開發歷史仍不能當成未見未來實績。
 
 四組比較及獨立核對均已完成。原48候選每折校準分數完全相同；指定完整重跑的一折，其全部54候選分數、不可用紀錄與最終選擇也完全一致。新反應係數以直接中心化配對向量獨立抽查，完整十檔／50檔稽核由預測列與全部日期重算且相符。新增候選沒有帶來一致改善，三種範圍、三種期間及四組比較共36項驗收全部未達75%；所有退步與缺漏保存在本機，沒有開封保留期或更改正式模型。
+
+## 共享歷史相似狀態研究
+
+`--candidate-set similarity --mode preopen`提供獨立七候選比較，資料參數沿用`response`，需要`--sector-history`、`--flow-history`及`--margin-history`。四個控制為prior、756日`portable_price` logistic，以及756日`portable_response`的logistic／hist；新增`similarity_tight`、`similarity_local`、`similarity_wide`三個756日共享近鄰候選。
+
+每折只用成熟固定十檔訓練資料擬合中位數補值、缺失指標及StandardScaler。距離為標準化向量的均方根歐氏距離，半徑分別0.5／1／2；最近256筆作名義上限，同距截點以`1e-12`絕對加相對容差完整納入。至少需要20筆及五個不同歷史日期；機率為`(鄰居上漲數+10×訓練上漲比例)/(鄰居數+10)`，支持不足或輸入未知則回退訓練先驗。模型不按外部股票擬合、更新記憶或改動門檻，近鄰相關性也不視為獨立信心。
+
+這是參考[臺灣Radius Neighbors研究](https://www.mdpi.com/2504-2289/10/4/109)的獨立改寫；原文85.1%對應TAIEX市場強度，不能當成本系統個股表現。本比較不採其缺值刪除或替換方向目標，仍保留完整50檔、每日分母、原資訊就緒診斷與126日保留期。七候選及原四控制均重新擬合，不繞過舊研究配方的重用檢查；完整設計與來源限制見[可行性評估](DIRECTION_FEASIBILITY.md)。
+
+```bash
+LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant --root artifacts/full-membership-transfer-20261107 direction-search --config configs/research_direction.json --events artifacts/fixed-ten/sources/events.csv --candidate-set similarity --sector-history artifacts/sector-context-research-20261107/sector_prices.csv --flow-history artifacts/institutional-flow-research-20261108/institutional_history.csv --flow-lag-sessions 2 --margin-history artifacts/margin-research-20261108/margin_history.csv --margin-lag-sessions 2 --membership artifacts/current-membership/20261107/membership.json --mode preopen --overseas-window --taifex-history artifacts/taifex-night-research-20261107/futures_selected_2017_2026.csv --taifex-exposure --selection-policy pooled_brier
+```
+
+七候選三規則與相同四控制三規則均已完成。控制分數與先前54候選中的相同四項逐折完全一致，全部原十檔／50檔稽核由預測列及完整日期重算且相符。部分規則改善平均表現，但弱股、資訊就緒範圍及不同期間未一致改善；六組比較、三範圍與三期間的54項驗收全部未達75%。等距修正前後的全部預測機率及校準分數完全一致，修正沒有製造此歷史資料的績效增益。全部退步、缺漏及兩版證據保存在本機，正式模型與保留期維持原樣。
+
+基線重用配方也包含獨立近鄰實作檔的指紋；缺少或變更該依賴會拒絕重用，舊配方不得事後補成已驗證。這是上述全部重新擬合比較完成後補強的驗證路徑，沒有改分類器或研究數值；實驗程式快照與修正紀錄分別保留。

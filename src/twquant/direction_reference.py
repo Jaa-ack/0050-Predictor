@@ -41,7 +41,7 @@ def _frame_sha(frame):
 
 def _recipe_signature():
     from .direction import _calibration_metrics,_selection_key
-    files=['direction_models.py','research.py','comparison.py','universe.py']
+    files=['direction_models.py','direction_similarity.py','research.py','comparison.py','universe.py']
     return dict(recipe_files={name:_sha(Path(__file__).parent/name) for name in files},
         recipe_functions={f.__name__:hashlib.sha256(inspect.getsource(f).encode()).hexdigest() for f in [_calibration_metrics,_selection_key]},
         environment=dict(python=platform.python_version(),packages={name:version(name) for name in ['numpy','pandas','scipy','scikit-learn','joblib','threadpoolctl']}))

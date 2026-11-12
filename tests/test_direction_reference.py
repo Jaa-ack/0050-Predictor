@@ -104,3 +104,24 @@ def test_multiple_cached_candidates_preserve_unavailable_scores_and_the_original
     fresh=search_direction_models(augmented,config,candidates=candidates,**options)
     assert cached.report['selections']==fresh.report['selections']
     pd.testing.assert_frame_equal(cached.predictions,fresh.predictions)
+
+
+def test_reference_rejects_a_changed_similarity_implementation_dependency(tmp_path, monkeypatch):
+    from test_direction import preopen_frame, search_frame
+    from test_research import small_config
+    import twquant.direction_reference as reference
+    from twquant.direction import DirectionCandidate, search_direction_models
+    frame=preopen_frame(search_frame())
+    config=small_config(horizons=(1,),max_folds=1,evaluation_tickers=('0050','1216'))
+    candidates=(DirectionCandidate('similarity_local'),)
+    options=dict(candidates=candidates,holdout_dates=15,bootstrap_samples=10,
+                 evidence_kind='synthetic',selection_policy='pooled_brier',mode='preopen')
+    output=tmp_path/'reference'
+    search_direction_models(frame,config,output=output,**options)
+    reference.pin_direction_reference(frame,config,output)
+    original=reference._sha
+    def changed_dependency(path):
+        return '0'*64 if path.name=='direction_similarity.py' else original(path)
+    monkeypatch.setattr(reference,'_sha',changed_dependency)
+    with pytest.raises(ValueError,match='recipe'):
+        search_direction_models(frame,config,reference_run=output,**options)
