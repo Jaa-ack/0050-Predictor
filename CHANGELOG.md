@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — 2026-11-12 — Causal local book inputs
+
+- Added an offline canonical snapshot/checkpoint frame builder with a one-second input buffer, bounded as-of history and explicit unknown-label retention.
+- Added a portable book feature contract invariant to price and quantity units, preserving fixed-ten-only fitting and index queries without fabricated books.
+- Kept synthetic and unverified input evidence separate from source names and planned research cutoffs; no provider session or forecast schedule is enabled.
+- Reviewed auction sources and documented the distinction between endpoint changes, official-opening direction and indicative-price corrections without changing the active target.
+
 ## Unreleased — 2026-11-12 — Queue regimes and liquidity response
 
 - Added hidden daily-window regime mixtures and external-only frequency overrides, keeping weak windows and all daily forecasts in the audit.

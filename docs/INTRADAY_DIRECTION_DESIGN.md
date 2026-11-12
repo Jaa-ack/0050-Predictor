@@ -71,3 +71,5 @@ report = audit_intraday_predictions(
 介面重新建立完整日期乘50檔網格，報告平盤、缺預測、未知答案、無效發報、最低單檔及最弱五檔。`up_vs_nonup_accuracy_diagnostic`只作對照，不代替盤中主指標。每日期須共用模型與門檻；宣告時間本身無法證明原始行情、特徵或訓練隔離，故`empirical_target_met`與`real_world_target_verified`保持`false`。`full_coverage_sample_gate_met`僅表示所給樣本的分數、基線優勢、完整性與最少126交易日條件通過。
 
 這項介面以合成反例驗證：75%平盤加25%下跌、每天猜非上漲可有100%的非上漲對照命中率，但真正漲跌得分只有25%；整體90%仍可能有最弱五檔0%。這些測試驗證記帳規則，不是新預測模型的成績。
+
+已另提供[本機快照到因果特徵矩陣](INTRADAY_BOOK_INPUTS.md)，保留獨立端點、實際到件上界及跨單位特徵；該接口尚不是已驗證的供應商接收器或實際發報後端。另見[集合競價目標區別](AUCTION_DIRECTION_SCOPE.md)，不同參考價格的準確率不可互換。
