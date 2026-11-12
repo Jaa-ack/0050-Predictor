@@ -1,0 +1,19 @@
+{
+  "train_dates": 600,
+  "calibration_dates": 200,
+  "test_dates": 1000,
+  "seeds": [17,29,43],
+  "horizons_seconds": [30],
+  "candidates": ["prior","snapshot_logistic","history_logistic","history_hist","history_state_hist"],
+  "reference_training_scenario": {"name":"pure_reference"},
+  "scenarios": [
+    {"name":"equal_worlds","liquidity_regimes":[0,0.5,1,1.5],"liquidity_weights":[0.25,0.25,0.25,0.25]},
+    {"name":"mostly_informative","liquidity_regimes":[0,0.5,1,1.5],"liquidity_weights":[0.45,0.35,0.15,0.05]},
+    {"name":"mixed_weak_windows","persistent_fraction":0.8,"liquidity_regimes":[0,0.5,1,1.5],"liquidity_weights":[0.45,0.35,0.15,0.05]},
+    {"name":"feed_outage","input_outage_fraction":0.25,"liquidity_regimes":[0,0.5,1,1.5],"liquidity_weights":[0.45,0.35,0.15,0.05]},
+    {"name":"external_world_shift","liquidity_regimes":[0,0.5,1,1.5],"liquidity_weights":[0.45,0.35,0.15,0.05],
+      "external_liquidity_weights":[["1216",[0.05,0.15,0.35,0.45]],["2303",[0.05,0.15,0.35,0.45]],["2327",[0.05,0.15,0.35,0.45]],["2345",[0.05,0.15,0.35,0.45]],["2357",[0.05,0.15,0.35,0.45]]]},
+    {"name":"unseen_external_worlds","liquidity_regimes":[0,0.5,1,1.5],"liquidity_weights":[0.5,0.5,0,0],
+      "external_liquidity_weights":[["1216",[0,0,0.5,0.5]],["2303",[0,0,0.5,0.5]],["2327",[0,0,0.5,0.5]],["2345",[0,0,0.5,0.5]],["2357",[0,0,0.5,0.5]]]}
+  ]
+}

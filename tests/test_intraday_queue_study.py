@@ -65,3 +65,26 @@ def test_mixture_study_keeps_a_pure_training_reference_outside_candidate_selecti
     protocol=json.loads((output/'protocol.json').read_text())
     assert protocol['reference_training_scenario']['persistent_fraction']==1.
     assert 'scikit-learn' in protocol['environment']['packages']
+
+
+def test_heterogeneous_study_declares_extra_candidate_and_keeps_hidden_diagnostics_outside_selection(tmp_path):
+    from twquant.intraday_queue_study import run_queue_study
+    from twquant.intraday_models import MODELS
+    members=list(TRAINING_TICKERS)+[str(4000+i) for i in range(40)]
+    membership=tmp_path/'membership.json'
+    membership.write_text(json.dumps(dict(tickers=members,count=50,as_of='2026-11-06',
+        source_url='https://www.yuantaetfs.com/product/detail/0050/ratio',
+        retrieved_at='2026-11-07T00:00:00+00:00',html_sha256='a'*64)))
+    candidates=[*MODELS,'history_state_hist']
+    config=dict(train_dates=30,calibration_dates=10,test_dates=126,seeds=[17],horizons_seconds=[30],
+        candidates=candidates,scenarios=[dict(name='heterogeneous',liquidity_regimes=[0.,.5],liquidity_weights=[.5,.5])])
+    output=tmp_path/'study'
+    report=run_queue_study(config,membership,output)
+    run=report['experiments'][0]
+    assert report['models_trained']==len(candidates)
+    assert list(run['candidate_calibration'])==candidates
+    assert not run['training_details']['history_state_hist']['hidden_regime_labels_used']
+    import pandas as pd
+    p=pd.read_parquet(output/run['predictions'])
+    assert set(p.diagnostic_liquidity_response)=={0.,.5}
+    assert p.probability_up_history_state_hist.between(0,1).all()

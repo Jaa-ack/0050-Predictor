@@ -15,7 +15,7 @@ from threadpoolctl import threadpool_limits
 
 from .direction_audit import load_membership_snapshot
 from .direction_intraday import audit_intraday_predictions
-from .intraday_models import MODELS,fit_intraday_model
+from .intraday_models import MODELS,EXTRA_MODELS,fit_intraday_model
 from .intraday_queue import QueueScenario,simulate_queue_panel
 from .universe import DEFAULT_EVALUATION_TICKERS,TRAINING_TICKERS,asset_class
 from .workflows import source_digest,write_json
@@ -23,7 +23,7 @@ from .workflows import source_digest,write_json
 
 def _config(config):
     required={'train_dates','calibration_dates','test_dates','seeds','horizons_seconds','scenarios'}
-    if not isinstance(config,dict) or not required<=set(config)<=required|{'reference_training_scenario'}:
+    if not isinstance(config,dict) or not required<=set(config)<=required|{'reference_training_scenario','candidates'}:
         raise ValueError('Queue study requires its explicit configuration fields')
     for field,minimum in [('train_dates',30),('calibration_dates',10),('test_dates',126)]:
         if type(config[field]) is not int or not minimum<=config[field]<=10000:
@@ -53,8 +53,12 @@ def _config(config):
         if not isinstance(spec,dict) or 'name' not in spec or not set(spec)<={f.name for f in fields(QueueScenario)}:
             raise ValueError('Invalid reference-training scenario')
         reference=QueueScenario(**spec)
-        if reference.weak_tickers or reference.external_persistent_fractions:
+        if reference.weak_tickers or reference.external_persistent_fractions or reference.external_liquidity_weights:
             raise ValueError('Reference training cannot include external-target overrides')
+    candidates=config.get('candidates',list(MODELS))
+    if (not isinstance(candidates,list) or not candidates or len(set(candidates))!=len(candidates)
+            or not set(candidates)<=set((*MODELS,*EXTRA_MODELS))):
+        raise ValueError('Declare distinct supported intraday candidates')
     return scenarios
 
 
@@ -75,7 +79,7 @@ def run_queue_study(config,membership_path,output):
     membership=load_membership_snapshot(membership_path)
     if len(membership['tickers'])!=50:
         raise ValueError('Queue study requires exactly fifty declared constituents')
-    if any((set(s.weak_tickers)|{t for t,_ in s.external_persistent_fractions})-set(membership['tickers']) for s in scenarios):
+    if any((set(s.weak_tickers)|{t for t,_ in s.external_persistent_fractions}|{t for t,_ in s.external_liquidity_weights})-set(membership['tickers']) for s in scenarios):
         raise ValueError('Weak-transfer targets must belong to the declared full constituent audit')
     output=Path(output)
     if output.exists():
@@ -88,10 +92,11 @@ def run_queue_study(config,membership_path,output):
     fit_at=calibration_dates[0].tz_localize('Asia/Taipei')+pd.Timedelta(hours=10,seconds=-1)
     selection_at=test_dates[0].tz_localize('Asia/Taipei')+pd.Timedelta(hours=10,seconds=-1)
     reference_scenario=QueueScenario(**config['reference_training_scenario']) if 'reference_training_scenario' in config else None
+    candidates=tuple(config.get('candidates',MODELS))
     protocol=dict(config=config,expanded_scenarios=[asdict(s) for s in scenarios],
         config_sha256=hashlib.sha256(json.dumps(config,sort_keys=True).encode()).hexdigest(),source_sha256=source_digest(),
         evidence_kind='synthetic_queue_process',market_calibrated=False,membership=membership,
-        training_tickers=list(TRAINING_TICKERS),evaluation_tickers=list(universe),candidates=list(MODELS),
+        training_tickers=list(TRAINING_TICKERS),evaluation_tickers=list(universe),candidates=list(candidates),
         selection='maximum fixed-ten minimum calibration accuracy, then mean, then declared candidate order',
         threshold=.5,fit_at=fit_at.isoformat(),selection_at=selection_at.isoformat(),
         synthetic_calendar='Weekdays from2020-01-02; not an exchange calendar or market history',
@@ -110,6 +115,10 @@ def run_queue_study(config,membership_path,output):
         'Liquidity response uses only an EMA of already observed simulated market-order signs; no hidden pressure oracle.',
         'At resets, bid depth scales by exp(-response*EMA), ask by exp(response*EMA), rounded upward.',
         'Pure-training history_logistic reference is a declared comparison only, never an extra selection candidate.']
+    protocol['heterogeneous_liquidity_assumptions']=[
+        'Liquidity coefficient chosen before observed history from declared weights, using a separate unused past random coordinate.',
+        'Hidden liquidity coefficient remains constant within each100s-history plus future window; it is never a predictor input.',
+        'Within each declared experiment, each algorithm uses one shared fixed-ten fit across stocks and the mixed physical environments; external overrides never alter primary rows.']
     output.mkdir(parents=True,exist_ok=False)
     write_json(output/'protocol.json',protocol)
     experiments=[]
@@ -126,14 +135,14 @@ def run_queue_study(config,membership_path,output):
                 test=frame.loc[frame.date.isin(test_dates)].copy()
                 scores={};models={};audits={}
                 with threadpool_limits(limits=1):
-                    for name in MODELS:
+                    for name in candidates:
                         model=fit_intraday_model(train,name,fit_at=fit_at)
                         scores[name]=_calibration(calibration,model.predict_proba(calibration)[:,1])
                         models[name]=model
-                    selected=max(MODELS,key=lambda name:(scores[name]['minimum_stock_accuracy'],scores[name]['overall_accuracy'],-MODELS.index(name)))
-                    predictions=test[['ticker','date','decision_at','prediction_at','max_input_available_at','target_at','label_available_at','actual_return','input_ready','price_basis','diagnostic_persistent_regime']].copy()
+                    selected=max(candidates,key=lambda name:(scores[name]['minimum_stock_accuracy'],scores[name]['overall_accuracy'],-candidates.index(name)))
+                    predictions=test[['ticker','date','decision_at','prediction_at','max_input_available_at','target_at','label_available_at','actual_return','input_ready','price_basis','diagnostic_persistent_regime','diagnostic_liquidity_response']].copy()
                     predictions['max_input_available_at']=predictions.max_input_available_at.fillna(selection_at)
-                    for name in MODELS:
+                    for name in candidates:
                         predictions[f'probability_up_{name}']=models[name].predict_proba(test)[:,1]
                         audit_input=predictions.assign(probability_up=predictions[f'probability_up_{name}'],
                             decision_threshold=.5,model_version=models[name].version)
@@ -178,7 +187,7 @@ def run_queue_study(config,membership_path,output):
                 write_json(output/'progress.json',dict(completed=len(experiments),last_run=run_id))
     if source_digest()!=protocol['source_sha256']:
         raise RuntimeError('Source changed during queue study; retain results but reject the frozen-run claim')
-    report=dict(evidence_kind='synthetic_queue_process',experiments=experiments,models_trained=(4+int(reference_scenario is not None))*len(experiments),
+    report=dict(evidence_kind='synthetic_queue_process',experiments=experiments,models_trained=(len(candidates)+int(reference_scenario is not None))*len(experiments),
         all_declared_experiments_completed=True,market_calibrated=False,empirical_target_met=False,
         real_world_target_verified=False,unconditional_75_expectation_supported=False,
         limitation='Passing a known artificial process is conditional simulation evidence, not a75pct market expectation.')

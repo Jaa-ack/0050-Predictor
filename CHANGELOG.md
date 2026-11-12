@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-12 — Heterogeneous liquidity windows
+
+- Added predeclared mixtures of causal liquidity-response coefficients and external-only distribution shifts, with hidden diagnostics excluded from predictor features.
+- Added an opt-in shared observable-state hist candidate using relative depth and past price/imbalance interactions; original four-candidate defaults remain unchanged.
+- Added explicit candidate declarations to frozen queue studies and a six-scenario, three-seed comparison, preserving full daily predictions, flat penalties and fixed-ten-only selection.
+- Completed18 experiments and independently recomputed all108model audits, exact fixed-ten replays, scalar-world couplings, original baselines and external-distribution isolation.
+- Retained adverse unseen-environment transfer and the new candidate's inconsistent gains; conditional synthetic success does not establish a market75expectation.
+
 ## Unreleased — 2026-11-12 — Causal local book inputs
 
 - Added an offline canonical snapshot/checkpoint frame builder with a one-second input buffer, bounded as-of history and explicit unknown-label retention.

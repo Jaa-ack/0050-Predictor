@@ -26,6 +26,9 @@ class QueueScenario:
     background_flow_imbalance: float = .1
     external_persistent_fractions: tuple[tuple[str,float], ...] = ()
     liquidity_response: float = 0.
+    liquidity_regimes: tuple[float, ...] = ()
+    liquidity_weights: tuple[float, ...] = ()
+    external_liquidity_weights: tuple[tuple[str,tuple[float, ...]], ...] = ()
 
     def __post_init__(self):
         if not isinstance(self.name,str) or not self.name or len(self.name)>80:
@@ -50,6 +53,28 @@ class QueueScenario:
             if any(isinstance(value,bool) or not isinstance(value,(int,float)) or not np.isfinite(value) or not 0<=value<=1 for _,value in pairs):
                 raise ValueError('External regime frequencies must be fractions')
         object.__setattr__(self,'external_persistent_fractions',pairs)
+        if not isinstance(self.liquidity_regimes,(list,tuple)) or not isinstance(self.liquidity_weights,(list,tuple)):
+            raise ValueError('Liquidity regimes and weights require explicit vectors')
+        regimes=tuple(self.liquidity_regimes);weights=tuple(self.liquidity_weights)
+        if bool(regimes)!=bool(weights) or (regimes and (len(regimes)!=len(weights) or self.liquidity_response!=0)):
+            raise ValueError('Declare either scalar liquidity response or matched regime/weight vectors')
+        if (len(set(regimes))!=len(regimes) or any(isinstance(x,bool) or not isinstance(x,(int,float)) or not np.isfinite(x) or not 0<=x<=2 for x in regimes)):
+            raise ValueError('Liquidity regimes must be distinct finite responses in [0,2]')
+        def valid_weights(values):
+            return (len(values)==len(regimes) and all(not isinstance(x,bool) and isinstance(x,(int,float)) and np.isfinite(x) and x>=0 for x in values)
+                    and np.isclose(sum(values),1.,rtol=0,atol=1e-12))
+        if regimes and not valid_weights(weights):raise ValueError('Liquidity weights must sum to one')
+        if (not isinstance(self.external_liquidity_weights,(list,tuple)) or
+                any(not isinstance(pair,(list,tuple)) or len(pair)!=2 or not isinstance(pair[1],(list,tuple)) for pair in self.external_liquidity_weights)):
+            raise ValueError('External liquidity weights require ticker/vector pairs')
+        overrides=tuple((str(ticker),tuple(values)) for ticker,values in self.external_liquidity_weights)
+        if overrides:
+            ids=validate_tickers([t for t,_ in overrides])
+            if not regimes or len(ids)!=len(overrides) or set(ids)&set(TRAINING_TICKERS) or any(not valid_weights(w) for _,w in overrides):
+                raise ValueError('Liquidity overrides require distinct external targets and valid weights')
+        object.__setattr__(self,'liquidity_regimes',regimes)
+        object.__setattr__(self,'liquidity_weights',weights)
+        object.__setattr__(self,'external_liquidity_weights',overrides)
 
 
 def _draws(dates,ticker,seed,phase,steps):
@@ -60,7 +85,7 @@ def _draws(dates,ticker,seed,phase,steps):
 
 def _queues(draw,flow_ema=None,response=0.):
     queues=(5+np.floor(6*draw).astype(int)).reshape(-1,2,5)+4*np.arange(5)
-    if response:
+    if np.any(response):
         skew=response*flow_ema
         scale=np.stack([np.exp(-skew),np.exp(skew)],axis=1)
         queues=np.maximum(1,np.ceil(queues*scale[:,:,None]).astype(int))
@@ -83,7 +108,8 @@ def _step(queues,position,pressure,draw,strength,flip_rate,flow_ema,response):
     depleted=queues[rows,side,0]<=0
     position+=np.where(depleted,np.where(side==1,1,-1),0)
     queues[:]=np.maximum(queues,0)
-    queues[depleted]=_queues(draw[depleted,6:16],flow_ema[depleted],response)
+    local_response=response[depleted] if np.ndim(response) else response
+    queues[depleted]=_queues(draw[depleted,6:16],flow_ema[depleted],local_response)
     return pressure,flow_ema
 
 
@@ -121,11 +147,16 @@ def simulate_queue_panel(tickers,dates,scenario,*,seed=17,future_seed=29,horizon
         persistent=past[:,0,12]<frequency
         peak=scenario.weak_flow_imbalance if ticker in scenario.weak_tickers else scenario.flow_imbalance
         strength=np.where(persistent,peak,scenario.background_flow_imbalance)
+        response=scenario.liquidity_response
+        if scenario.liquidity_regimes:
+            weights=dict(scenario.external_liquidity_weights).get(ticker,scenario.liquidity_weights)
+            indices=np.searchsorted(np.cumsum(weights),past[:,0,13],side='right')
+            response=np.array(scenario.liquidity_regimes)[np.minimum(indices,len(weights)-1)]
         flow_ema=np.zeros(len(dates))
         history=np.zeros((len(dates),100))
         imbalance=np.zeros((len(dates),100,5))
         for step in range(100):
-            pressure,flow_ema=_step(queues,position,pressure,past[:,step+1],strength,scenario.flip_rate,flow_ema,scenario.liquidity_response)
+            pressure,flow_ema=_step(queues,position,pressure,past[:,step+1],strength,scenario.flip_rate,flow_ema,response)
             history[:,step]=position
             bid=np.cumsum(queues[:,0],axis=1);ask=np.cumsum(queues[:,1],axis=1)
             imbalance[:,step]=(bid-ask)/np.maximum(bid+ask,1)
@@ -141,7 +172,7 @@ def simulate_queue_panel(tickers,dates,scenario,*,seed=17,future_seed=29,horizon
             columns[f'f_book_mid_change_{window}']=history[:,-1]-history[:,-window]
             columns[f'f_book_mid_vol_{window}']=np.diff(history[:,-window:],axis=1).std(axis=1)
         for step in range(horizon_seconds):
-            pressure,flow_ema=_step(queues,position,pressure,future[:,step],strength,scenario.flip_rate,flow_ema,scenario.liquidity_response)
+            pressure,flow_ema=_step(queues,position,pressure,future[:,step],strength,scenario.flip_rate,flow_ema,response)
         actual=(position-initial)/(10000.+initial)
         is_index=asset_class(ticker)=='index'
         ready=~outage if not is_index else np.zeros(len(dates),dtype=bool)
@@ -156,6 +187,7 @@ def simulate_queue_panel(tickers,dates,scenario,*,seed=17,future_seed=29,horizon
             label_available_at=decision+pd.Timedelta(seconds=horizon_seconds,milliseconds=5),
             actual_return=actual,input_ready=ready,horizon_seconds=horizon_seconds,
             diagnostic_persistent_regime=persistent,
+            diagnostic_liquidity_response=response,
             source='synthetic_queue_process',price_basis='abstract_index_points_no_book' if is_index else 'abstract_one_tick_mid_quote')
         frame.loc[~ready,'max_input_available_at']=pd.NaT
         frames.append(frame)

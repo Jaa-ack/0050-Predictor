@@ -15,6 +15,7 @@ from sklearn.preprocessing import StandardScaler
 from .universe import TRAINING_TICKERS
 
 MODELS=('prior','snapshot_logistic','history_logistic','history_hist')
+EXTRA_MODELS=('history_state_hist',)
 
 
 class SharedIntradayModel:
@@ -60,7 +61,7 @@ class SharedIntradayModel:
 
 def fit_intraday_model(frame,name,*,fit_at):
     """Reject outside training rows, mixed horizons and unmatured answers."""
-    if name not in MODELS:
+    if name not in (*MODELS,*EXTRA_MODELS):
         raise ValueError('Unknown intraday model')
     if set(frame.ticker.astype(str))!=set(TRAINING_TICKERS):
         raise ValueError('Intraday fitting requires exactly the fixed ten training stocks')
@@ -80,4 +81,7 @@ def fit_intraday_model(frame,name,*,fit_at):
     causal=(frame.max_input_available_at.le(frame.prediction_at)&frame.prediction_at.le(frame.decision_at))
     if not causal[ready].all():
         raise ValueError('Intraday training inputs must be causal at each emission')
+    if name=='history_state_hist':
+        from .intraday_state import ObservableStateModel
+        return ObservableStateModel(frame)
     return SharedIntradayModel(frame,name)

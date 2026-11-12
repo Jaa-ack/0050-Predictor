@@ -144,3 +144,47 @@ def test_external_regime_frequencies_do_not_change_primary_history_and_liquidity
     with pytest.raises(ValueError):QueueScenario('bad',persistent_fraction=1.1)
     with pytest.raises(ValueError):QueueScenario('bad',liquidity_response=-1.)
     with pytest.raises(ValueError):QueueScenario('bad',external_persistent_fractions=(('2330',.5),))
+
+
+def test_hidden_liquidity_mixtures_match_scalar_worlds_without_future_information():
+    from twquant.intraday_queue import QueueScenario
+    scenario=QueueScenario('heterogeneous',liquidity_regimes=(0.,.5,1.,1.5),liquidity_weights=(.25,)*4)
+    a=simulate(scenario=scenario);b=simulate(scenario=scenario,future_seed=43)
+    assert set(a.diagnostic_liquidity_response)=={0.,.5,1.,1.5}
+    pd.testing.assert_frame_equal(a.filter(like='f_book_'),b.filter(like='f_book_'))
+    np.testing.assert_array_equal(a.diagnostic_liquidity_response,b.diagnostic_liquidity_response)
+    columns=[c for c in a if c.startswith('f_book_')]+['actual_return']
+    for response in [0.,.5,1.,1.5]:
+        scalar=simulate(scenario=QueueScenario('scalar',liquidity_response=response))
+        mask=a.diagnostic_liquidity_response.eq(response)
+        pd.testing.assert_frame_equal(a.loc[mask,columns],scalar.loc[mask,columns])
+
+
+def test_external_liquidity_distributions_never_change_primary_examples():
+    from twquant.intraday_queue import QueueScenario
+    kwargs=dict(liquidity_regimes=(0.,.5,1.,1.5),liquidity_weights=(.45,.35,.15,.05))
+    a=simulate((*TRAINING_TICKERS,'1216'),scenario=QueueScenario('base',**kwargs))
+    b=simulate((*TRAINING_TICKERS,'1216'),scenario=QueueScenario('shift',**kwargs,
+        external_liquidity_weights=(('1216',(.05,.15,.35,.45)),)))
+    pd.testing.assert_frame_equal(a[a.ticker.isin(TRAINING_TICKERS)].reset_index(drop=True),
+                                  b[b.ticker.isin(TRAINING_TICKERS)].reset_index(drop=True))
+    with pytest.raises(ValueError):QueueScenario('bad',liquidity_regimes=(0.,1.),liquidity_weights=(.1,.1))
+    with pytest.raises(ValueError):QueueScenario('bad',**kwargs,external_liquidity_weights=(('2330',(.25,)*4),))
+
+
+def test_observable_state_model_uses_portable_inputs_without_oracle_regime_labels():
+    from twquant.intraday_queue import QueueScenario
+    train=simulate(scenario=QueueScenario('heterogeneous',liquidity_regimes=(0.,.5),liquidity_weights=(.5,.5)))
+    model=fit_model(train,'history_state_hist',fit_at=train.label_available_at.max()+pd.Timedelta(days=1))
+    query=train.tail(20).copy()
+    before=model.predict_proba(query)
+    mutated=query.assign(actual_return=999.,ticker='1216',diagnostic_liquidity_response=999.,diagnostic_persistent_regime=False)
+    np.testing.assert_array_equal(before,model.predict_proba(mutated))
+    scaled=query.copy()
+    for col in scaled.filter(like='f_book_log_depth_'):
+        scaled[col]=np.log1p(np.expm1(scaled[col])*100)
+    np.testing.assert_array_equal(before,model.predict_proba(scaled))
+    assert np.isfinite(before).all()
+    assert not any('log_depth' in col for col in model.training_details['features'])
+    assert not any('diagnostic' in col for col in model.training_details['features'])
+    np.testing.assert_allclose(model.predict_proba(query.assign(input_ready=False))[:,1],model.prior)
