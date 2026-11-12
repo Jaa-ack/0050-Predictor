@@ -113,6 +113,54 @@ def _step(queues,position,pressure,draw,strength,flip_rate,flow_ema,response):
     return pressure,flow_ema
 
 
+@dataclass
+class _QueueHistory:
+    queues: np.ndarray
+    position: np.ndarray
+    pressure: np.ndarray
+    strength: np.ndarray
+    response: np.ndarray | float
+    flow_ema: np.ndarray
+    persistent: np.ndarray
+    columns: dict
+
+
+def _queue_history(dates,ticker,scenario,seed,market_pressure):
+    """Observed history plus private Markov state; never an inference feature frame."""
+    past=_draws(dates,ticker,seed,1,101)
+    queues=_queues(past[:,0,:10])
+    pressure=np.where(past[:,0,11]<.35,market_pressure,np.where(past[:,0,10]<.5,-1,1))
+    position=np.zeros(len(dates),dtype=int)
+    frequency=dict(scenario.external_persistent_fractions).get(ticker,scenario.persistent_fraction)
+    persistent=past[:,0,12]<frequency
+    peak=scenario.weak_flow_imbalance if ticker in scenario.weak_tickers else scenario.flow_imbalance
+    strength=np.where(persistent,peak,scenario.background_flow_imbalance)
+    response=scenario.liquidity_response
+    if scenario.liquidity_regimes:
+        weights=dict(scenario.external_liquidity_weights).get(ticker,scenario.liquidity_weights)
+        indices=np.searchsorted(np.cumsum(weights),past[:,0,13],side='right')
+        response=np.array(scenario.liquidity_regimes)[np.minimum(indices,len(weights)-1)]
+    flow_ema=np.zeros(len(dates))
+    history=np.zeros((len(dates),100))
+    imbalance=np.zeros((len(dates),100,5))
+    for step in range(100):
+        pressure,flow_ema=_step(queues,position,pressure,past[:,step+1],strength,scenario.flip_rate,flow_ema,response)
+        history[:,step]=position
+        bid=np.cumsum(queues[:,0],axis=1);ask=np.cumsum(queues[:,1],axis=1)
+        imbalance[:,step]=(bid-ask)/np.maximum(bid+ask,1)
+    columns={f'f_book_imbalance_{level+1}':imbalance[:,-1,level] for level in range(5)}
+    depth=np.cumsum(queues.sum(axis=1),axis=1)
+    columns.update({f'f_book_log_depth_{level+1}':np.log1p(depth[:,level]) for level in range(5)})
+    for window in (5,20,100):
+        for level in (0,4):
+            values=imbalance[:,-window:,level]
+            columns[f'f_book_imbalance_{level+1}_mean_{window}']=values.mean(axis=1)
+            columns[f'f_book_imbalance_{level+1}_change_{window}']=values[:,-1]-values[:,0]
+        columns[f'f_book_mid_change_{window}']=history[:,-1]-history[:,-window]
+        columns[f'f_book_mid_vol_{window}']=np.diff(history[:,-window:],axis=1).std(axis=1)
+    return _QueueHistory(queues,position,pressure,strength,response,flow_ema,persistent,columns)
+
+
 def simulate_queue_panel(tickers,dates,scenario,*,seed=17,future_seed=29,horizon_seconds=30):
     """Generate complete daily examples and finite-horizon raw endpoint labels.
 
@@ -138,39 +186,12 @@ def simulate_queue_panel(tickers,dates,scenario,*,seed=17,future_seed=29,horizon
     market_pressure=np.where(common[:,1]<.5,-1,1)
     frames=[]
     for ticker in universe:
-        past=_draws(dates,ticker,seed,1,101)
+        state=_queue_history(dates,ticker,scenario,seed,market_pressure)
+        queues=state.queues;position=state.position;pressure=state.pressure
+        strength=state.strength;response=state.response;flow_ema=state.flow_ema
+        persistent=state.persistent;columns=state.columns
         future=_draws(dates,ticker,future_seed,2,60)
-        queues=_queues(past[:,0,:10])
-        pressure=np.where(past[:,0,11]<.35,market_pressure,np.where(past[:,0,10]<.5,-1,1))
-        position=np.zeros(len(dates),dtype=int)
-        frequency=dict(scenario.external_persistent_fractions).get(ticker,scenario.persistent_fraction)
-        persistent=past[:,0,12]<frequency
-        peak=scenario.weak_flow_imbalance if ticker in scenario.weak_tickers else scenario.flow_imbalance
-        strength=np.where(persistent,peak,scenario.background_flow_imbalance)
-        response=scenario.liquidity_response
-        if scenario.liquidity_regimes:
-            weights=dict(scenario.external_liquidity_weights).get(ticker,scenario.liquidity_weights)
-            indices=np.searchsorted(np.cumsum(weights),past[:,0,13],side='right')
-            response=np.array(scenario.liquidity_regimes)[np.minimum(indices,len(weights)-1)]
-        flow_ema=np.zeros(len(dates))
-        history=np.zeros((len(dates),100))
-        imbalance=np.zeros((len(dates),100,5))
-        for step in range(100):
-            pressure,flow_ema=_step(queues,position,pressure,past[:,step+1],strength,scenario.flip_rate,flow_ema,response)
-            history[:,step]=position
-            bid=np.cumsum(queues[:,0],axis=1);ask=np.cumsum(queues[:,1],axis=1)
-            imbalance[:,step]=(bid-ask)/np.maximum(bid+ask,1)
         initial=position.copy()
-        columns={f'f_book_imbalance_{level+1}':imbalance[:,-1,level] for level in range(5)}
-        depth=np.cumsum(queues.sum(axis=1),axis=1)
-        columns.update({f'f_book_log_depth_{level+1}':np.log1p(depth[:,level]) for level in range(5)})
-        for window in (5,20,100):
-            for level in (0,4):
-                values=imbalance[:,-window:,level]
-                columns[f'f_book_imbalance_{level+1}_mean_{window}']=values.mean(axis=1)
-                columns[f'f_book_imbalance_{level+1}_change_{window}']=values[:,-1]-values[:,0]
-            columns[f'f_book_mid_change_{window}']=history[:,-1]-history[:,-window]
-            columns[f'f_book_mid_vol_{window}']=np.diff(history[:,-window:],axis=1).std(axis=1)
         for step in range(horizon_seconds):
             pressure,flow_ema=_step(queues,position,pressure,future[:,step],strength,scenario.flip_rate,flow_ema,response)
         actual=(position-initial)/(10000.+initial)

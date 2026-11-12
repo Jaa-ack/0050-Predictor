@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 2026-11-12 — Privileged-state queue ceilings
+
+- Extracted shared observed-history simulation while preserving original feature frames, endpoint labels and index behavior.
+- Added an offline complete-state fork diagnostic with independent future streams, preserved date/stock grids and separate strict versus up/nonup accounting.
+- Added Jensen/Hoeffding population upper bounds and independent pilot/evaluation policy lower bounds; branch replicas never count as extra market dates.
+- Kept oracle diagnostics outside training, model selection, deployable forecasts and target-success gates, with frozen protocols and credential-free CLI execution.
+- Completed15experiments,60horizon panels and3million conditional rows; independently verified scalar transitions, archived labels, complete grids and all simultaneous bounds.
+- Ruled out75pct under adverse artificial laws even with complete hidden state, and inherited component bounds for previously fixed mixtures without treating upper bounds or flat-dominated baselines as forecast achievements.
+
 ## Unreleased — 2026-11-12 — Heterogeneous liquidity windows
 
 - Added predeclared mixtures of causal liquidity-response coefficients and external-only distribution shifts, with hidden diagnostics excluded from predictor features.

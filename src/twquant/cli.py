@@ -172,6 +172,10 @@ def parser():
     queue.add_argument('--config', type=Path, default=Path('configs/intraday_queue.json'))
     queue.add_argument('--membership', type=Path, required=True)
     queue.add_argument('--out', type=Path, required=True)
+    ceiling=subs.add_parser('direction-queue-ceiling',help='離線估計完整隱藏模擬狀態的方向上限；不產生可部署預測')
+    ceiling.add_argument('--config',type=Path,required=True)
+    ceiling.add_argument('--membership',type=Path,required=True)
+    ceiling.add_argument('--out',type=Path,required=True)
     f = subs.add_parser("predict", help="保存不可覆寫的1/5/20日預測")
     f.add_argument("--as-of", required=True)
     f.add_argument("--paper", action="store_true")
@@ -222,6 +226,12 @@ def execute(args):
     default_root = {'demo': 'artifacts/demo', 'direction-simulate': 'artifacts/direction-synthetic',
                     'direction-feasibility': 'artifacts/direction-feasibility'}
     root = args.root or Path(default_root.get(args.command, 'artifacts/real'))
+    if args.command=='direction-queue-ceiling':
+        from .queue_ceiling import run_queue_ceiling
+        report=run_queue_ceiling(json.loads(args.config.read_text()),args.membership,args.out)
+        return dict(report=str(args.out/'report.json'),evidence_kind=report['evidence_kind'],
+                    experiments=len(report['experiments']),models_trained=0,forecast_produced=False,
+                    target_feasibility_established=False)
     if args.command == 'direction-queue-study':
         from .intraday_queue_study import run_queue_study
         report=run_queue_study(json.loads(args.config.read_text()),args.membership,args.out)
@@ -574,7 +584,7 @@ def main(argv=None):
     args = parser().parse_args(argv)
     credentials=None
     try:
-        if args.command not in {'direction-feasibility','direction-queue-study'} and not (args.command=='secrets' and args.secret_command=='init'):
+        if args.command not in {'direction-feasibility','direction-queue-study','direction-queue-ceiling'} and not (args.command=='secrets' and args.secret_command=='init'):
             credentials=load_dotenv()
         result = execute(args)
         if result is not None:

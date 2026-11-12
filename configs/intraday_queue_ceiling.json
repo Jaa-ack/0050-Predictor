@@ -1,0 +1,17 @@
+{
+  "state_dates": 1000,
+  "calendar_offset": 800,
+  "branches": 64,
+  "seeds": [17,29,43],
+  "branch_seed": 73,
+  "horizons_seconds": [1,5,30,60],
+  "chunk_dates": 64,
+  "alpha": 0.05,
+  "scenarios": [
+    {"name":"persistent_flow"},
+    {"name":"adaptive_05","liquidity_response":0.5},
+    {"name":"adaptive_10","liquidity_response":1.0},
+    {"name":"adaptive_15","liquidity_response":1.5},
+    {"name":"background_flow","flow_imbalance":0.1}
+  ]
+}
