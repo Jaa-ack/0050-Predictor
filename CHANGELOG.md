@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-14 — Persistent-flow stress and declared initial depth
+
+- Completed36predeclared directional-persistence cases and144candidate audits at1millisecond, preserving all50daily grids, external high-activity interventions, large orders and rapid sign-flip controls. Both policies passed21sample any-five gates and6joint conditional lower gates; retained medium/strong persistence failures.
+- Independently checked all fixed-ten refits/query panels,1400dictionary orders,96scalar price paths and10485760order signs. Distinguished hidden-direction alignment from adjacent-order persistence and finite exponential memory from the published LMF model.
+- Evaluated eight causal fill-flow features only on fixed-ten training/calibration prefixes;240independent scalar histories and48fresh refits verified all12ablations. The features did not restore stable75pctin stronger flow and were kept out of production.
+- Added bounded initial depth ranges and isolated external depth interventions, retaining default5to10initial quantities, finite-grid semantics, primary/index protections and constituent allowlisting. Initial ranges never force current depth or replenish depleted books.
+- Preserved the earlier numerical source snapshot and documented default compatibility separately from future custom-depth performance. No provider connection, subscription, real schedule, trading or frontend publication was enabled.
+
 ## Unreleased — 2026-11-14 — Operational first-trade latency envelope
 
 - Predeclared twelve operational scenarios with three fresh seeds and a fixed fast spread-bounce design candidate, retaining all four candidate audits and full daily constituent grids.

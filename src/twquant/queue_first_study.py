@@ -60,6 +60,7 @@ def _run_queue_event_study(config,membership_path,output,*,event_kind):
     for s in scenarios:
         overrides={t for t,_ in s.external_event_rates}|{t for t,_ in s.external_size_weights}|set(s.queue.weak_tickers)|{t for t,_ in s.queue.external_persistent_fractions}|{t for t,_ in s.queue.external_liquidity_weights}
         overrides|={t for t,_ in getattr(s,'external_large_order_fractions',())}
+        overrides|={t for t,_ in getattr(s,'external_depth_ranges',())}
         if overrides-set(members) or set(s.queue.weak_tickers)&set(TRAINING_TICKERS):raise ValueError('Transfer interventions must stay within external constituents')
     output=Path(output)
     if output.exists():raise ValueError('Queue-first research requires a fresh output directory')
@@ -85,7 +86,7 @@ def _run_queue_event_study(config,membership_path,output,*,event_kind):
         'Indices have no transaction prints: keep the shared prior query and unknown answer without fabricating an index trade.']
     if event_kind=='matching':
         protocol['matching_rule']='ordered_opposite_levels'
-        protocol['assumptions']=['Finite signed price grid with initial5to10units at every tick;100past order events. No quote reset or automatic replenishment.',
+        protocol['assumptions']=['Finite signed price grid with declared initial integer depth ranges, default5to10units at every tick;100past order events. No quote reset or automatic replenishment.',
             'Market orders walk opposite price levels; limit orders may execute then rest or cancel IOC remainders. Separate quotes change only on their own side.',
             'Individual price-level fills retain execution order; last trade is the last fill, never a per-order average.',
             'Exhausted known depth or orders outside the finite grid make the path unknown; no fake quote or verified timeout.',

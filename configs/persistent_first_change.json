@@ -1,0 +1,174 @@
+{
+  "train_dates": 600,
+  "calibration_dates": 200,
+  "test_dates": 2000,
+  "seeds": [
+    211,
+    257,
+    307
+  ],
+  "max_wait_seconds": 60,
+  "max_events": 2048,
+  "candidates": [
+    "prior",
+    "spread_bounce",
+    "trade_logistic",
+    "trade_hist"
+  ],
+  "scenarios": [
+    {
+      "name": "limit_p00_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.0
+      }
+    },
+    {
+      "name": "limit_p20_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.2
+      }
+    },
+    {
+      "name": "limit_p50_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5
+      }
+    },
+    {
+      "name": "limit_p80_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.8
+      }
+    },
+    {
+      "name": "intermediate_p00_1ms",
+      "market_fraction": 0.35,
+      "cancel_fraction": 0.25,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.0
+      }
+    },
+    {
+      "name": "intermediate_p20_1ms",
+      "market_fraction": 0.35,
+      "cancel_fraction": 0.25,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.2
+      }
+    },
+    {
+      "name": "intermediate_p50_1ms",
+      "market_fraction": 0.35,
+      "cancel_fraction": 0.25,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5
+      }
+    },
+    {
+      "name": "intermediate_p80_1ms",
+      "market_fraction": 0.35,
+      "cancel_fraction": 0.25,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.8
+      }
+    },
+    {
+      "name": "external_fast_p20_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.2
+      },
+      "external_event_rates": [
+        [
+          "1216",
+          1000.0
+        ],
+        [
+          "2303",
+          1000.0
+        ],
+        [
+          "2327",
+          1000.0
+        ],
+        [
+          "2345",
+          1000.0
+        ],
+        [
+          "2357",
+          1000.0
+        ]
+      ]
+    },
+    {
+      "name": "external_fast_p50_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5
+      },
+      "external_event_rates": [
+        [
+          "1216",
+          1000.0
+        ],
+        [
+          "2303",
+          1000.0
+        ],
+        [
+          "2327",
+          1000.0
+        ],
+        [
+          "2345",
+          1000.0
+        ],
+        [
+          "2357",
+          1000.0
+        ]
+      ]
+    },
+    {
+      "name": "large_p20_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "large_order_fraction": 0.1,
+      "queue": {
+        "flow_imbalance": 0.2
+      }
+    },
+    {
+      "name": "rapid_p50_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5,
+        "flip_rate": 0.05
+      }
+    }
+  ]
+}

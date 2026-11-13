@@ -18,6 +18,13 @@ from .queue_first_change import QueueFirstScenario,_number,_feature_names
 from .universe import TRAINING_TICKERS,asset_class,tickers as validate_tickers
 
 
+def _depth_range(values):
+    if (not isinstance(values,(list,tuple)) or len(values)!=2
+            or any(type(v) is not int for v in values) or not 1<=values[0]<=values[1]<=1_000_000):
+        raise ValueError('Depth range requires two ordered positive bounded integers')
+    return tuple(values)
+
+
 @dataclass(frozen=True)
 class MatchingScenario(QueueFirstScenario):
     latency_seconds:float=.0001
@@ -28,6 +35,8 @@ class MatchingScenario(QueueFirstScenario):
     large_order_fraction:float=0.
     grid_ticks:int=128
     external_large_order_fractions:tuple[tuple[str,float],...]=()
+    initial_depth_range:tuple[int,int]=(5,10)
+    external_depth_ranges:tuple[tuple[str,tuple[int,int]],...]=()
 
     def __post_init__(self):
         super().__post_init__()
@@ -42,6 +51,16 @@ class MatchingScenario(QueueFirstScenario):
             ids=validate_tickers([t for t,_ in pairs])
             if len(ids)!=len(pairs) or set(ids)&set(TRAINING_TICKERS) or any(not _number(v,0,1) for _,v in pairs):raise ValueError('Declare distinct external large-order fractions')
         object.__setattr__(self,'external_large_order_fractions',pairs)
+        object.__setattr__(self,'initial_depth_range',_depth_range(self.initial_depth_range))
+        depth_pairs=self.external_depth_ranges
+        if not isinstance(depth_pairs,(list,tuple)) or any(not isinstance(p,(list,tuple)) or len(p)!=2 for p in depth_pairs):
+            raise ValueError('Declare external depth ranges')
+        depth_pairs=tuple((str(t),_depth_range(v)) for t,v in depth_pairs)
+        if depth_pairs:
+            ids=validate_tickers([t for t,_ in depth_pairs])
+            if len(ids)!=len(depth_pairs) or set(ids)&set(TRAINING_TICKERS) or any(asset_class(t)=='index' for t in ids):
+                raise ValueError('External depth ranges require distinct nonprimary tradable targets')
+        object.__setattr__(self,'external_depth_ranges',depth_pairs)
 
 
 def _generators(dates,ticker,seed,phase):
@@ -73,7 +92,8 @@ def _order_fields(book,draw,scenario,pressure,strength,ticker):
 def _history(dates,ticker,scenario,seed,market_pressure):
     W=scenario.grid_ticks;N=len(dates);origin=10000-W//2
     initial=np.stack([rng.random(1024) for rng in _generators(dates,ticker,seed,30)])[:,512-W//2:512+W//2]
-    quantities=(5+np.floor(6*initial)).astype('int64')*np.where(np.arange(W)<W//2,1,-1)
+    depth_low,depth_high=dict(scenario.external_depth_ranges).get(ticker,scenario.initial_depth_range)
+    quantities=(depth_low+np.floor((depth_high-depth_low+1)*initial)).astype('int64')*np.where(np.arange(W)<W//2,1,-1)
     book=BookBatch(quantities,origin=origin);past=_draws(dates,ticker,seed,31,101);first=past[:,0];spec=scenario.queue
     pressure=np.where(first[:,11]<.35,market_pressure,np.where(first[:,10]<.5,-1,1))
     frequency=dict(spec.external_persistent_fractions).get(ticker,spec.persistent_fraction)
