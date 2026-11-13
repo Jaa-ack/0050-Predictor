@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 2026-11-14 — Operational first-trade latency envelope
+
+- Predeclared twelve operational scenarios with three fresh seeds and a fixed fast spread-bounce design candidate, retaining all four candidate audits and full daily constituent grids.
+- Reused the frozen ordered-level matching implementation to examine1/5/20millisecond delays, larger orders, five external high-activity stocks,2pctcommon missing input and an intermediate event mix.
+- Completed36experiments and144candidate audits with independent fixed-ten refits, all53query panels, full daily denominators,1400dictionary orders and96scalar paths. Both selected and fixed policies passed27complete sample gates and20joint any-five lower gates; retained every adverse latency and event-mix result.
+- Derived any-five-average bounds from the predeclared3600comparison stock family, reporting the stricter minimum-stock diagnostic separately and quantifying a conservative additional-failure allowance.
+- Reviewed post2020Taiwan depth/spread research and official trade/book feed schemas, distinguishing best-quote depth from five-level cumulative depth and timestamp precision from transport freshness.
+- Documented the operating assumptions separately from historical or live evidence. No broker connection, subscription, schedule, trading or frontend publication was enabled.
+
 ## Unreleased — 2026-11-14 — Ordered-level matching and compact bounce inference
 
 - Added signed finite-grid books with ordered partial fills, market and crossing/resting limit orders, IOC remainders, per-side quote updates and explicit depth-loss unknowns.

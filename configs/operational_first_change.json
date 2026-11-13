@@ -1,0 +1,146 @@
+{
+  "train_dates": 600,
+  "calibration_dates": 200,
+  "test_dates": 2000,
+  "seeds": [
+    101,
+    137,
+    173
+  ],
+  "max_wait_seconds": 60,
+  "max_events": 2048,
+  "candidates": [
+    "prior",
+    "spread_bounce",
+    "trade_logistic",
+    "trade_hist"
+  ],
+  "scenarios": [
+    {
+      "name": "limit_rich_100us",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.0001
+    },
+    {
+      "name": "limit_rich_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001
+    },
+    {
+      "name": "limit_rich_5ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.005
+    },
+    {
+      "name": "limit_rich_20ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.02
+    },
+    {
+      "name": "large_limit_rich_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "large_order_fraction": 0.1
+    },
+    {
+      "name": "large_limit_rich_5ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.005,
+      "large_order_fraction": 0.1
+    },
+    {
+      "name": "external_fast_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "external_event_rates": [
+        [
+          "1216",
+          1000.0
+        ],
+        [
+          "2303",
+          1000.0
+        ],
+        [
+          "2327",
+          1000.0
+        ],
+        [
+          "2345",
+          1000.0
+        ],
+        [
+          "2357",
+          1000.0
+        ]
+      ]
+    },
+    {
+      "name": "external_fast_5ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.005,
+      "external_event_rates": [
+        [
+          "1216",
+          1000.0
+        ],
+        [
+          "2303",
+          1000.0
+        ],
+        [
+          "2327",
+          1000.0
+        ],
+        [
+          "2345",
+          1000.0
+        ],
+        [
+          "2357",
+          1000.0
+        ]
+      ]
+    },
+    {
+      "name": "outage2_1ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.0,
+        "input_outage_fraction": 0.02
+      }
+    },
+    {
+      "name": "outage2_5ms",
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.005,
+      "queue": {
+        "flow_imbalance": 0.0,
+        "input_outage_fraction": 0.02
+      }
+    },
+    {
+      "name": "intermediate_1ms",
+      "market_fraction": 0.35,
+      "cancel_fraction": 0.25,
+      "latency_seconds": 0.001
+    },
+    {
+      "name": "intermediate_5ms",
+      "market_fraction": 0.35,
+      "cancel_fraction": 0.25,
+      "latency_seconds": 0.005
+    }
+  ]
+}
