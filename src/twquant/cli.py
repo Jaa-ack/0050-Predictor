@@ -188,6 +188,10 @@ def parser():
     trade_first.add_argument('--config',type=Path,required=True)
     trade_first.add_argument('--membership',type=Path,required=True)
     trade_first.add_argument('--out',type=Path,required=True)
+    matching=subs.add_parser('direction-matching-study',help='逐價部分成交、動態價差與首次成交價變動；離線合成研究')
+    matching.add_argument('--config',type=Path,required=True)
+    matching.add_argument('--membership',type=Path,required=True)
+    matching.add_argument('--out',type=Path,required=True)
     f = subs.add_parser("predict", help="保存不可覆寫的1/5/20日預測")
     f.add_argument("--as-of", required=True)
     f.add_argument("--paper", action="store_true")
@@ -238,6 +242,11 @@ def execute(args):
     default_root = {'demo': 'artifacts/demo', 'direction-simulate': 'artifacts/direction-synthetic',
                     'direction-feasibility': 'artifacts/direction-feasibility'}
     root = args.root or Path(default_root.get(args.command, 'artifacts/real'))
+    if args.command=='direction-matching-study':
+        from .queue_first_study import run_matching_study
+        report=run_matching_study(json.loads(args.config.read_text()),args.membership,args.out)
+        return dict(report=str(args.out/'report.json'),evidence_kind=report['evidence_kind'],experiments=len(report['experiments']),
+                    models_trained=report['models_trained'],target_scope_confirmed=True,target_feasibility_established=False)
     if args.command=='direction-trade-first-study':
         from .queue_first_study import run_trade_first_study
         report=run_trade_first_study(json.loads(args.config.read_text()),args.membership,args.out)
@@ -611,7 +620,7 @@ def main(argv=None):
     args = parser().parse_args(argv)
     credentials=None
     try:
-        if args.command not in {'direction-feasibility','direction-queue-study','direction-queue-ceiling','direction-first-change-study','direction-queue-first-study','direction-trade-first-study'} and not (args.command=='secrets' and args.secret_command=='init'):
+        if args.command not in {'direction-feasibility','direction-queue-study','direction-queue-ceiling','direction-first-change-study','direction-queue-first-study','direction-trade-first-study','direction-matching-study'} and not (args.command=='secrets' and args.secret_command=='init'):
             credentials=load_dotenv()
         result = execute(args)
         if result is not None:

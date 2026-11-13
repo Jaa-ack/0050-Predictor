@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 2026-11-14 — Ordered-level matching and compact bounce inference
+
+- Added signed finite-grid books with ordered partial fills, market and crossing/resting limit orders, IOC remainders, per-side quote updates and explicit depth-loss unknowns.
+- Added a causal matching-process adapter with independent event clocks, actual emission anchors, individual-fill targets, variable spread and past-fill-normalized depth; price-grid expansion preserves untouched paths.
+- Added an offline fixed-ten study command and a predeclared36-case comparison with all144candidate audits, retaining adverse activity, size, timeout and missing-input conditions.
+- Independently checked1400dictionary orders,96scalar paths, all four primary-only refits, full53-target probability panels and both selected/fixed-policy audit families. Selected controls passed23sample gates and4conditional lower gates; fixed bounce passed22and5respectively.
+- Added a prepared-array bounce interface that preserves twelve-decimal rounding, missing-input priors and every one of3816000legacy query probabilities. Batch50 inference measured11.833microseconds median and17.593microseconds p99, excluding data preparation, feed reception and publication.
+- Documented reduced gains after removing simultaneous quote resets and the remaining distribution/freshness assumptions; no provider connection, subscription, live schedule, trading or frontend publication was enabled.
+
 ## Unreleased — 2026-11-13 — Transaction first changes and spread bounce
 
 - Added the accepted transaction-price first-change target with a separate fitting/audit interface, emission-time last-trade anchors, same-price waiting and explicit unknown index answers.

@@ -28,13 +28,21 @@ def run_trade_first_study(config,membership_path,output):
     return _run_queue_event_study(config,membership_path,output,event_kind='trade')
 
 
+def run_matching_study(config,membership_path,output):
+    return _run_queue_event_study(config,membership_path,output,event_kind='matching')
+
+
 def _run_queue_event_study(config,membership_path,output,*,event_kind):
-    if event_kind=='trade':
+    Scenario=QueueFirstScenario
+    if event_kind in ('trade','matching'):
         from .trade_first_change import MODELS as allowed,fit_trade_first_model as fit,audit_trade_first_predictions as audit,simulate_trade_first_panel as simulate,TARGET as target
+        if event_kind=='matching':
+            from .matching_simulation import MatchingScenario,simulate_matching_panel
+            Scenario=MatchingScenario;simulate=simulate_matching_panel
     else:
         from .first_change import TARGET as target
         allowed=(*MODELS,*EXTRA_MODELS);fit=fit_first_change_model;audit=audit_first_change_predictions;simulate=simulate_queue_first_change_panel
-    evidence='synthetic_poisson_queue_trade_first_change' if event_kind=='trade' else 'synthetic_poisson_queue_first_change'
+    evidence={'trade':'synthetic_poisson_queue_trade_first_change','matching':'synthetic_multilevel_matching'}.get(event_kind,'synthetic_poisson_queue_first_change')
     required={'train_dates','calibration_dates','test_dates','seeds','max_wait_seconds','scenarios','candidates'}
     if not isinstance(config,dict) or not required<=set(config)<=required|{'max_events'}:raise ValueError('Declare queue-first study fields')
     for key,minimum in [('train_dates',30),('calibration_dates',10),('test_dates',126)]:
@@ -43,7 +51,7 @@ def _run_queue_event_study(config,membership_path,output,*,event_kind):
     if not isinstance(seeds,list) or not 1<=len(seeds)<=20 or any(type(s) is not int or not 0<=s<2**32 for s in seeds) or len(set(seeds))!=len(seeds):raise ValueError('Declare distinct bounded seeds')
     if not isinstance(candidates,list) or not candidates or len(set(candidates))!=len(candidates) or not set(candidates)<=set(allowed):raise ValueError('Declare distinct supported first-change candidates')
     if not isinstance(specs,list) or not 1<=len(specs)<=24:raise ValueError('Declare bounded queue-first scenarios')
-    scenarios=[QueueFirstScenario(**spec) for spec in specs]
+    scenarios=[Scenario(**spec) for spec in specs]
     if len({s.name for s in scenarios})!=len(scenarios) or any(not re.fullmatch(r'[A-Za-z0-9_-]{1,80}',s.name) for s in scenarios):raise ValueError('Declare distinct path-safe scenario names')
     max_events=config.get('max_events',2048)
     if type(max_events) is not int or not 1<=max_events<=8192:raise ValueError('Declare a bounded simulation event budget')
@@ -51,6 +59,7 @@ def _run_queue_event_study(config,membership_path,output,*,event_kind):
     if len(members)!=50:raise ValueError('Queue-first research requires all50constituents')
     for s in scenarios:
         overrides={t for t,_ in s.external_event_rates}|{t for t,_ in s.external_size_weights}|set(s.queue.weak_tickers)|{t for t,_ in s.queue.external_persistent_fractions}|{t for t,_ in s.queue.external_liquidity_weights}
+        overrides|={t for t,_ in getattr(s,'external_large_order_fractions',())}
         if overrides-set(members) or set(s.queue.weak_tickers)&set(TRAINING_TICKERS):raise ValueError('Transfer interventions must stay within external constituents')
     output=Path(output)
     if output.exists():raise ValueError('Queue-first research requires a fresh output directory')
@@ -74,6 +83,17 @@ def _run_queue_event_study(config,membership_path,output,*,event_kind):
         'Warmup starts with a declared synthetic bid/ask transaction. Last trade updates on each market event; same-price prints are not changes.',
         'The last trade at actual emission anchors the target, including all unobserved pre-emission prints.',
         'Indices have no transaction prints: keep the shared prior query and unknown answer without fabricating an index trade.']
+    if event_kind=='matching':
+        protocol['matching_rule']='ordered_opposite_levels'
+        protocol['assumptions']=['Finite signed price grid with initial5to10units at every tick;100past order events. No quote reset or automatic replenishment.',
+            'Market orders walk opposite price levels; limit orders may execute then rest or cancel IOC remainders. Separate quotes change only on their own side.',
+            'Individual price-level fills retain execution order; last trade is the last fill, never a per-order average.',
+            'Exhausted known depth or orders outside the finite grid make the path unknown; no fake quote or verified timeout.',
+            'Separate17th random coordinate controls exponential event time. All history windows and pressure flips count events.',
+            'All pre-emission fills update the actual emission anchor; the first different post-emission fill is the target.',
+            'Spread and depth normalized by mean past fill size are observable optional features; mean fill has a one-unit floor.',
+            'Event mixes, lot sizes, depth, rate and latency remain counterfactual; no Taiwan calibration or measured end-to-end latency.',
+            'Indices receive shared prior queries with unknown transaction answers and no invented book.']
     output.mkdir(parents=True,exist_ok=False);write_json(output/'protocol.json',protocol);runs=[]
     for scenario in scenarios:
         for seed in seeds:
@@ -99,7 +119,7 @@ def _run_queue_event_study(config,membership_path,output,*,event_kind):
             for ticker in DEFAULT_EVALUATION_TICKERS:
                 q=p[p.ticker.eq(ticker)];correct=q.actual_return.notna()&q.actual_return.ne(0)&q.actual_return.gt(0).eq(q.probability_up.ge(.5))
                 transfer[ticker]=dict(accuracy=float(correct.mean()),predictions=len(q),timeout_fraction=float(q.timeout.mean()),tradable=asset_class(ticker)!='index',used_for_training_calibration_selection=False)
-                if event_kind=='trade':transfer[ticker]['unresolved_answers']=int(q.actual_return.isna().sum())
+                if event_kind in ('trade','matching'):transfer[ticker]['unresolved_answers']=int(q.actual_return.isna().sum())
             r=dict(run_id=run_id,scenario=asdict(scenario),seed=seed,selected_model=chosen,training_rows=len(train),calibration_rows=len(cal),
                 candidate_calibration=scores,training_details={n:m.training_details for n,m in models.items()},candidate_test_audits=audits,selected_test_audit=audits[chosen],
                 predictions=str(path),prediction_sha256=hashlib.sha256((output/path).read_bytes()).hexdigest(),transfer=transfer,selection_uses_external_targets=False,

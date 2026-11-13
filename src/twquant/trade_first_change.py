@@ -35,6 +35,11 @@ def _trade_frame(frame):
     if 'f_trade_location' not in frame:raise ValueError('Transaction models require the observed last-trade location')
     result=_event_frame(frame)
     result['f_book_trade_location']=pd.to_numeric(frame.f_trade_location,errors='coerce').round(12)
+    matching=('f_trade_spread_ticks','f_trade_bid_depth_to_fill','f_trade_ask_depth_to_fill')
+    present=set(matching)&set(frame)
+    if present and present!=set(matching):raise ValueError('Declare the complete matching feature profile')
+    for name in matching:
+        if name in present:result[name.replace('f_trade_','f_book_trade_',1)]=pd.to_numeric(frame[name],errors='coerce').round(12)
     return result
 
 
@@ -59,6 +64,21 @@ class TradeFirstModel:
         location=inputs.f_book_trade_location.to_numpy()
         if not np.isfinite(location[ready]).all():raise ValueError('Ready bounce inputs require finite observed trade location')
         up=np.full(len(frame),self.prior);up[ready]=(location[ready]<0).astype(float)
+        return np.column_stack([1-up,up])
+
+    def predict_locations(self,locations,*,input_ready):
+        """Use prepared causal locations; callers establish receipt/time contracts.
+
+        This array path excludes feed reception, feature building and persistence.
+        Keep the DataFrame interface's twelve-decimal location convention.
+        """
+        if self.name!='spread_bounce':raise ValueError('Location inference requires the spread-bounce model')
+        values=np.asarray(locations);ready=np.asarray(input_ready)
+        if values.ndim!=1 or values.dtype.kind not in 'fiu':raise ValueError('Declare a numeric location vector')
+        if ready.shape!=values.shape or ready.dtype.kind!='b':raise ValueError('Declare a matching boolean input_ready vector')
+        observed=np.round(values[ready].astype(float,copy=False),12)
+        if not np.isfinite(observed).all():raise ValueError('Ready bounce locations must be finite')
+        up=np.full(len(values),self.prior);up[ready]=observed<0
         return np.column_stack([1-up,up])
 
 

@@ -1,0 +1,23 @@
+{
+  "train_dates":600,
+  "calibration_dates":200,
+  "test_dates":2000,
+  "seeds":[17,29,43],
+  "max_wait_seconds":60,
+  "max_events":2048,
+  "candidates":["prior","spread_bounce","trade_logistic","trade_hist"],
+  "scenarios":[
+    {"name":"sweep_lag0","latency_seconds":0.0},
+    {"name":"sweep_lag100us"},
+    {"name":"sweep_lag1ms","latency_seconds":0.001},
+    {"name":"sweep_lag5ms","latency_seconds":0.005},
+    {"name":"best_ioc_100us","sweep_fraction":0.0},
+    {"name":"large_sweep_100us","large_order_fraction":0.1},
+    {"name":"limit_rich_100us","market_fraction":0.15,"cancel_fraction":0.35},
+    {"name":"large_limit_rich_100us","market_fraction":0.15,"cancel_fraction":0.35,"large_order_fraction":0.1},
+    {"name":"external_fast_100us","external_event_rates":[["1216",1000.0],["2303",1000.0],["2327",1000.0],["2345",1000.0],["2357",1000.0]]},
+    {"name":"external_large_100us","external_large_order_fractions":[["1216",0.1],["2303",0.1],["2327",0.1],["2345",0.1],["2357",0.1]]},
+    {"name":"outage25_100us","queue":{"flow_imbalance":0.0,"input_outage_fraction":0.25}},
+    {"name":"slow_timeout","event_rate":0.01}
+  ]
+}

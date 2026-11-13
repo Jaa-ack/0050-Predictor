@@ -130,3 +130,28 @@ def test_trade_first_cli_is_offline_and_preserves_the_index_query(tmp_path,capsy
     run=report['experiments'][0];assert run['selected_test_audit']['expected_predictions']==50*126
     assert run['transfer']['IX0001']['unresolved_answers']==126 and not run['transfer']['IX0001']['tradable']
     assert not report['empirical_target_met'] and not report['target_feasibility_established']
+
+
+def test_array_inference_preserves_dataframe_rounding_missing_inputs_and_immutable_queries():
+    m=module();frame=panel(periods=40)
+    model=m.fit_trade_first_model(frame,'spread_bounce',fit_at=frame.label_available_at.max()+pd.Timedelta(days=1))
+    assert hasattr(model,'predict_locations'), 'The shared bounce model needs a compact observed-location interface'
+    locations=np.array([-3.,-1.,-1e-14,0.,1e-14,1.,3.,np.nan,np.inf])
+    ready=np.array([True]*7+[False,False]);before=locations.copy()
+    probe=frame.iloc[:len(locations)].assign(f_trade_location=locations,input_ready=ready)
+    actual=model.predict_locations(locations,input_ready=ready)
+    np.testing.assert_array_equal(actual,model.predict_proba(probe))
+    np.testing.assert_array_equal(actual[:,1],np.array([1.,1.,0.,0.,0.,0.,0.,model.prior,model.prior]))
+    np.testing.assert_array_equal(locations,before)
+    np.testing.assert_array_equal(actual.sum(axis=1),np.ones(len(locations)))
+    assert model.predict_locations(np.array([],float),input_ready=np.array([],bool)).shape==(0,2)
+
+
+def test_array_inference_rejects_invalid_observations_and_non_bounce_models():
+    m=module();frame=panel(periods=40);fit_at=frame.label_available_at.max()+pd.Timedelta(days=1)
+    model=m.fit_trade_first_model(frame,'spread_bounce',fit_at=fit_at)
+    assert hasattr(model,'predict_locations'), 'The shared bounce model needs a compact observed-location interface'
+    for locations,ready in (([[1.]],np.array([True])),([1.],np.array([True,False])),([1.],np.array([1])),(['1'],np.array([True])),([np.nan],np.array([True])),([np.inf],np.array([True]))):
+        with pytest.raises(ValueError,match='location|ready'):model.predict_locations(locations,input_ready=ready)
+    prior=m.fit_trade_first_model(frame,'prior',fit_at=fit_at)
+    with pytest.raises(ValueError,match='spread.bounce'):prior.predict_locations(np.array([-1.]),input_ready=np.array([True]))
