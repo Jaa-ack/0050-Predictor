@@ -1,0 +1,553 @@
+{
+  "review_date": "2026-11-14",
+  "timezone": "Asia/Taipei",
+  "method": "Public GitHub repository metadata + latest default-branch commit + pinned raw files; static inspection only. No external source executed.",
+  "disclaimer": "Repository licenses do not establish weight, base-model, dataset or provider-data permissions. No packages, weights or datasets imported.",
+  "repositories": [
+    {
+      "requested": "microsoft/qlib",
+      "repository": "microsoft/qlib",
+      "commit": "54355232463878d2eebb91fe0ee5fa7fa1f5976c",
+      "commit_date": "2026-10-08T10:15:27Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "e9f7cc8eeb60e3fe3784ec496e350ecb584157c3240cda0651c20acb26fd9037",
+          "url": "https://github.com/microsoft/qlib/blob/54355232463878d2eebb91fe0ee5fa7fa1f5976c/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "url": "https://github.com/microsoft/qlib/blob/54355232463878d2eebb91fe0ee5fa7fa1f5976c/LICENSE"
+        },
+        {
+          "path": "pyproject.toml",
+          "sha256": "c47849f143278fef2c114513ca123c6100f007947cdf051928e734985f35a4e9",
+          "url": "https://github.com/microsoft/qlib/blob/54355232463878d2eebb91fe0ee5fa7fa1f5976c/pyproject.toml"
+        },
+        {
+          "path": "qlib/contrib/data/handler.py",
+          "sha256": "b621481c6009c39066c67c71390fd2bea635f56daf9f2c4e38817eff268e3232",
+          "url": "https://github.com/microsoft/qlib/blob/54355232463878d2eebb91fe0ee5fa7fa1f5976c/qlib/contrib/data/handler.py"
+        },
+        {
+          "path": "qlib/contrib/data/loader.py",
+          "sha256": "814b7f7ab3d418ae3c87ce352220080b239eba2670eac9e38376b794be4075cb",
+          "url": "https://github.com/microsoft/qlib/blob/54355232463878d2eebb91fe0ee5fa7fa1f5976c/qlib/contrib/data/loader.py"
+        },
+        {
+          "path": "qlib/data/dataset/processor.py",
+          "sha256": "424af44e81c99467171c2d0b7978fb9f95d3b4c8b743a535ff4fe45d708cf517",
+          "url": "https://github.com/microsoft/qlib/blob/54355232463878d2eebb91fe0ee5fa7fa1f5976c/qlib/data/dataset/processor.py"
+        }
+      ],
+      "github_license_detection": "MIT",
+      "license_reviewed": "MIT"
+    },
+    {
+      "requested": "shiyu-coder/Kronos",
+      "repository": "shiyu-coder/Kronos",
+      "commit": "67b630e67f6a18c9e9be918d9b4337c960db1e9a",
+      "commit_date": "2026-04-13T12:38:49Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "b815b608192afa4b805a11bcbb66268f3e3db55736218964944318da7865357e",
+          "url": "https://github.com/shiyu-coder/Kronos/blob/67b630e67f6a18c9e9be918d9b4337c960db1e9a/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "acb2d194d378204e5f2be4dcd24d39ecac437903620c790c3315a96dab388fdc",
+          "url": "https://github.com/shiyu-coder/Kronos/blob/67b630e67f6a18c9e9be918d9b4337c960db1e9a/LICENSE"
+        },
+        {
+          "path": "requirements.txt",
+          "sha256": "b68eaa2f945d6a5726e3642ce5d6c82014b33a09c3c1bd6302f2c530db22593e",
+          "url": "https://github.com/shiyu-coder/Kronos/blob/67b630e67f6a18c9e9be918d9b4337c960db1e9a/requirements.txt"
+        },
+        {
+          "path": "model/kronos.py",
+          "sha256": "0a5f90282e2039c2de0771473419715c845def154896dbd0f5747837e6241032",
+          "url": "https://github.com/shiyu-coder/Kronos/blob/67b630e67f6a18c9e9be918d9b4337c960db1e9a/model/kronos.py"
+        }
+      ],
+      "github_license_detection": "MIT",
+      "license_reviewed": "MIT"
+    },
+    {
+      "requested": "amazon-science/chronos-forecasting",
+      "repository": "amazon-science/chronos-forecasting",
+      "commit": "1224fafa91e1ecd6674f5204066b159e40b5e4a1",
+      "commit_date": "2026-10-05T14:25:02Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "7f9e55723daadb20f79f3d76d23370888301d917f075e9eafa3e780c78f9ff35",
+          "url": "https://github.com/amazon-science/chronos-forecasting/blob/1224fafa91e1ecd6674f5204066b159e40b5e4a1/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b",
+          "url": "https://github.com/amazon-science/chronos-forecasting/blob/1224fafa91e1ecd6674f5204066b159e40b5e4a1/LICENSE"
+        },
+        {
+          "path": "pyproject.toml",
+          "sha256": "a6928789495e4d90c7abe9c97d84c03e6b2f704dbbcd73692637c30489e1ed32",
+          "url": "https://github.com/amazon-science/chronos-forecasting/blob/1224fafa91e1ecd6674f5204066b159e40b5e4a1/pyproject.toml"
+        },
+        {
+          "path": "src/chronos/chronos.py",
+          "sha256": "52a8ad41894195b1c244784e35e238c57e572d54fd980816b579c9c5fab78e3b",
+          "url": "https://github.com/amazon-science/chronos-forecasting/blob/1224fafa91e1ecd6674f5204066b159e40b5e4a1/src/chronos/chronos.py"
+        },
+        {
+          "path": "src/chronos/chronos2/pipeline.py",
+          "sha256": "9fad1e4fb7251471463a40408a32d25d31b23b7afb88069911f095071b9b0599",
+          "url": "https://github.com/amazon-science/chronos-forecasting/blob/1224fafa91e1ecd6674f5204066b159e40b5e4a1/src/chronos/chronos2/pipeline.py"
+        }
+      ],
+      "github_license_detection": "Apache-2.0",
+      "license_reviewed": "Apache-2.0"
+    },
+    {
+      "requested": "Nixtla/neuralforecast",
+      "repository": "Nixtla/neuralforecast",
+      "commit": "5bcb26d86aa6523cec76d12b78a656a1754e7490",
+      "commit_date": "2026-11-12T19:37:37Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "0360a4f3d8ebb24c880e8675a8a57cc325af32210d729b6f492608b102fdfe37",
+          "url": "https://github.com/Nixtla/neuralforecast/blob/5bcb26d86aa6523cec76d12b78a656a1754e7490/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "d392f3d2969e354d7e6aef8fc6df5590ef5c20eea4b946191bd76a6138b4e81c",
+          "url": "https://github.com/Nixtla/neuralforecast/blob/5bcb26d86aa6523cec76d12b78a656a1754e7490/LICENSE"
+        },
+        {
+          "path": "pyproject.toml",
+          "sha256": "53423b73d7ae9a92f5d54a59caf4b711f1bd466bbf4718e590cc1f641b1adecb",
+          "url": "https://github.com/Nixtla/neuralforecast/blob/5bcb26d86aa6523cec76d12b78a656a1754e7490/pyproject.toml"
+        },
+        {
+          "path": "neuralforecast/core.py",
+          "sha256": "990f3d9715d5adf7c519a42bdd0f7bda023af42ac8e740c0361a11298bc62aeb",
+          "url": "https://github.com/Nixtla/neuralforecast/blob/5bcb26d86aa6523cec76d12b78a656a1754e7490/neuralforecast/core.py"
+        },
+        {
+          "path": "neuralforecast/losses/pytorch.py",
+          "sha256": "bd9e511101bbecbaa889673a1a2cea4392032892963908559731385c2a0e8760",
+          "url": "https://github.com/Nixtla/neuralforecast/blob/5bcb26d86aa6523cec76d12b78a656a1754e7490/neuralforecast/losses/pytorch.py"
+        }
+      ],
+      "github_license_detection": "Apache-2.0",
+      "license_reviewed": "Apache-2.0"
+    },
+    {
+      "requested": "unit8co/darts",
+      "repository": "unit8co/darts",
+      "commit": "e679f7bea284734b15961c9ee3c4e4fc3fcd7fd2",
+      "commit_date": "2026-11-13T15:06:52Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "43a2dc91a81a9e5694878bb80e51114dd30f3e65f0917991a8757df14fb06c15",
+          "url": "https://github.com/unit8co/darts/blob/e679f7bea284734b15961c9ee3c4e4fc3fcd7fd2/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "a9f5092af3beb16a4e210725e991ebfc9bcca4420644730e969f8418173eb31e",
+          "url": "https://github.com/unit8co/darts/blob/e679f7bea284734b15961c9ee3c4e4fc3fcd7fd2/LICENSE"
+        },
+        {
+          "path": "pyproject.toml",
+          "sha256": "d91c68fea5860247257d03e9c54127c64bfef3eb51e11967b64261c27820b8e7",
+          "url": "https://github.com/unit8co/darts/blob/e679f7bea284734b15961c9ee3c4e4fc3fcd7fd2/pyproject.toml"
+        },
+        {
+          "path": "darts/models/forecasting/conformal_models.py",
+          "sha256": "aa39aa43a7f394fc17827b0377674119fc8b2d753c976130387484d993d3dbe4",
+          "url": "https://github.com/unit8co/darts/blob/e679f7bea284734b15961c9ee3c4e4fc3fcd7fd2/darts/models/forecasting/conformal_models.py"
+        }
+      ],
+      "github_license_detection": "Apache-2.0",
+      "license_reviewed": "Apache-2.0"
+    },
+    {
+      "requested": "microsoft/RD-Agent",
+      "repository": "microsoft/RD-Agent",
+      "commit": "484776c211e4fbbeef03e0ec00d6bbee7362a4f4",
+      "commit_date": "2026-09-23T11:05:10Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "b68ff14551944e1821023ae54a090fc0aabaad58170165cc9c17c6e0e7290c13",
+          "url": "https://github.com/microsoft/RD-Agent/blob/484776c211e4fbbeef03e0ec00d6bbee7362a4f4/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "url": "https://github.com/microsoft/RD-Agent/blob/484776c211e4fbbeef03e0ec00d6bbee7362a4f4/LICENSE"
+        },
+        {
+          "path": "pyproject.toml",
+          "sha256": "e77338c6f024c70adfeab8518227774fa5ecd14b421eba139d2c20f6148b3352",
+          "url": "https://github.com/microsoft/RD-Agent/blob/484776c211e4fbbeef03e0ec00d6bbee7362a4f4/pyproject.toml"
+        },
+        {
+          "path": "rdagent/scenarios/qlib/experiment/factor_experiment.py",
+          "sha256": "451bc9a4b01c73f5d8d30d071c0e54f27f87d001898dbed853e7264b5332af79",
+          "url": "https://github.com/microsoft/RD-Agent/blob/484776c211e4fbbeef03e0ec00d6bbee7362a4f4/rdagent/scenarios/qlib/experiment/factor_experiment.py"
+        }
+      ],
+      "github_license_detection": "MIT",
+      "license_reviewed": "MIT"
+    },
+    {
+      "requested": "AI4Finance-Foundation/FinGPT",
+      "repository": "AI4Finance-Foundation/FinGPT",
+      "commit": "ac5c5443fbeeafad801e7a3c188e4f24cfaad4d8",
+      "commit_date": "2026-10-25T13:49:15Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "8f2b9963d39c4a6e9ef558db018cfa1abf66126906912a55a8dc261647140aaf",
+          "url": "https://github.com/AI4Finance-Foundation/FinGPT/blob/ac5c5443fbeeafad801e7a3c188e4f24cfaad4d8/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "2a3183a35138275582698c16b07e9b33992d822434bb4c7728673c6204bb1848",
+          "url": "https://github.com/AI4Finance-Foundation/FinGPT/blob/ac5c5443fbeeafad801e7a3c188e4f24cfaad4d8/LICENSE"
+        },
+        {
+          "path": "setup.py",
+          "sha256": "6168059b0f9ad8ff96da49ce6b4c880248b0e527b590506999ec6f8bf44c643c",
+          "url": "https://github.com/AI4Finance-Foundation/FinGPT/blob/ac5c5443fbeeafad801e7a3c188e4f24cfaad4d8/setup.py"
+        },
+        {
+          "path": "fingpt/FinGPT_Forecaster/README.md",
+          "sha256": "ed730a1b12d03532f86696a0e8cdca2c877ceb893884578f5f13eed039222e1e",
+          "url": "https://github.com/AI4Finance-Foundation/FinGPT/blob/ac5c5443fbeeafad801e7a3c188e4f24cfaad4d8/fingpt/FinGPT_Forecaster/README.md"
+        },
+        {
+          "path": "fingpt/FinGPT_Forecaster/data.py",
+          "sha256": "b8eef0e5fd9c54586193c0be4ab33fd0e8bf4e4f4d34acdb6a5db1a84c516dd7",
+          "url": "https://github.com/AI4Finance-Foundation/FinGPT/blob/ac5c5443fbeeafad801e7a3c188e4f24cfaad4d8/fingpt/FinGPT_Forecaster/data.py"
+        },
+        {
+          "path": "fingpt/FinGPT_Forecaster/train_lora.py",
+          "sha256": "255b04f13063b7ecca6dfae99fcb8da3728fb80b3693fc79f1bc9e5e8f985563",
+          "url": "https://github.com/AI4Finance-Foundation/FinGPT/blob/ac5c5443fbeeafad801e7a3c188e4f24cfaad4d8/fingpt/FinGPT_Forecaster/train_lora.py"
+        }
+      ],
+      "github_license_detection": "MIT",
+      "license_reviewed": "MIT"
+    },
+    {
+      "requested": "TauricResearch/TradingAgents",
+      "repository": "TauricResearch/TradingAgents",
+      "commit": "9fa1196fffbcfd9de5146d2dd2869df84ab99838",
+      "commit_date": "2026-11-04T10:13:55Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "cffed7f3d8189cc02a128eabf6fbf07b29d069e5817d8848dae03c16e39f802e",
+          "url": "https://github.com/TauricResearch/TradingAgents/blob/9fa1196fffbcfd9de5146d2dd2869df84ab99838/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "url": "https://github.com/TauricResearch/TradingAgents/blob/9fa1196fffbcfd9de5146d2dd2869df84ab99838/LICENSE"
+        },
+        {
+          "path": "pyproject.toml",
+          "sha256": "670cd3552c10b5dbb2ea4c420336c7b58af455c27b1a65599727ecbefb4f375c",
+          "url": "https://github.com/TauricResearch/TradingAgents/blob/9fa1196fffbcfd9de5146d2dd2869df84ab99838/pyproject.toml"
+        },
+        {
+          "path": "tradingagents/graph/trading_graph.py",
+          "sha256": "e12331cdf3d3d03df5e17a4c705638409d52f318bbbb52eb102a76a65a16c50e",
+          "url": "https://github.com/TauricResearch/TradingAgents/blob/9fa1196fffbcfd9de5146d2dd2869df84ab99838/tradingagents/graph/trading_graph.py"
+        }
+      ],
+      "github_license_detection": "Apache-2.0",
+      "license_reviewed": "Apache-2.0"
+    },
+    {
+      "requested": "polakowo/vectorbt",
+      "repository": "polakowo/vectorbt",
+      "commit": "9ac1b697166b00911def494cf95937274218aa54",
+      "commit_date": "2026-11-11T17:29:20Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "4978449a5dd9b7ef15944b5d152ed72902b118697fd27fb4b93ed82947e4e3df",
+          "url": "https://github.com/polakowo/vectorbt/blob/9ac1b697166b00911def494cf95937274218aa54/README.md"
+        },
+        {
+          "path": "LICENSE.md",
+          "sha256": "a914859a115b70e80956a3cbd613139ad74c04e5d1bd38da8bcc16725822ec84",
+          "url": "https://github.com/polakowo/vectorbt/blob/9ac1b697166b00911def494cf95937274218aa54/LICENSE.md"
+        },
+        {
+          "path": "pyproject.toml",
+          "sha256": "65ff68a8e267310a5bc1699dcbac5583d438f0e2dbdd76f2e2d3c2a53c714281",
+          "url": "https://github.com/polakowo/vectorbt/blob/9ac1b697166b00911def494cf95937274218aa54/pyproject.toml"
+        },
+        {
+          "path": "vectorbt/portfolio/base.py",
+          "sha256": "2fa60e4b4d6b58a8e720ff300e0587391a028ca9fc6e8a2b6529aa3d2321ec13",
+          "url": "https://github.com/polakowo/vectorbt/blob/9ac1b697166b00911def494cf95937274218aa54/vectorbt/portfolio/base.py"
+        },
+        {
+          "path": "vectorbt/portfolio/nb.py",
+          "sha256": "0286cdd49b099972f850fd9d7beebd719efa8f36d9eaa9a85671def7c2321700",
+          "url": "https://github.com/polakowo/vectorbt/blob/9ac1b697166b00911def494cf95937274218aa54/vectorbt/portfolio/nb.py"
+        }
+      ],
+      "github_license_detection": "NOASSERTION",
+      "license_reviewed": "Apache-2.0 WITH Commons-Clause-1.0"
+    },
+    {
+      "requested": "QuantConnect/Lean",
+      "repository": "QuantConnect/Lean",
+      "commit": "82d26047e95a89b53c9cbe02b67efaa3c4455ed9",
+      "commit_date": "2026-11-13T21:23:58Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "readme.md",
+          "sha256": "c93d2d649740ffdbfeca35ee5035eff668dc1f0a6b97873756addb70f4f4b91e",
+          "url": "https://github.com/QuantConnect/Lean/blob/82d26047e95a89b53c9cbe02b67efaa3c4455ed9/readme.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "522cf0a716ce03f67d46f8fceb5bf78c5b84400ec5cd8d14bf9f02cddc1cb6ba",
+          "url": "https://github.com/QuantConnect/Lean/blob/82d26047e95a89b53c9cbe02b67efaa3c4455ed9/LICENSE"
+        },
+        {
+          "path": "Engine/AlgorithmManager.cs",
+          "sha256": "c20e267cbd2a58b829587b7182966c5edf90a093ce98ac45dab64562adc2440f",
+          "url": "https://github.com/QuantConnect/Lean/blob/82d26047e95a89b53c9cbe02b67efaa3c4455ed9/Engine/AlgorithmManager.cs"
+        },
+        {
+          "path": "Engine/TransactionHandlers/BacktestingTransactionHandler.cs",
+          "sha256": "df5b3565fa4f67e504252d1b70320394c8be4e0bbebbe17317d6fa827d85f05e",
+          "url": "https://github.com/QuantConnect/Lean/blob/82d26047e95a89b53c9cbe02b67efaa3c4455ed9/Engine/TransactionHandlers/BacktestingTransactionHandler.cs"
+        },
+        {
+          "path": "Engine/QuantConnect.Lean.Engine.csproj",
+          "sha256": "3f6c8e1e600d8b9391f662c0d779d05be0a125569b8f6cc079e13637f4ee65e4",
+          "url": "https://github.com/QuantConnect/Lean/blob/82d26047e95a89b53c9cbe02b67efaa3c4455ed9/Engine/QuantConnect.Lean.Engine.csproj"
+        },
+        {
+          "path": "Dockerfile",
+          "sha256": "a5cf67340ae7749504d680136e7a2418d118118e26667e95ab3b049b6b9e3557",
+          "url": "https://github.com/QuantConnect/Lean/blob/82d26047e95a89b53c9cbe02b67efaa3c4455ed9/Dockerfile"
+        }
+      ],
+      "github_license_detection": "Apache-2.0",
+      "license_reviewed": "Apache-2.0"
+    },
+    {
+      "requested": "AI4Finance-Foundation/FinRL-Trading",
+      "repository": "AI4Finance-Foundation/FinRL-Trading",
+      "commit": "4409abe925c904e570be78ebfb5e77ac3491dff8",
+      "commit_date": "2026-09-18T01:13:20Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "87b6d384f7b9f98ab2d091cf52391c5a0246a342c61213bf5cf7eec1c366d6d2",
+          "url": "https://github.com/AI4Finance-Foundation/FinRL-Trading/blob/4409abe925c904e570be78ebfb5e77ac3491dff8/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "ef3d97b5113a0f224425680aceb7a9ed3baaa4fd9aa21e8ff445cb963fddcbf5",
+          "url": "https://github.com/AI4Finance-Foundation/FinRL-Trading/blob/4409abe925c904e570be78ebfb5e77ac3491dff8/LICENSE"
+        },
+        {
+          "path": "setup.py",
+          "sha256": "1626e212f1272045bfd50f99b550d2dc967669c2ffaacd3dd2c23e87200457bc",
+          "url": "https://github.com/AI4Finance-Foundation/FinRL-Trading/blob/4409abe925c904e570be78ebfb5e77ac3491dff8/setup.py"
+        },
+        {
+          "path": "src/backtest/backtest_engine.py",
+          "sha256": "0db265436ba9816d4b07b6834c080f467314abd18ab8c451c7e5cd39eaaa46a0",
+          "url": "https://github.com/AI4Finance-Foundation/FinRL-Trading/blob/4409abe925c904e570be78ebfb5e77ac3491dff8/src/backtest/backtest_engine.py"
+        },
+        {
+          "path": "src/strategies/adaptive_rotation/walk_forward.py",
+          "sha256": "581feaf57f666c1bc41b1dcf68c5b27cb00a34e3900a82f5330090bef7d9c545",
+          "url": "https://github.com/AI4Finance-Foundation/FinRL-Trading/blob/4409abe925c904e570be78ebfb5e77ac3491dff8/src/strategies/adaptive_rotation/walk_forward.py"
+        },
+        {
+          "path": "requirements.txt",
+          "sha256": "bafd6710592e640315b1e2ff2f6dc6e79e1b40dd40658776ee84ef146217a7f3",
+          "url": "https://github.com/AI4Finance-Foundation/FinRL-Trading/blob/4409abe925c904e570be78ebfb5e77ac3491dff8/requirements.txt"
+        }
+      ],
+      "github_license_detection": "Apache-2.0",
+      "license_reviewed": "Apache-2.0"
+    },
+    {
+      "requested": "freqtrade/freqtrade",
+      "repository": "freqtrade/freqtrade",
+      "commit": "5197bedab82559fac6be6c1539c64b94368fb91c",
+      "commit_date": "2026-11-12T05:41:21Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "119d586166ae397b05f9763caf7f90e2d27792f90c8455c04ac3455e14a40d89",
+          "url": "https://github.com/freqtrade/freqtrade/blob/5197bedab82559fac6be6c1539c64b94368fb91c/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2",
+          "url": "https://github.com/freqtrade/freqtrade/blob/5197bedab82559fac6be6c1539c64b94368fb91c/LICENSE"
+        },
+        {
+          "path": "pyproject.toml",
+          "sha256": "4a33f0d8a613e19e33a74f968a68ed452064972f6339a8a3b9ff941c708cda85",
+          "url": "https://github.com/freqtrade/freqtrade/blob/5197bedab82559fac6be6c1539c64b94368fb91c/pyproject.toml"
+        },
+        {
+          "path": "freqtrade/optimize/analysis/lookahead.py",
+          "sha256": "25b02b2d4f6e4317d8855b01976a3fef112e56280b7a33954634ed4dc51e2cca",
+          "url": "https://github.com/freqtrade/freqtrade/blob/5197bedab82559fac6be6c1539c64b94368fb91c/freqtrade/optimize/analysis/lookahead.py"
+        },
+        {
+          "path": "freqtrade/freqai/data_kitchen.py",
+          "sha256": "e46ecd04467c6dde0bbb53d64363988040eebcd16c4f478540a30b8e588e4396",
+          "url": "https://github.com/freqtrade/freqtrade/blob/5197bedab82559fac6be6c1539c64b94368fb91c/freqtrade/freqai/data_kitchen.py"
+        }
+      ],
+      "github_license_detection": "GPL-3.0",
+      "license_reviewed": "GPL-3.0"
+    },
+    {
+      "requested": "ZhuLinsen/daily_stock_analysis",
+      "repository": "ZhuLinsen/daily_stock_analysis",
+      "commit": "ac9c33dfcf4cb84974d7bfee9c8661d88b8cfbff",
+      "commit_date": "2026-11-14T07:25:13Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "3fa8129502623e120b3db03ec315f34ceba991dc034f0299dfb1c896293c229a",
+          "url": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/ac9c33dfcf4cb84974d7bfee9c8661d88b8cfbff/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "87915011a44adbd0b2b085dbf931a21bd082f65c4a0824d61c1dec50dc54f2a4",
+          "url": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/ac9c33dfcf4cb84974d7bfee9c8661d88b8cfbff/LICENSE"
+        },
+        {
+          "path": "pyproject.toml",
+          "sha256": "3d022ee69f5314f9f0481ae8de8a4a1214f53ff255e41a0376cf1e199f4136b2",
+          "url": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/ac9c33dfcf4cb84974d7bfee9c8661d88b8cfbff/pyproject.toml"
+        },
+        {
+          "path": "src/analyzer.py",
+          "sha256": "48b5d38a443b9312e09afc9dd2088053524b38ebe7527cb481bc036e6f368e25",
+          "url": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/ac9c33dfcf4cb84974d7bfee9c8661d88b8cfbff/src/analyzer.py"
+        },
+        {
+          "path": "data_provider/__init__.py",
+          "sha256": "44cc76cb8e547aa5748a7a8cf24930c6e5baa1c39fcd7c162867cdfb9e2f06e2",
+          "url": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/ac9c33dfcf4cb84974d7bfee9c8661d88b8cfbff/data_provider/__init__.py"
+        },
+        {
+          "path": "data_provider/tw_institutional_fetcher.py",
+          "sha256": "bd0ae733dcf8f4322c52b522589299cd8288248b81644baf114ea24bfa27e453",
+          "url": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/ac9c33dfcf4cb84974d7bfee9c8661d88b8cfbff/data_provider/tw_institutional_fetcher.py"
+        },
+        {
+          "path": "requirements.txt",
+          "sha256": "7e859a200900fcfcff3a52c03eaf5f136b321d255d68225975ae24d35ec71810",
+          "url": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/ac9c33dfcf4cb84974d7bfee9c8661d88b8cfbff/requirements.txt"
+        }
+      ],
+      "github_license_detection": "MIT",
+      "license_reviewed": "MIT"
+    },
+    {
+      "requested": "openbq-org/OpenBB",
+      "repository": "openbq-org/OpenBB",
+      "commit": "e43353a82815ff9ba56ad1b7ad47c32729dcf314",
+      "commit_date": "2026-11-13T02:14:58Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "4a7df430d0e8fdbb2cbe896d41f88069456cc326c02cfc200c7b210c8bd241c3",
+          "url": "https://github.com/openbq-org/OpenBB/blob/e43353a82815ff9ba56ad1b7ad47c32729dcf314/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "2c40e795cd5d3179d45c57b534e953e3fa2f1fb499602e2b314f57aeec813885",
+          "url": "https://github.com/openbq-org/OpenBB/blob/e43353a82815ff9ba56ad1b7ad47c32729dcf314/LICENSE"
+        },
+        {
+          "path": "openbb_platform/core/openbb_core/provider/abstract/fetcher.py",
+          "sha256": "bde211053a842828b3bba21ed0c53fc82fa0b1d0af946bc96d7342c81f00efa3",
+          "url": "https://github.com/openbq-org/OpenBB/blob/e43353a82815ff9ba56ad1b7ad47c32729dcf314/openbb_platform/core/openbb_core/provider/abstract/fetcher.py"
+        },
+        {
+          "path": "openbb_platform/core/pyproject.toml",
+          "sha256": "1821d4e6b913c1b4de408cdcb3053c7ccbe93aa7494822a0a466b4ac6343df11",
+          "url": "https://github.com/openbq-org/OpenBB/blob/e43353a82815ff9ba56ad1b7ad47c32729dcf314/openbb_platform/core/pyproject.toml"
+        }
+      ],
+      "github_license_detection": "NOASSERTION",
+      "license_reviewed": "Apache-2.0"
+    },
+    {
+      "requested": "AI4Finance-Foundation/FinRobot",
+      "repository": "AI4Finance-Foundation/FinRobot",
+      "commit": "63e1884a42ea7b729551a5424b4bd6a65af636e0",
+      "commit_date": "2026-10-24T13:58:26Z",
+      "archived": false,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "a18b26396e0ca785364e0379dc9c40d2efa988d1b591d5199e357478f1f911eb",
+          "url": "https://github.com/AI4Finance-Foundation/FinRobot/blob/63e1884a42ea7b729551a5424b4bd6a65af636e0/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "bbcb4226500b503737713f0c9a9da17efce56fa6989b9f0538071dcb60826af5",
+          "url": "https://github.com/AI4Finance-Foundation/FinRobot/blob/63e1884a42ea7b729551a5424b4bd6a65af636e0/LICENSE"
+        },
+        {
+          "path": "setup.py",
+          "sha256": "06ec2abd7eb2dafd7e68df36325e8896d6eaebf6869866099b591abf4f231b3a",
+          "url": "https://github.com/AI4Finance-Foundation/FinRobot/blob/63e1884a42ea7b729551a5424b4bd6a65af636e0/setup.py"
+        },
+        {
+          "path": "finrobot_autogen/finrobot/agents/workflow.py",
+          "sha256": "1ff5e04cdfbbffa0c6e61e15965aa31d216cb6d000905824abac34423e207fe5",
+          "url": "https://github.com/AI4Finance-Foundation/FinRobot/blob/63e1884a42ea7b729551a5424b4bd6a65af636e0/finrobot_autogen/finrobot/agents/workflow.py"
+        },
+        {
+          "path": "finrobot_autogen/requirements.txt",
+          "sha256": "685ca02bb04d09f4019f582ec28e41143eff055654fd706e751dd7aa59caae02",
+          "url": "https://github.com/AI4Finance-Foundation/FinRobot/blob/63e1884a42ea7b729551a5424b4bd6a65af636e0/finrobot_autogen/requirements.txt"
+        }
+      ],
+      "github_license_detection": "Apache-2.0",
+      "license_reviewed": "Apache-2.0"
+    }
+  ]
+}

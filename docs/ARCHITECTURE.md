@@ -34,6 +34,7 @@ flowchart LR
 | `universe` | 使用者固定十檔、延伸測試角色及指數點數語義 |
 | `direction_fusion` | 價格／美股／夜盤共享expert與內層時序權重；缺報先驗回退、等權及凸融合，獨立研究而不切換正式模型 |
 | `comparison` / `diagnostics` | 開發期特徵消融與以市場日期為單位的成對損失區塊抽樣 |
+| `open_source_factors` / `open_source_intervals` / `open_source_study` | 獨立九因子、凍結模型的波動縮放區間與特徵截斷重算；共用既有 fitter，先存協定、保留完整日曆與失敗，不寫正式模型／帳本 |
 | `skill_screener` / `skill_signals` / `skill_risk` / `skill_integration` | 獨立離線篩選、日線旗標、紙上目標組合檢查與 A/B/C/D/R 比較；不寫正式模型／帳本，不刪除方向評分樣本 |
 | `features` | `build_features`、`point_in_time_join`；只有 `f_` 欄位能進模型 |
 | `research` | `ResearchConfig`、`run_research`、`train_latest`、`simulate_portfolio` |

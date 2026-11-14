@@ -1,0 +1,21 @@
+{
+  "horizons": [1, 5, 20],
+  "min_train_dates": 252,
+  "calibration_dates": 63,
+  "test_dates": 63,
+  "max_folds": 8,
+  "embargo_dates": 1,
+  "training_window_dates": 756,
+  "calibration_policy": "chronological_shrinkage",
+  "feature_profile": "portable_all",
+  "evaluation_tickers": ["0050", "1216", "2002", "2412", "IX0001"],
+  "random_state": 42,
+  "commission": 0.001425,
+  "sell_tax": 0.003,
+  "etf_sell_tax": 0.001,
+  "slippage": 0.001,
+  "max_positions": 5,
+  "max_weight": 0.2,
+  "min_probability": 0.55,
+  "min_expected_return": 0.0
+}

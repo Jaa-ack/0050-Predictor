@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — 2026-11-14 — Reproducible open-source method experiments
+
+- Inspected pinned GitHub revisions, actual implementation files, dependencies and licenses for fifteen forecasting, agent, backtest and data-platform projects; retained source-file hashes and explicit restrictions, including VectorBT's Commons Clause and separate model/data rights.
+- Added an isolated postclose study with nine Alpha158-inspired factors, exact-rank pooled and volatility-scaled residual intervals, and sampled feature-prefix audits with a deliberately leaky test control. Reused existing fixed-ten models and maturity-purged folds; retained missing forecasts, unknown labels, transfer-only assets and the reserved final 126 sessions.
+- Completed three experiments on the existing historical snapshot with eight folds per horizon and 48 model fits, including simple baselines and frozen-order slippage stress. Five-session factor Brier improved relative to the current model but remained worse than training frequency; one-session interval quality improved locally, while five-session intervals and strategy results did not improve. No model was promoted.
+- Saved independent-run fingerprints, aggregate results, commands and limitations in the research record; kept provider inputs, detailed predictions and runtime artifacts local. Added ten behavior tests; full Python and frontend checks passed. No dependencies, frontend, schedules or trading capabilities changed.
+
 ## Unreleased — 2026-11-14 — Depth, activity and separate five-minute targets
 
 - Completed36 frozen depth/persistence worlds and144candidate audits, retaining external thin-book, faster-activity, large-order and missing-input controls. Both selected and fixed bounce policies passed30sample and30joint conditional any-five gates; all thin-book failures remain visible.

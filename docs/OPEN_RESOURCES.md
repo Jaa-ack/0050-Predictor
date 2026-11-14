@@ -1,5 +1,7 @@
 # 值得補入的資料與開源專案
 
+2026-11-14補充：[開源技術研究與實驗](OPEN_SOURCE_RESEARCH.md)另以15個GitHub專案的固定commit、實際程式碼及LICENSE作查核，完成九因子、波動縮放區間與截斷重算；[來源鎖定表](research/open_source_sources.json)保存已讀檔案SHA及永久連結。VectorBT本版含Commons Clause，OpenBB根授權已是Apache-2.0，不沿用其他年代的授權印象。
+
 初次查核：2026-11-05；0050完整名單與期交所歷史檔於2026-11-07增補。以下明確區分已接入部分及剩餘條件。「可免費讀取」與「允許重散布」須分開；供應商資料不隨程式碼開源。可直接執行的無Key計畫、費用及手動資源見[CERTIFICATES_AND_COSTS.md](CERTIFICATES_AND_COSTS.md)。
 
 ## 資料

@@ -2,6 +2,8 @@
 
 最新研究：[深度、活動率與60秒成交首次變動](docs/DEPTH_CLOCK_FIRST_CHANGE.md)，以及分開驗收的[5分鐘成交首次變動](docs/FIVE_MINUTE_FIRST_CHANGE.md)。保留每天全50檔預測、逾時及弱股；人工情境中的75%通過不代表已證明真實市場優勢。
 
+[開源技術研究與首輪實驗](docs/OPEN_SOURCE_RESEARCH.md)已查核15個專案的固定版本、程式碼與授權，完成Qlib九因子、Darts啟發的波動區間及Freqtrade啟發的截斷稽核。五日因子仍輸給簡單先驗；一日區間有局部改善，沒有方向或交易優勢證據。原型可獨立執行，不替換正式模型或新增套件。
+
 [資訊分組／權重融合與官方公告計畫](docs/SOURCE_FUSION_PLAN.md)亦保留。已實作可獨立重現的價格、美股、夜盤等權／學習融合；完整歷史比較未達每日任意五檔75%，公告仍需累積可驗證的時間版本。
 
 這是一套能在本機執行的資料 → 特徵 → 歷史驗證 → 預測 → 到期評分／校準系統。第一版以日線為核心，提供十檔股票的 1、5、20 交易日方向機率、中央報酬估計、80% 殘差區間及獨立基本面估值。
@@ -160,7 +162,7 @@ Python >=3.11；本機驗證環境為 Python 3.14.3／macOS arm64。`requirement
 - `forecasts.sqlite`：不可覆寫預測、實際發出時間及到期結果。
 - `latest_forecast.json`、`monitoring.json`：最新預測與監控輸出。
 
-目前未直接採用 Qlib、LightGBM、FinGPT、vectorbt 或 MLflow；核心使用 pandas／DuckDB／scikit-learn，保留替換介面。這能先驗證資料與樣本外流程，再依增益引入更複雜的模型。
+目前未直接採用 Qlib、LightGBM、FinGPT、vectorbt 或 MLflow 套件；核心使用 pandas／DuckDB／scikit-learn，保留替換介面。部分開源方法已在獨立研究器重新實作並作消融，詳見[實驗紀錄與指令](docs/OPEN_SOURCE_RESEARCH.md)。
 
 GitHub 主儲存庫為 [Jaa-ack/0050-Predictor](https://github.com/Jaa-ack/0050-Predictor)。CI 執行 Python 3.11／3.14、前端狀態測試、金鑰／歷史掃描，並產生合成網頁預覽 artifact；Dependabot 每週提出依賴更新 PR，待審核合併。後續已授權變更須更新文件、驗證及 commit，規則見 [AGENTS.md](AGENTS.md) 與 [CONTRIBUTING.md](CONTRIBUTING.md)。尚未選定正式程式碼 LICENSE。
 
