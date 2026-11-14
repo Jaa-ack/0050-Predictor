@@ -1,0 +1,237 @@
+{
+  "train_dates": 600,
+  "calibration_dates": 200,
+  "test_dates": 2000,
+  "seeds": [
+    401,
+    443,
+    487
+  ],
+  "max_wait_seconds": 60,
+  "max_events": 2048,
+  "candidates": [
+    "prior",
+    "spread_bounce",
+    "trade_logistic",
+    "trade_hist"
+  ],
+  "scenarios": [
+    {
+      "name": "thin_p50",
+      "initial_depth_range": [
+        5,
+        10
+      ],
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5
+      }
+    },
+    {
+      "name": "medium_p50",
+      "initial_depth_range": [
+        20,
+        40
+      ],
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5
+      }
+    },
+    {
+      "name": "deep_p50",
+      "initial_depth_range": [
+        50,
+        100
+      ],
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5
+      }
+    },
+    {
+      "name": "deep_p80",
+      "initial_depth_range": [
+        50,
+        100
+      ],
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.8
+      }
+    },
+    {
+      "name": "intermediate_deep_p50",
+      "initial_depth_range": [
+        50,
+        100
+      ],
+      "market_fraction": 0.35,
+      "cancel_fraction": 0.25,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5
+      }
+    },
+    {
+      "name": "intermediate_deep_p80",
+      "initial_depth_range": [
+        50,
+        100
+      ],
+      "market_fraction": 0.35,
+      "cancel_fraction": 0.25,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.8
+      }
+    },
+    {
+      "name": "aggressive_deep_p50",
+      "initial_depth_range": [
+        50,
+        100
+      ],
+      "market_fraction": 0.65,
+      "cancel_fraction": 0.15,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5
+      }
+    },
+    {
+      "name": "aggressive_deep_p80",
+      "initial_depth_range": [
+        50,
+        100
+      ],
+      "market_fraction": 0.65,
+      "cancel_fraction": 0.15,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.8
+      }
+    },
+    {
+      "name": "external_thin_p50",
+      "initial_depth_range": [
+        50,
+        100
+      ],
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5
+      },
+      "external_depth_ranges": [
+        [
+          "1216",
+          [
+            5,
+            10
+          ]
+        ],
+        [
+          "2303",
+          [
+            5,
+            10
+          ]
+        ],
+        [
+          "2327",
+          [
+            5,
+            10
+          ]
+        ],
+        [
+          "2345",
+          [
+            5,
+            10
+          ]
+        ],
+        [
+          "2357",
+          [
+            5,
+            10
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "external_fast_p50",
+      "initial_depth_range": [
+        50,
+        100
+      ],
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5
+      },
+      "external_event_rates": [
+        [
+          "1216",
+          1000.0
+        ],
+        [
+          "2303",
+          1000.0
+        ],
+        [
+          "2327",
+          1000.0
+        ],
+        [
+          "2345",
+          1000.0
+        ],
+        [
+          "2357",
+          1000.0
+        ]
+      ]
+    },
+    {
+      "name": "large_deep_p50",
+      "initial_depth_range": [
+        50,
+        100
+      ],
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5
+      },
+      "large_order_fraction": 0.1
+    },
+    {
+      "name": "outage2_deep_p50",
+      "initial_depth_range": [
+        50,
+        100
+      ],
+      "market_fraction": 0.15,
+      "cancel_fraction": 0.35,
+      "latency_seconds": 0.001,
+      "queue": {
+        "flow_imbalance": 0.5,
+        "input_outage_fraction": 0.02
+      }
+    }
+  ]
+}

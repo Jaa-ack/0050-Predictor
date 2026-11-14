@@ -139,7 +139,7 @@ def _future_source(dates,ticker,scenario,seed,max_events,block_events,pressure,s
 
 
 def simulate_matching_panel(tickers,dates,scenario,*,seed=17,future_seed=29,max_wait_seconds=60,max_events=2048,block_events=32):
-    _wait(max_wait_seconds);universe=validate_tickers(tickers);dates=pd.DatetimeIndex(dates)
+    _wait(max_wait_seconds,target_kind='first_trade_change_before_deadline');universe=validate_tickers(tickers);dates=pd.DatetimeIndex(dates)
     if not isinstance(scenario,MatchingScenario) or not len(dates) or dates.hasnans or dates.has_duplicates or dates.tz is not None or not dates.equals(dates.normalize()):raise ValueError('Declare a matching scenario and distinct naive dates')
     if any(type(s) is not int or not 0<=s<2**32 for s in (seed,future_seed)):raise ValueError('Declare bounded integer seeds')
     if type(max_events) is not int or not 1<=max_events<=8192 or type(block_events) is not int or not 1<=block_events<=256:raise ValueError('Declare bounded matching event budgets')

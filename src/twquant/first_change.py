@@ -55,7 +55,8 @@ class FirstChangeScenario:
             object.__setattr__(self,field,pairs)
 
 
-def _wait(seconds):
+def _wait(seconds, *, target_kind=None):
+    if target_kind=='first_trade_change_before_deadline' and type(seconds) is int and seconds==300:return
     if type(seconds) is not int or seconds not in (1,5,30,60):raise ValueError('Declare a1/5/30/60second maximum wait')
 
 
@@ -176,7 +177,7 @@ class FirstChangeModel:
 def _validate_first_event_fit(frame,*,fit_at,target_kind):
     if set(frame.ticker.astype(str))!=set(TRAINING_TICKERS):raise ValueError('First-change fitting requires exactly the fixed ten')
     if frame.max_wait_seconds.nunique()!=1:raise ValueError('Declare one first-change deadline')
-    seconds=int(frame.max_wait_seconds.iloc[0]);_wait(seconds);p=_labels(frame,seconds,target_kind=target_kind)
+    seconds=int(frame.max_wait_seconds.iloc[0]);_wait(seconds,target_kind=target_kind);p=_labels(frame,seconds,target_kind=target_kind)
     stamp=pd.Timestamp(fit_at)
     if stamp.tzinfo is None or not np.isfinite(p.actual_return).all():raise ValueError('First-change fitting requires mature known labels')
     available=_aware(p.label_available_at,'label_available_at')
@@ -202,7 +203,7 @@ def audit_first_change_predictions(predictions,constituents,*,expected_decisions
 
 
 def _audit_first_event_predictions(predictions,constituents,*,expected_decisions,max_wait_seconds,min_dates,evidence_kind,target_kind):
-    _wait(max_wait_seconds);universe=constituent_universe(constituents);decisions=_aware(expected_decisions,'Decision calendar').sort_values()
+    _wait(max_wait_seconds,target_kind=target_kind);universe=constituent_universe(constituents);decisions=_aware(expected_decisions,'Decision calendar').sort_values()
     local=decisions.tz_convert('Asia/Taipei');seconds=(local-local.normalize()).total_seconds()
     if (len(universe)!=50 or not len(decisions) or decisions.hasnans or decisions.has_duplicates or local.normalize().has_duplicates
             or len(set(local.time))!=1 or (seconds<9*3600).any() or (seconds+max_wait_seconds>=13*3600+25*60).any()):raise ValueError('Declare a complete fixed-clock continuous-session calendar and50constituents')

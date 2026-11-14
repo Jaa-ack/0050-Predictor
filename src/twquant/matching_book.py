@@ -129,7 +129,7 @@ def first_trade_change(book,last_trade,order_source,*,latency_seconds,max_wait_s
     The source receives that working book so later orders may use earlier quotes.
     An exhausted source is an unknown answer, never evidence of a timeout.
     """
-    _wait(max_wait_seconds)
+    _wait(max_wait_seconds,target_kind='first_trade_change_before_deadline')
     if isinstance(latency_seconds,bool) or not isinstance(latency_seconds,(int,float)) or not np.isfinite(latency_seconds) or not 0<=latency_seconds<=5:raise ValueError('Invalid emission latency')
     work=book.copy();last=np.asarray(last_trade,dtype=float).copy();N=len(work.quantities)
     if last.shape!=(N,) or not np.isfinite(last).all() or (last<=0).any():raise ValueError('Declare the observed last trade for every book')

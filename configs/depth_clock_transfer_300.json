@@ -1,0 +1,5 @@
+{
+  "slowdowns": [100, 1000],
+  "training_scenario": "thin_p50",
+  "max_wait_seconds": 300
+}

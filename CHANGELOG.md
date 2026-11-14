@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-14 — Depth, activity and separate five-minute targets
+
+- Completed36 frozen depth/persistence worlds and144candidate audits, retaining external thin-book, faster-activity, large-order and missing-input controls. Both selected and fixed bounce policies passed30sample and30joint conditional any-five gates; all thin-book failures remain visible.
+- Added an offline coupled-clock runner with input/source fingerprints, one fixed-ten model per seed across every environment, full-grid audits and simultaneous any-five bounds. Completed180 paired60second transfers;96sample and90conditional lower gates passed, with all36slowest worlds failing.
+- Added target-specific300second matching/replay and audit support while preserving the60second target. Reject extensions beyond the reference's observed future and verify that cross-version differences contain only the specific deadline guard changes.
+- Completed72 separate300second transfers with100pctdaily constituent coverage:39sample any-five gates and36joint conditional lower gates passed. Independently verified all53query panels, fixed-ten refits,3600comparison bounds and1152direct matching replays; preserved every original60second prediction fingerprint.
+- Added three frozen configurations, direct lower-rate replay and reference-integrity regressions, and separate depth/activity documentation. No provider connection, subscription, live-data schedule, trading or frontend deployment was enabled.
+
 ## Unreleased — 2026-11-14 — Persistent-flow stress and declared initial depth
 
 - Completed36predeclared directional-persistence cases and144candidate audits at1millisecond, preserving all50daily grids, external high-activity interventions, large orders and rapid sign-flip controls. Both policies passed21sample any-five gates and6joint conditional lower gates; retained medium/strong persistence failures.
