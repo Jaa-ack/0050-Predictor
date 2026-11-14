@@ -1,0 +1,11 @@
+{
+  "profile": "existing_gcp_small_host",
+  "python_command": "python3.11",
+  "memory_max": "512M",
+  "collection_start": "09:30:00",
+  "collection_end": "10:15:00",
+  "minimum_free_bytes": 4294967296,
+  "new_paid_resources_allowed": false,
+  "capture_scope": "pre-decision quotes and trades plus all first-change scoring windows",
+  "report_quiet_window": ["09:58:00", "10:06:00"]
+}

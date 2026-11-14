@@ -64,6 +64,35 @@ def test_changed_frozen_source_is_rejected_before_output_creation(tmp_path):
     assert not output.exists()
 
 
+def test_existing_debian_python_is_selected_without_system_python_upgrade(tmp_path):
+    m=module();workspace,root=fixture(tmp_path);out=tmp_path/'debian-bundle'
+    result=m.prepare(workspace,root,out,python='python3.11')
+    script=(out/'install.sh').read_text()
+    assert 'command -v python3.11' in script
+    assert "python3.11 -m venv" in script
+    assert 'python3.12' not in script and 'apt-get' not in script
+    assert result['python_command']=='python3.11'
+    assert '--without-pip' in script and '--ignore-installed' in script
+    assert 'bootstrap_pip_sha256' in result
+
+
+def test_unsupported_python_is_rejected_before_writing_bundle(tmp_path):
+    m=module();workspace,root=fixture(tmp_path);out=tmp_path/'unsupported'
+    with pytest.raises(ValueError,match='Python|python'):
+        m.prepare(workspace,root,out,python='python3.14')
+    assert not out.exists()
+
+
+def test_shared_host_profile_limits_only_pilot_memory_and_uses_supervisor(tmp_path):
+    m=module();workspace,root=fixture(tmp_path);out=tmp_path/'bounded'
+    m.prepare(workspace,root,out,python='python3.11',memory_max='512M')
+    assert 'MemoryMax=512M' in (out/'units/twquant-pilot.slice').read_text()
+    collector=(out/'units/twquant-pilot-collect.service').read_text()
+    assert 'Slice=twquant-pilot.slice' in collector and 'resource_guard.py' in collector
+    assert (out/'resource_guard.py').exists()
+    assert 'report-ready' in (out/'units/twquant-pilot-report.service').read_text()
+
+
 @pytest.mark.parametrize('prefix,user',[('/opt/path\nExecStart=evil','twquant'),('/opt/path%unsafe','twquant'),('/opt/path','bad user')])
 def test_unit_arguments_cannot_inject_systemd_directives(prefix,user):
     with pytest.raises(ValueError):module().units(prefix,user,['2026-11-16'])

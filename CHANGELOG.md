@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-15 — Existing-host Linux compatibility and bounded collection
+
+- Inspected the user-selected existing Google Cloud host and verified nativeSDK2.4.0loading,17core tests and a clearly synthetic10000row ingestion benchmark in an isolated Debian12/Python3.11environment. No broker authentication, secrets transfer, new cloud resources or existing-service changes were performed.
+- Added explicit Python3.11/3.12/3.13 selection and a verified private pip-wheel bootstrap for systems without ensurepip, preserving the system Python and frozen prediction source.
+- Added a small-host supervision profile with a09:30–10:15capture window, shared512MiB pilot slice,4GiB free-disk reserve and report deferral around forecasting. Full50stock coverage, targets, missing-answer penalties and model parameters remain intact; acquisition changes are separately declared.
+- Added regressions for Python compatibility, storage-stop behavior, bounded process lifetime and memory-unit generation. Deployment support files receive individual fingerprints; cloud authentication and activation remain pending explicit credential-transfer authorization.
+- Reproduced and corrected root-umask public-code access for the low-privilege service account. Installed the isolated application without credentials, verified systemd syntax and three non-trading-day service executions, and left every timer disabled. Full Python658and frontend10checks passed; the prediction source snapshot remains unchanged.
+
 ## Unreleased — 2026-11-14 — Credential-free cloud pilot preparation
 
 - Added reproducible Linux deployment preparation from the frozen pilot source, public package metadata, pinned official2.4.0Linux SDK fingerprint and explicit-date systemd units. Bundles exclude credentials, private protocols, provider data, databases, model binaries and SDK logs.
