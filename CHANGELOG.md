@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — 2026-11-14 — Credential-free cloud pilot preparation
+
+- Added reproducible Linux deployment preparation from the frozen pilot source, public package metadata, pinned official2.4.0Linux SDK fingerprint and explicit-date systemd units. Bundles exclude credentials, private protocols, provider data, databases, model binaries and SDK logs.
+- Preserved independent forecast preheating, collector/report retries, publication-time accounting and conditional finalization of only this pilot's services. The inactive installer verifies hashes and refuses to overwrite a deployment; no cloud resources, credentials or timers are changed by preparation.
+- Verified package exclusion, source-integrity rejection and unit argument/calendar behavior with six regressions, and checked the generated installer syntax. Documented existing-cloud capacity, cost, credential authorization and target-host runtime validation requirements; local schedules remain intact.
+
 ## Unreleased — 2026-11-14 — Ten-session prospective market-data pilot
 
 - Added a bounded, explicitly authorized local pilot for November16–27 with real Fubon trades/books/index observations, event and receipt timestamps, private SQLite persistence and fixed-ten synthetic-reference rule export. Verified all105 required read-only subscriptions; weekend access verification is not represented as collected future market data.
