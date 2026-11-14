@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-14 — Ten-session prospective market-data pilot
+
+- Added a bounded, explicitly authorized local pilot for November16–27 with real Fubon trades/books/index observations, event and receipt timestamps, private SQLite persistence and fixed-ten synthetic-reference rule export. Verified all105 required read-only subscriptions; weekend access verification is not represented as collected future market data.
+- Added independent prewarmed10:00 full-grid paper forecasts, immutable publication seals, missing-input prior fallbacks and separate60/300second observed-stream labels. Missing, late, timeout and gap-affected answers remain in the audit.
+- Added per-day/per-stock reports, constant-direction controls, transfer queries, latency samples and100comparison conditional bounds. Clearly distinguish provider-stream evidence, unverified individual exchange-fill completeness and the statistical limits of ten daily observations per stock.
+- Added three bounded macOS LaunchAgents, frozen private source snapshots and retirement of only this pilot's jobs after the final report. Preserved credentials, provider data and native SDK logs outside Git; no orders, paid subscriptions or provider-data publication were enabled.
+- Verified17focused regressions,645Python tests and10frontend-state tests before installation; runtime and publication checks are recorded separately.
+
 ## Unreleased — 2026-11-14 — Reproducible open-source method experiments
 
 - Inspected pinned GitHub revisions, actual implementation files, dependencies and licenses for fifteen forecasting, agent, backtest and data-platform projects; retained source-file hashes and explicit restrictions, including VectorBT's Commons Clause and separate model/data rights.

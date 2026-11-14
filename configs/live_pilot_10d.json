@@ -1,0 +1,23 @@
+{
+  "source": "fubon",
+  "dates": [
+    "2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20",
+    "2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27"
+  ],
+  "timezone": "Asia/Taipei",
+  "prediction_time": "10:00:00",
+  "horizons": [60, 300],
+  "max_input_age_seconds": 60,
+  "max_emission_lateness_seconds": 1,
+  "require_release_seal": true,
+  "label_scope": "provider_published_trade_first_change",
+  "collection_start": "08:45:00",
+  "collection_end": "13:40:00",
+  "model": "spread_bounce",
+  "model_reference_scenario": "thin_p50",
+  "model_reference_seed": 401,
+  "read_only": true,
+  "orders_enabled": false,
+  "retrain_during_test": false,
+  "missing_and_timeouts_wrong": true
+}
