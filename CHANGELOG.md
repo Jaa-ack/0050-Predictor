@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — 2026-11-15 — Authorized cloud activation and private incident supervision
+
+- Activated the existing-host ten-session pilot after explicit authorization to transfer only necessary Fubon credentials into owner-only private storage. Verified105/105read-only subscriptions both as the service user and inside the production service sandbox, with synchronized time and unchanged frozen prediction source.
+- Added08:40premarket probes,30second supervision, private Telegram incident/recovery notifications and daily rolling SQLite backups. Recovery uses fixed service actions, daily retry budgets and cooldowns; timeouts, missing forecasts and late publication remain in the original denominator. Notifications retry after delivery failures and final delivery precedes monitor retirement.
+- Preserved the09:30–10:15capture window,10:00full-grid forecasts and separate60/300second scoring. Enabled six cloud timers, disabled and unloaded only the three duplicate Mac jobs, and retained their original settings and private rollback copies. Existing Telegram reminders and VM networking were preserved; no new paid resources, orders or provider-data publication were enabled.
+- Reproduced duplicate final-marker failure and made finalization idempotent. Verified isolated synthetic backup integrity, low-space preservation, low-privilege writes, non-trading service execution and an actual private notification. Python670and frontend10tests passed; first live-market capture remains pending November16.
+
 ## Unreleased — 2026-11-15 — Existing-host Linux compatibility and bounded collection
 
 - Inspected the user-selected existing Google Cloud host and verified nativeSDK2.4.0loading,17core tests and a clearly synthetic10000row ingestion benchmark in an isolated Debian12/Python3.11environment. No broker authentication, secrets transfer, new cloud resources or existing-service changes were performed.

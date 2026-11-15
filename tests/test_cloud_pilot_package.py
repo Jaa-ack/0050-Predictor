@@ -93,6 +93,34 @@ def test_shared_host_profile_limits_only_pilot_memory_and_uses_supervisor(tmp_pa
     assert 'report-ready' in (out/'units/twquant-pilot-report.service').read_text()
 
 
+def test_cloud_operations_bundle_has_bounded_monitor_backup_and_preserves_telegram(tmp_path):
+    m=module();workspace,root=fixture(tmp_path);out=tmp_path/'operations'
+    result=m.prepare(workspace,root,out,python='python3.11',memory_max='512M')
+    assert (out/'watchdog.py').is_file()
+    assert 'watchdog.py' in result['support_files']
+    monitor=(out/'units/twquant-pilot-watchdog.service').read_text()
+    assert '--phase check' in monitor and 'NoNewPrivileges=true' in monitor
+    assert 'OnUnitInactiveSec=30s' in (out/'units/twquant-pilot-watchdog.timer').read_text()
+    backup=(out/'units/twquant-pilot-backup.timer').read_text()
+    assert '2026-11-16 10:20:00 Asia/Taipei' in backup
+    assert '2026-11-16 08:40:00 Asia/Taipei' in (out/'units/twquant-pilot-preflight.timer').read_text()
+    finalize=(out/'units/twquant-pilot-finalize.service').read_text()
+    assert 'twquant-pilot-backup.timer' in finalize
+    assert 'telegram' not in finalize and 'docker' not in finalize
+
+
+def test_final_report_marker_is_idempotent_and_preserves_existing_evidence(tmp_path):
+    m=module();root=tmp_path/'runtime';root.mkdir()
+    (root/'evaluation.json').write_text(json.dumps({'final':True}))
+    import subprocess,sys
+    helper=tmp_path/'finish.py';helper.write_text(m.FINISH)
+    first=subprocess.run([sys.executable,str(helper),str(root)],capture_output=True)
+    assert first.returncode==0
+    marker=root/'cloud_complete';original=marker.stat().st_mtime_ns
+    second=subprocess.run([sys.executable,str(helper),str(root)],capture_output=True)
+    assert second.returncode==0 and marker.stat().st_mtime_ns==original
+
+
 @pytest.mark.parametrize('prefix,user',[('/opt/path\nExecStart=evil','twquant'),('/opt/path%unsafe','twquant'),('/opt/path','bad user')])
 def test_unit_arguments_cannot_inject_systemd_directives(prefix,user):
     with pytest.raises(ValueError):module().units(prefix,user,['2026-11-16'])

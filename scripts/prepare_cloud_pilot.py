@@ -88,6 +88,11 @@ Type=oneshot
 User=root
 ExecStart=/bin/systemctl disable --now twquant-pilot-collect.timer twquant-pilot-forecast.timer twquant-pilot-report.timer
 ExecStart=/bin/systemctl stop twquant-pilot-collect.service twquant-pilot-forecast.service
+ExecStart=/bin/systemctl disable --now twquant-pilot-backup.timer
+ExecStart=/bin/systemctl stop twquant-pilot-backup.service
+ExecStart=/bin/systemctl disable --now twquant-pilot-preflight.timer
+ExecStart=/bin/systemctl stop twquant-pilot-preflight.service
+ExecStart=/bin/systemctl start --no-block twquant-pilot-watchdog.service
 '''
     if memory_max:
         result['twquant-pilot.slice']=f'''[Unit]
@@ -96,6 +101,57 @@ Description=Memory budget for this pilot only
 [Slice]
 MemoryAccounting=true
 MemoryMax={memory_max}
+'''
+    result.update(operations_units(prefix,user,dates))
+    return result
+
+
+def operations_units(prefix,user,dates):
+    result={}
+    for kind,phase,identity in [('watchdog','check','root'),('backup','backup',user),('preflight','preflight',user)]:
+        result[f'twquant-pilot-{kind}.service']=f'''[Unit]
+Description=Private bounded 0050 pilot {kind}
+After=network-online.target time-sync.target
+Wants=network-online.target
+ConditionPathExists={prefix}/runtime/protocol.json
+
+[Service]
+Type=oneshot
+User={identity}
+WorkingDirectory={prefix}
+UMask=0077
+Environment=TZ=Asia/Taipei
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 {prefix}/watchdog.py --root {prefix}/runtime --prefix {prefix} --phase {phase}
+TimeoutStartSec={'180' if kind=='backup' else '90' if kind=='preflight' else '60'}
+Restart={'no' if kind=='preflight' else 'on-failure'}
+RestartSec=30
+MemoryMax={'256M' if kind=='preflight' else '96M' if kind=='backup' else '64M'}
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={prefix}/runtime {prefix}/log
+StandardOutput=append:{prefix}/runtime/{kind}.log
+StandardError=append:{prefix}/runtime/{kind}.log
+'''
+        if kind=='watchdog':
+            timing='OnBootSec=45s\nOnUnitInactiveSec=30s'
+        else:
+            clock='08:40:00' if kind=='preflight' else '10:20:00'
+            timing='\n'.join(f'OnCalendar={day} {clock} Asia/Taipei' for day in dates)
+        result[f'twquant-pilot-{kind}.timer']=f'''[Unit]
+Description=Bounded 0050 pilot {kind} schedule
+
+[Timer]
+{timing}
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=true
+Unit=twquant-pilot-{kind}.service
+
+[Install]
+WantedBy=timers.target
 '''
     return result
 
@@ -135,6 +191,7 @@ fi
 chmod -R a+rX '{prefix}/app' '{prefix}/venv'
 install -m 0644 "$bundle_dir/finish.py" '{prefix}/finish.py'
 install -m 0644 "$bundle_dir/resource_guard.py" '{prefix}/resource_guard.py'
+install -m 0644 "$bundle_dir/watchdog.py" '{prefix}/watchdog.py'
 for file in "$bundle_dir"/units/*; do install -m 0644 "$file" /etc/systemd/system/; done
 systemctl daemon-reload
 echo 'Installed inactive units. No credentials copied; no timer enabled.'
@@ -147,8 +204,13 @@ import json,os,sys
 root=Path(sys.argv[1])
 report=json.loads((root/'evaluation.json').read_text())
 if report.get('final') is True:
-    fd=os.open(root/'cloud_complete',os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-    os.close(fd)
+    try:
+        fd=os.open(root/'cloud_complete',os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+    except FileExistsError:
+        pass
+    else:
+        os.fsync(fd)
+        os.close(fd)
 '''
 
 
@@ -164,6 +226,7 @@ def prepare(workspace,root,output,*,prefix='/opt/twquant-pilot',user='twquant-pi
     if digest.hexdigest()!=protocol['source_sha256']:raise ValueError('Frozen source fingerprint differs')
     generated=units(prefix,user,protocol['dates'],memory_max=memory_max)
     guard_source=Path(__file__).with_name('cloud_pilot_runtime.py').read_text()
+    watchdog_source=Path(__file__).with_name('cloud_pilot_watchdog.py').read_text()
     metadata=[workspace/'pyproject.toml',workspace/'README.md',workspace/'docs/licenses/TRADER_SKILLS_MIT.txt']
     if any(not p.is_file() or p.is_symlink() for p in metadata):raise ValueError('Public package metadata is missing')
     if output.exists():raise ValueError('Deployment preparation requires fresh output')
@@ -177,6 +240,7 @@ def prepare(workspace,root,output,*,prefix='/opt/twquant-pilot',user='twquant-pi
     for name,text in generated.items():(output/'units'/name).write_text(text)
     (output/'install.sh').write_text(installer(prefix,user,archive_sha,python));(output/'finish.py').write_text(FINISH)
     (output/'resource_guard.py').write_text(guard_source)
+    (output/'watchdog.py').write_text(watchdog_source)
     result=dict(source_sha256=digest.hexdigest(),archive_sha256=archive_sha,files=manifest,dates=protocol['dates'],
         prefix=prefix,service_user=user,sdk_version='2.4.0',sdk_platform='linux_x86_64',sdk_sha256=SDK_SHA256,
         python_command=python,bootstrap_pip_version='26.0',bootstrap_pip_sha256=PIP_SHA256,
