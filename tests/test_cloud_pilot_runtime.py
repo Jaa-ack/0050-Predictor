@@ -56,3 +56,13 @@ def test_report_work_is_deferred_around_forecast_on_small_shared_host(tmp_path):
     assert not m.report_ready(p,datetime(2026,11,16,9,59,tzinfo=tz))
     assert not m.report_ready(p,datetime(2026,11,16,10,5,tzinfo=tz))
     assert m.report_ready(p,datetime(2026,11,16,10,6,tzinfo=tz))
+
+
+def test_active_report_quiet_condition_is_bounded_to_declared_forecast_window(tmp_path,monkeypatch):
+    m=module();setup(tmp_path);tz=ZoneInfo('Asia/Taipei')
+    monkeypatch.setattr(m,'now',lambda:datetime(2026,11,16,9,58,tzinfo=tz))
+    assert m.main(['--root',str(tmp_path),'--phase','report-quiet'])==0
+    monkeypatch.setattr(m,'now',lambda:datetime(2026,11,16,10,6,tzinfo=tz))
+    assert m.main(['--root',str(tmp_path),'--phase','report-quiet'])==1
+    monkeypatch.setattr(m,'now',lambda:datetime(2026,11,15,9,58,tzinfo=tz))
+    assert m.main(['--root',str(tmp_path),'--phase','report-quiet'])==1

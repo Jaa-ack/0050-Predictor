@@ -76,6 +76,19 @@ def test_existing_debian_python_is_selected_without_system_python_upgrade(tmp_pa
     assert 'bootstrap_pip_sha256' in result
 
 
+def test_linux_deployment_requests_native_websocket_validation_without_skipping_checks(tmp_path):
+    m=module();workspace,root=fixture(tmp_path);out=tmp_path/'accelerated'
+    m.prepare(workspace,root,out,python='python3.11')
+    script=(out/'install.sh').read_text()
+    assert '/app[cloud]' in script
+    assert 'skip_utf8_validation' not in script
+    assert (out/'sqlite_tuning.py').is_file()
+    assert 'twquant_cloud_sqlite.install()' in script
+    import tomllib
+    project=tomllib.loads((Path(__file__).parents[1]/'pyproject.toml').read_text())
+    assert any(item.startswith('wsaccel==0.6.7') for item in project['project']['optional-dependencies']['cloud'])
+
+
 def test_unsupported_python_is_rejected_before_writing_bundle(tmp_path):
     m=module();workspace,root=fixture(tmp_path);out=tmp_path/'unsupported'
     with pytest.raises(ValueError,match='Python|python'):
@@ -91,6 +104,33 @@ def test_shared_host_profile_limits_only_pilot_memory_and_uses_supervisor(tmp_pa
     assert 'Slice=twquant-pilot.slice' in collector and 'resource_guard.py' in collector
     assert (out/'resource_guard.py').exists()
     assert 'report-ready' in (out/'units/twquant-pilot-report.service').read_text()
+    assert '--cloud-runtime' in collector
+    assert (out/'collector_runtime.py').is_file()
+
+
+def test_shared_host_collection_and_report_yield_cpu_without_delaying_forecast():
+    generated=module().units('/opt/twquant-pilot','twquant',['2026-11-16'],memory_max='512M')
+    assert 'Nice=10' in generated['twquant-pilot-collect.service']
+    assert 'Nice=10' in generated['twquant-pilot-report.service']
+    assert 'Nice=10' not in generated['twquant-pilot-forecast.service']
+
+
+def test_shared_host_stops_already_running_reports_before_forecast():
+    generated=module().units('/opt/twquant-pilot','twquant',['2026-11-16'],memory_max='512M')
+    service=generated['twquant-pilot-quiet.service']
+    assert '--phase report-quiet' in service
+    assert 'ExecStart=/bin/systemctl stop twquant-pilot-report.service' in service
+    assert 'twquant-pilot-collect.service' not in service and 'twquant-pilot-forecast.service' not in service
+    assert '2026-11-16 09:58:00 Asia/Taipei' in generated['twquant-pilot-quiet.timer']
+    assert 'twquant-pilot-quiet.timer' in generated['twquant-pilot-finalize.service']
+
+
+def test_existing_host_memory_budget_covers_overlapping_workers_and_remains_bounded():
+    profile=json.loads((Path(__file__).parents[1]/'configs/live_pilot_existing_host.json').read_text())
+    assert profile['memory_max']=='640M'
+    generated=module().units('/opt/twquant-pilot','twquant',['2026-11-16'],memory_max=profile['memory_max'])
+    assert 'MemoryMax=640M' in generated['twquant-pilot.slice']
+    assert profile['minimum_free_bytes']==4*1024**3
 
 
 def test_cloud_operations_bundle_has_bounded_monitor_backup_and_preserves_telegram(tmp_path):

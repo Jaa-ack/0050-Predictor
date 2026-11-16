@@ -33,7 +33,7 @@ def write_status(root,result):
     os.replace(name,root/'cloud_collect_status.json')
 
 
-def supervise(root,*,clock=now,sleep=time.sleep,launch=subprocess.Popen,free_bytes=None):
+def supervise(root,*,clock=now,sleep=time.sleep,launch=subprocess.Popen,free_bytes=None,cloud_runtime=False):
     root=Path(root).resolve();protocol=json.loads((root/'protocol.json').read_text())
     local=clock().astimezone(TZ);day=local.date().isoformat()
     start=datetime.fromisoformat(day+'T'+protocol.get('collection_start','08:45:00')).replace(tzinfo=TZ)
@@ -47,7 +47,12 @@ def supervise(root,*,clock=now,sleep=time.sleep,launch=subprocess.Popen,free_byt
     with (root/'cloud_collect.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:return finish('collector_already_running')
-        child=launch([sys.executable,'-m','twquant.live_market','--root',str(root),'--mode','collect'])
+        if cloud_runtime:
+            entry=Path(__file__).resolve().with_name('collector_runtime.py')
+            if not entry.is_file() or entry.is_symlink():raise ValueError('Trusted cloud collector is missing')
+            arguments=[sys.executable,str(entry),'--root',str(root)]
+        else:arguments=[sys.executable,'-m','twquant.live_market','--root',str(root),'--mode','collect']
+        child=launch(arguments)
         reason='worker_exited'
         try:
             while child.poll() is None:
@@ -65,12 +70,14 @@ def supervise(root,*,clock=now,sleep=time.sleep,launch=subprocess.Popen,free_byt
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',required=True,type=Path)
-    parser.add_argument('--phase',choices=('collect','report-ready'),required=True)
+    parser.add_argument('--phase',choices=('collect','report-ready','report-quiet'),required=True)
+    parser.add_argument('--cloud-runtime',action='store_true')
     args=parser.parse_args(argv)
-    if args.phase=='report-ready':
+    if args.phase in ('report-ready','report-quiet'):
         protocol=json.loads((args.root/'protocol.json').read_text())
-        return 0 if report_ready(protocol,now()) else 1
-    result=supervise(args.root);print(json.dumps(result));return 0
+        ready=report_ready(protocol,now())
+        return 0 if ready==(args.phase=='report-ready') else 1
+    result=supervise(args.root,cloud_runtime=args.cloud_runtime);print(json.dumps(result));return 0
 
 
 if __name__=='__main__':raise SystemExit(main())

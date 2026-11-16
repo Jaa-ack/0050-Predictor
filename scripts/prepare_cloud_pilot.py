@@ -27,7 +27,7 @@ def units(prefix,user,dates,*,memory_max=None):
         success='OnSuccess=twquant-pilot-finalize.service\n' if mode=='report' else ''
         guard=(f'ExecCondition={prefix}/venv/bin/python {prefix}/resource_guard.py --root {runtime} --phase report-ready\n'
             if mode=='report' and memory_max else '')
-        command=(f'{prefix}/venv/bin/python {prefix}/resource_guard.py --root {runtime} --phase collect'
+        command=(f'{prefix}/venv/bin/python {prefix}/resource_guard.py --root {runtime} --phase collect --cloud-runtime'
             if mode=='collect' and memory_max else f'{prefix}/venv/bin/python -m twquant.live_market --root {runtime} --mode {mode}')
         result[f'twquant-pilot-{mode}.service']=f'''[Unit]
 Description=Bounded 0050 paper pilot {mode}
@@ -42,6 +42,7 @@ ConditionPathExists=!{runtime}/cloud_complete
 Type={'oneshot' if mode=='report' else 'simple'}
 User={user}
 {'Slice=twquant-pilot.slice' if memory_max else ''}
+{'Nice=10' if memory_max and mode in ('collect','report') else ''}
 WorkingDirectory={prefix}
 UMask=0077
 Environment=TZ=Asia/Taipei
@@ -92,6 +93,7 @@ ExecStart=/bin/systemctl disable --now twquant-pilot-backup.timer
 ExecStart=/bin/systemctl stop twquant-pilot-backup.service
 ExecStart=/bin/systemctl disable --now twquant-pilot-preflight.timer
 ExecStart=/bin/systemctl stop twquant-pilot-preflight.service
+ExecStart=/bin/systemctl disable --now twquant-pilot-quiet.timer
 ExecStart=/bin/systemctl start --no-block twquant-pilot-watchdog.service
 '''
     if memory_max:
@@ -153,6 +155,36 @@ Unit=twquant-pilot-{kind}.service
 [Install]
 WantedBy=timers.target
 '''
+    result['twquant-pilot-quiet.service']=f'''[Unit]
+Description=Stop an existing research report before the forecast quiet window
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecCondition=/usr/bin/python3 {prefix}/resource_guard.py --root {prefix}/runtime --phase report-quiet
+ExecStart=/bin/systemctl stop twquant-pilot-report.service
+TimeoutStartSec=45
+MemoryMax=32M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+'''
+    calendar='\n'.join(f'OnCalendar={day} 09:58:00 Asia/Taipei' for day in dates)
+    result['twquant-pilot-quiet.timer']=f'''[Unit]
+Description=Protect ten declared forecast windows from running reports
+
+[Timer]
+{calendar}
+AccuracySec=1us
+RandomizedDelaySec=0
+Persistent=true
+Unit=twquant-pilot-quiet.service
+
+[Install]
+WantedBy=timers.target
+'''
     return result
 
 
@@ -185,12 +217,17 @@ if "$needs_bootstrap"; then
 else
     {python} -m venv '{prefix}/venv'
 fi
-'{prefix}/venv/bin/python' -m pip install --no-cache-dir --disable-pip-version-check '{prefix}/app' "$sdk_wheel"
+'{prefix}/venv/bin/python' -m pip install --no-cache-dir --disable-pip-version-check '{prefix}/app[cloud]' "$sdk_wheel"
+site_dir="$('{prefix}/venv/bin/python' -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+install -m 0644 "$bundle_dir/sqlite_tuning.py" "$site_dir/twquant_cloud_sqlite.py"
+printf '%s\\n' 'import twquant_cloud_sqlite; twquant_cloud_sqlite.install()' > "$site_dir/twquant_cloud_sqlite.pth"
+chmod 0644 "$site_dir/twquant_cloud_sqlite.pth"
 # Only public code/packages are made readable to the unprivileged service user.
 # The sibling runtime, log and certificate directories retain owner-only modes.
 chmod -R a+rX '{prefix}/app' '{prefix}/venv'
 install -m 0644 "$bundle_dir/finish.py" '{prefix}/finish.py'
 install -m 0644 "$bundle_dir/resource_guard.py" '{prefix}/resource_guard.py'
+install -m 0644 "$bundle_dir/collector_runtime.py" '{prefix}/collector_runtime.py'
 install -m 0644 "$bundle_dir/watchdog.py" '{prefix}/watchdog.py'
 for file in "$bundle_dir"/units/*; do install -m 0644 "$file" /etc/systemd/system/; done
 systemctl daemon-reload
@@ -227,6 +264,8 @@ def prepare(workspace,root,output,*,prefix='/opt/twquant-pilot',user='twquant-pi
     generated=units(prefix,user,protocol['dates'],memory_max=memory_max)
     guard_source=Path(__file__).with_name('cloud_pilot_runtime.py').read_text()
     watchdog_source=Path(__file__).with_name('cloud_pilot_watchdog.py').read_text()
+    sqlite_source=Path(__file__).with_name('cloud_pilot_sqlite.py').read_text()
+    collector_source=Path(__file__).with_name('cloud_pilot_collector.py').read_text()
     metadata=[workspace/'pyproject.toml',workspace/'README.md',workspace/'docs/licenses/TRADER_SKILLS_MIT.txt']
     if any(not p.is_file() or p.is_symlink() for p in metadata):raise ValueError('Public package metadata is missing')
     if output.exists():raise ValueError('Deployment preparation requires fresh output')
@@ -241,6 +280,8 @@ def prepare(workspace,root,output,*,prefix='/opt/twquant-pilot',user='twquant-pi
     (output/'install.sh').write_text(installer(prefix,user,archive_sha,python));(output/'finish.py').write_text(FINISH)
     (output/'resource_guard.py').write_text(guard_source)
     (output/'watchdog.py').write_text(watchdog_source)
+    (output/'sqlite_tuning.py').write_text(sqlite_source)
+    (output/'collector_runtime.py').write_text(collector_source)
     result=dict(source_sha256=digest.hexdigest(),archive_sha256=archive_sha,files=manifest,dates=protocol['dates'],
         prefix=prefix,service_user=user,sdk_version='2.4.0',sdk_platform='linux_x86_64',sdk_sha256=SDK_SHA256,
         python_command=python,bootstrap_pip_version='26.0',bootstrap_pip_sha256=PIP_SHA256,

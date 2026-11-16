@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 2026-11-16 — Live-feed collection, scheduling and durability repairs
+
+- Investigated first-session feed-not-ready and stalled-collector alerts with sanitized diagnostics and stack samples without locals. Confirmed pure-Python UTF-8 validation cost, the512MiBgroup repeatedly hitting its limit, commit/I/O stalls and an oversized20000message drain starving heartbeat updates. The SDK busy-wait hypothesis was not supported by the sampled stacks; its connection code was left unchanged.
+- Enabled pinned wsaccel0.6.7 in a service-owned private directory and a single explicit loader file. Verified262synthetic byte cases against the original validator, preserving validation semantics, credentials and frozen prediction source; future Linux CPython deployments use a cloud extra.
+- Added an explicitly versioned cloud acquisition runtime that yields after512messages or0.25seconds while retaining the original feed, allowlisted persistence, conservative gaps and bounded retries. Added research-venv SQLite tuning with an8MiBcache and deferred commit-time automatic checkpoints, preserving WAL/FULL durability and verifying committed recovery after abrupt process exit.
+- Added a09:58timer that stops an already-running report and remains bounded to the declared quiet window. Raised the existing research group's limit to640MiB and lowered only collection/report CPU priority, preserving forecast priority, VM size and Telegram configuration. No paid resources, orders or provider-data publication were introduced.
+- Retained the first day's53query forecasts, actual10:03:50publication seal, late penalties, gaps and exhausted retry history. Validated the repairs in a separate100second real-stream diagnostic with105subscriptions, timely heartbeats and persisted events; it emitted no predictions and was not merged into pilot scores. Original Telegram health recovered. Added regressions for deployment, quiet-window conditions, bounded memory, collector fairness and SQLite durability.
+- Verified680Python tests,10frontend tests, generated-installer syntax, secret publication audit, matching deployed helper/unit fingerprints, database integrity and completed private backup. The first day's late outcome remains in both60/300second denominators.
+
 ## Unreleased — 2026-11-15 — Authorized cloud activation and private incident supervision
 
 - Activated the existing-host ten-session pilot after explicit authorization to transfer only necessary Fubon credentials into owner-only private storage. Verified105/105read-only subscriptions both as the service user and inside the production service sandbox, with synchronized time and unchanged frozen prediction source.
