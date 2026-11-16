@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-16 — Full-session live operational validation
+
+- Added a bounded, isolated real-stream rehearsal with45minutes of capture, the frozen53query model, separate60/300second checks, deliberate collector interruption, private incident/recovery notifications, backup verification and unconditional cleanup. Formal ten-session evidence remains separate.
+- Captured428523events and53forecasts, but measured the11:25publication seal at1.125641seconds after the decision, beyond the unchanged1second limit. Retained the late result and delivered alert; recurring Telegram health-check timeouts and end-of-window backlog prevent a full-operation acceptance claim.
+- Reproduced and fixed the validation tool's missing private writable path under its32MiB sandbox. Retained original authenticated systemd timing evidence, the failed receipt and retrieval timestamps; did not backdate observations or rewrite forecasts. Failed validation has its own retried notification and retires only its isolated monitor after delivery.
+- Confirmed a286580736byte consistent backup after multi-minute WAL recovery. Missing or corrupt backups fail the validation gate without creating a replacement database. Reverted the unsuccessful memory-soft-limit experiment; left the original Telegram service, VM size, frozen source and formal publication records intact.
+- Verified690Python tests,10frontend tests and the working-tree secrets audit. Operational timing and shared-host stability remain failed despite passing software tests; private data, runtime receipts and logs are excluded from Git.
+
 ## Unreleased — 2026-11-16 — Live-feed collection, scheduling and durability repairs
 
 - Investigated first-session feed-not-ready and stalled-collector alerts with sanitized diagnostics and stack samples without locals. Confirmed pure-Python UTF-8 validation cost, the512MiBgroup repeatedly hitting its limit, commit/I/O stalls and an oversized20000message drain starving heartbeat updates. The SDK busy-wait hypothesis was not supported by the sampled stacks; its connection code was left unchanged.
