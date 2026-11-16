@@ -18,7 +18,7 @@ dependencies = [
 dev = ["pytest>=8,<10", "httpx>=0.28,<1"]
 publish = ["pre-commit>=4,<5", "build>=1.2,<2"]
 lightgbm = ["lightgbm>=4.6,<5"]
-cloud = ["wsaccel==0.6.7; sys_platform == 'linux' and platform_python_implementation == 'CPython' and python_version < '3.14'"]
+cloud = ["wsaccel==0.6.7; sys_platform == 'linux' and platform_python_implementation == 'CPython' and python_version < '3.14'", "pysqlite3==0.6.2; sys_platform == 'linux' and platform_python_implementation == 'CPython' and python_version < '3.14'"]
 
 [project.scripts]
 twquant = "twquant.cli:main"

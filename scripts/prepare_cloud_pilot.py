@@ -23,10 +23,11 @@ def units(prefix,user,dates,*,memory_max=None):
     result={}
     for mode,clock in [('collect','08:45:00'),('forecast','09:59:00'),('report','13:45:00')]:
         runtime=prefix+'/runtime'
-        post=f'ExecStartPost={prefix}/venv/bin/python {prefix}/finish.py {runtime}\n' if mode=='report' else ''
+        post=(f'ExecStartPost={prefix}/venv/bin/python {prefix}/finish.py {runtime}\n'
+            + f'ExecStartPost={prefix}/venv/bin/python {prefix}/resource_guard.py --root {runtime} --phase report-record\n') if mode=='report' else ''
         success='OnSuccess=twquant-pilot-finalize.service\n' if mode=='report' else ''
         guard=(f'ExecCondition={prefix}/venv/bin/python {prefix}/resource_guard.py --root {runtime} --phase report-ready\n'
-            if mode=='report' and memory_max else '')
+            if mode=='report' else '')
         command=(f'{prefix}/venv/bin/python {prefix}/resource_guard.py --root {runtime} --phase collect --cloud-runtime'
             if mode=='collect' and memory_max else f'{prefix}/venv/bin/python -m twquant.live_market --root {runtime} --mode {mode}')
         result[f'twquant-pilot-{mode}.service']=f'''[Unit]
@@ -80,6 +81,7 @@ Unit=twquant-pilot-{mode}.service
 [Install]
 WantedBy=timers.target
 '''
+    checkpoint_retire=('ExecStart=/bin/systemctl disable --now twquant-pilot-checkpoint.timer\nExecStart=/bin/systemctl stop twquant-pilot-checkpoint.service\n' if memory_max else '')
     result['twquant-pilot-finalize.service']=f'''[Unit]
 Description=Retire only this completed paper pilot
 ConditionPathExists={prefix}/runtime/cloud_complete
@@ -94,7 +96,7 @@ ExecStart=/bin/systemctl stop twquant-pilot-backup.service
 ExecStart=/bin/systemctl disable --now twquant-pilot-preflight.timer
 ExecStart=/bin/systemctl stop twquant-pilot-preflight.service
 ExecStart=/bin/systemctl disable --now twquant-pilot-quiet.timer
-ExecStart=/bin/systemctl start --no-block twquant-pilot-watchdog.service
+{checkpoint_retire}ExecStart=/bin/systemctl start --no-block twquant-pilot-watchdog.service
 '''
     if memory_max:
         result['twquant-pilot.slice']=f'''[Unit]
@@ -105,6 +107,31 @@ MemoryAccounting=true
 MemoryMax={memory_max}
 '''
     result.update(operations_units(prefix,user,dates,quiet_clock='09:28:00' if memory_max else '09:58:00'))
+    if memory_max:
+        result['twquant-pilot-checkpoint.service']=f'''[Unit]
+Description=Bounded PASSIVE WAL checkpoint outside protected forecast windows
+ConditionPathExists={prefix}/runtime/protocol.json
+ConditionPathExists=!{prefix}/runtime/cloud_complete
+[Service]
+Type=oneshot
+User={user}
+Slice=twquant-pilot.slice
+Nice=19
+UMask=0077
+Environment=TZ=Asia/Taipei
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart={prefix}/venv/bin/python {prefix}/checkpoint.py --root {prefix}/runtime
+ExecStopPost={prefix}/venv/bin/python {prefix}/checkpoint.py --root {prefix}/runtime --interrupted
+TimeoutStartSec=45
+TimeoutStopSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={prefix}/runtime
+'''
+        calendar='\n'.join(f'OnCalendar={d} 09:30:00 Asia/Taipei' for d in dates)
+        result['twquant-pilot-checkpoint.timer']='[Unit]\nDescription=Bounded WAL maintenance\n[Timer]\n'+calendar+'\nOnUnitInactiveSec=60s\nAccuracySec=1s\nUnit=twquant-pilot-checkpoint.service\n[Install]\nWantedBy=timers.target\n'
     return result
 
 
@@ -229,6 +256,7 @@ install -m 0644 "$bundle_dir/finish.py" '{prefix}/finish.py'
 install -m 0644 "$bundle_dir/resource_guard.py" '{prefix}/resource_guard.py'
 install -m 0644 "$bundle_dir/collector_runtime.py" '{prefix}/collector_runtime.py'
 install -m 0644 "$bundle_dir/watchdog.py" '{prefix}/watchdog.py'
+install -m 0644 "$bundle_dir/checkpoint.py" '{prefix}/checkpoint.py'
 for file in "$bundle_dir"/units/*; do install -m 0644 "$file" /etc/systemd/system/; done
 systemctl daemon-reload
 echo 'Installed inactive units. No credentials copied; no timer enabled.'
@@ -266,6 +294,7 @@ def prepare(workspace,root,output,*,prefix='/opt/twquant-pilot',user='twquant-pi
     watchdog_source=Path(__file__).with_name('cloud_pilot_watchdog.py').read_text()
     sqlite_source=Path(__file__).with_name('cloud_pilot_sqlite.py').read_text()
     collector_source=Path(__file__).with_name('cloud_pilot_collector.py').read_text()
+    checkpoint_source=Path(__file__).with_name('cloud_pilot_checkpoint.py').read_text()
     metadata=[workspace/'pyproject.toml',workspace/'README.md',workspace/'docs/licenses/TRADER_SKILLS_MIT.txt']
     if any(not p.is_file() or p.is_symlink() for p in metadata):raise ValueError('Public package metadata is missing')
     if output.exists():raise ValueError('Deployment preparation requires fresh output')
@@ -282,6 +311,7 @@ def prepare(workspace,root,output,*,prefix='/opt/twquant-pilot',user='twquant-pi
     (output/'watchdog.py').write_text(watchdog_source)
     (output/'sqlite_tuning.py').write_text(sqlite_source)
     (output/'collector_runtime.py').write_text(collector_source)
+    (output/'checkpoint.py').write_text(checkpoint_source)
     result=dict(source_sha256=digest.hexdigest(),archive_sha256=archive_sha,files=manifest,dates=protocol['dates'],
         prefix=prefix,service_user=user,sdk_version='2.4.0',sdk_platform='linux_x86_64',sdk_sha256=SDK_SHA256,
         python_command=python,bootstrap_pip_version='26.0',bootstrap_pip_sha256=PIP_SHA256,

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime,timedelta
 import fcntl
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -76,9 +77,17 @@ def supervise(root,*,clock=now,sleep=time.sleep,launch=subprocess.Popen,free_byt
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',required=True,type=Path)
-    parser.add_argument('--phase',choices=('collect','report-ready','report-quiet'),required=True)
+    parser.add_argument('--phase',choices=('collect','report-ready','report-quiet','report-record'),required=True)
     parser.add_argument('--cloud-runtime',action='store_true')
     args=parser.parse_args(argv)
+    if args.phase in ('report-ready','report-record'):
+        path=Path(__file__).with_name('watchdog.py')
+        if not path.exists():path=Path(__file__).with_name('cloud_pilot_watchdog.py')
+        spec=importlib.util.spec_from_file_location('report_ops',path);ops=importlib.util.module_from_spec(spec);spec.loader.exec_module(ops)
+        protocol=json.loads((args.root/'protocol.json').read_text());stamp=now()
+        if args.phase=='report-record':ops.record_report(args.root,protocol,stamp);return 0
+        if not report_ready(protocol,stamp) or not ops.report_wanted(args.root,protocol,stamp):return 1
+        ops.begin_report(args.root,protocol,stamp);return 0
     if args.phase in ('report-ready','report-quiet'):
         protocol=json.loads((args.root/'protocol.json').read_text())
         ready=report_ready(protocol,now())

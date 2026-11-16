@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-17 — Market-session preparation and retained daily acceptance
+
+- Cached reports by observed storage/protocol fingerprints, matured session and final-report status, checking that inputs remain unchanged during evaluation. Aligned supervision with this cache while preserving full capture/drain report deferral and required new-session/final evaluations.
+- Pinned the Linux research backend to pysqlite3 0.6.2 and verified SQLite3.54.1 before enabling concurrent WAL maintenance. Added a64MiB-triggered PASSIVE checkpoint with a45second service limit, Nice19, the existing640MiB slice and09:57–10:06 connection exclusion. Retained WAL/FULL durability and explicit partial/interrupted states;128MiB journal reuse is not a hard WAL cap.
+- Added read-only health observation of the original Telegram container and retained incidents until health is explicitly confirmed. From November17, persist immutable10:30daily operational checks covering publication, both target windows, gaps, closeout, backup/report, unresolved incidents and sampled flow/health/monitoring coverage; retry failed Telegram delivery without rewriting failed days.
+- Deployed operations helpers and the eighth timer with private rollback copies, verified unchanged frozen source/protocol/formal forecasts/seals/events, and confirmed the existing reminder service remains healthy. Reused a successful actual sandbox notification receipt. Whole-VM failure monitoring remains excluded at the user's request; no paid resources, orders or provider-data publication were added.
+- Verified713Python tests,10frontend tests and the working-tree secrets audit. Isolated cloud tests produced identical53forecast/evaluation fingerprints across old/new SQLite and retained8001synthetic rows through an82.7MB WAL checkpoint. Software and synthetic checks do not establish live one-second publication, shared-host stability or75pctaccuracy; November16failures remain in the audit.
+
 ## Unreleased — 2026-11-16 — Bounded collector closeout and missing operational alerts
 
 - Reproduced accepted messages being left in RAM at capture end. Added bounded draining on natural completion and SIGTERM, original receipt timestamps, explicit incomplete counts/gaps and private append-only closeout receipts. The supervisor waits before terminating the cloud child, and systemd permits150seconds for stop; hard crashes and exhausted budgets remain failures.

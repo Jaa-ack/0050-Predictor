@@ -209,7 +209,7 @@ def test_snapshot_exposes_real_backlog_closeout_and_only_todays_gaps(tmp_path,mo
         ns=int(stamp.timestamp())*10**9
         db.executemany('INSERT INTO gaps VALUES(?,?)',[(ns,ns+1),(ns-86400*10**9,ns-86400*10**9+1)])
     monkeypatch.setattr(m,'unit_active',lambda kind:False)
-    monkeypatch.setattr(m.subprocess,'run',lambda *a,**k:SimpleNamespace(stdout='yes'))
+    monkeypatch.setattr(m.subprocess,'run',lambda *a,**k:SimpleNamespace(stdout='yes',returncode=0))
     view=m.snapshot(tmp_path,tmp_path,stamp)
     assert view['database_ok'] and view['gap_count']==1 and view['collector_backlog']==7
     assert view['closeout_complete'] and view['closeout_remaining']==0 and view['wal_bytes']==0
@@ -218,3 +218,84 @@ def test_snapshot_exposes_real_backlog_closeout_and_only_todays_gaps(tmp_path,mo
     monkeypatch.setattr(m.sqlite3,'connect',recovering)
     view=m.snapshot(tmp_path,tmp_path,stamp)
     assert not view['database_ok'] and view['database_recovering']
+
+
+def test_report_cache_skips_unchanged_data_but_expires_on_writes_and_new_matured_days(tmp_path):
+    m=module();p=protocol(tmp_path);p['dates']=['2026-11-16','2026-11-17','2026-11-27']
+    (tmp_path/'protocol.json').write_text(json.dumps(p))
+    with sqlite3.connect(tmp_path/'pilot.sqlite3') as db:db.execute('create table evidence(value integer)')
+    start=datetime(2026,11,16,10,18,tzinfo=TZ);m.begin_report(tmp_path,p,start)
+    (tmp_path/'evaluation.json').write_text(json.dumps(dict(as_of=start.isoformat(),final=False)))
+    assert m.record_report(tmp_path,p,start+timedelta(seconds=1))['cached']
+    assert m.report_current(tmp_path,p,start.replace(hour=23))
+    assert not m.report_wanted(tmp_path,p,start.replace(hour=23))
+    assert m.report_wanted(tmp_path,p,start+timedelta(days=1))
+    with sqlite3.connect(tmp_path/'pilot.sqlite3') as db:db.execute('insert into evidence values(1)')
+    assert m.report_wanted(tmp_path,p,start)
+
+
+def test_report_cache_rejects_data_changed_during_report_and_requires_due_final_report(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,27,13,45,tzinfo=TZ)
+    (tmp_path/'protocol.json').write_text(json.dumps(p))
+    with sqlite3.connect(tmp_path/'pilot.sqlite3') as db:db.execute('create table evidence(value integer)')
+    m.begin_report(tmp_path,p,stamp)
+    with sqlite3.connect(tmp_path/'pilot.sqlite3') as db:db.execute('insert into evidence values(1)')
+    (tmp_path/'evaluation.json').write_text(json.dumps(dict(as_of=stamp.isoformat(),final=True)))
+    assert not m.record_report(tmp_path,p,stamp+timedelta(seconds=1))['cached']
+    m.begin_report(tmp_path,p,stamp)
+    (tmp_path/'evaluation.json').write_text(json.dumps(dict(as_of=stamp.isoformat(),final=False)))
+    assert not m.record_report(tmp_path,p,stamp+timedelta(seconds=1))['cached']
+    (tmp_path/'evaluation.json').write_text(json.dumps(dict(as_of=stamp.isoformat(),final=True)))
+    assert m.record_report(tmp_path,p,stamp+timedelta(seconds=1))['cached']
+    assert m.report_current(tmp_path,p,stamp+timedelta(minutes=10))
+
+
+def test_daily_acceptance_retains_a_bad_live_sample_and_retries_failure_delivery(tmp_path):
+    m=module();protocol(tmp_path);clock=[datetime(2026,11,16,9,45,tzinfo=TZ)];view=healthy(clock[0]);view.update(collector_backlog=2000,shared_service_health='unhealthy')
+    notices=[];delivered=[False]
+    def send(code,fields):notices.append(code);return delivered[0] if code=='daily_validation_failed' else True
+    args=dict(clock=lambda:clock[0],inspect=lambda:view,control=lambda action:True,send=send)
+    m.check(tmp_path,**args)
+    clock[0]=clock[0].replace(hour=10,minute=31);view.update(healthy(clock[0]));view.update(collector_backlog=0,shared_service_health='healthy',closeout_date='2026-11-16',closeout_state='day_collection_finished',closeout_complete=True,closeout_remaining=0,critical_windows_observed=True,gap_count=0)
+    m.check(tmp_path,**args);path=tmp_path/'daily_acceptance_2026-11-16.json';original=path.read_bytes();result=json.loads(original)
+    assert not result['passed'] and not result['checks']['shared_service_stable'] and not result['checks']['data_flow_stable']
+    delivered[0]=True;m.check(tmp_path,**args);m.check(tmp_path,**args)
+    assert path.read_bytes()==original and notices.count('daily_validation_failed')==2
+
+
+def test_daily_flow_acceptance_respects_the_existing_two_minute_startup_grace(tmp_path):
+    m=module();p=protocol(tmp_path);state={};stamp=datetime(2026,11,16,9,30,tzinfo=TZ);view=healthy(stamp)
+    view.update(collector_backlog=2000,last_event_ns=0,shared_service_health='healthy')
+    m.daily_acceptance(tmp_path,p,stamp,view,state,lambda *a:True)
+    stamp=stamp.replace(minute=35);view.update(healthy(stamp));view.update(collector_backlog=0,shared_service_health='healthy')
+    m.daily_acceptance(tmp_path,p,stamp,view,state,lambda *a:True)
+    observed=state['daily_observations']['2026-11-16']
+    assert observed['flow_samples']==1 and observed['max_backlog']==0 and observed['max_lag_seconds']==0
+
+
+def test_a_single_late_monitor_sample_cannot_pass_daily_monitoring_coverage(tmp_path):
+    m=module();p=protocol(tmp_path);state={};stamp=datetime(2026,11,16,10,16,tzinfo=TZ);view=healthy(stamp)
+    view.update(collector_backlog=0,shared_service_health='healthy')
+    m.daily_acceptance(tmp_path,p,stamp,view,state,lambda *a:True)
+    m.daily_acceptance(tmp_path,p,stamp.replace(minute=31),view,state,lambda *a:True)
+    result=json.loads((tmp_path/'daily_acceptance_2026-11-16.json').read_text())
+    assert not result['checks']['monitoring_coverage']
+
+
+def test_shared_service_does_not_recover_merely_because_observation_window_ended(tmp_path):
+    m=module();protocol(tmp_path);stamp=[datetime(2026,11,16,9,45,tzinfo=TZ)];view=healthy(stamp[0]);view['shared_service_health']='unhealthy';notices=[]
+    args=dict(clock=lambda:stamp[0],inspect=lambda:view,control=lambda action:True,send=lambda code,fields:notices.append((code,fields)) or True)
+    m.check(tmp_path,**args);stamp[0]=stamp[0].replace(hour=10,minute=31);view['shared_service_health']=None
+    result=m.check(tmp_path,**args)
+    assert not any(c=='recovered' and f.get('previous')=='shared_service_unhealthy' for c,f in notices)
+    assert result['state']=='incidents' and 'shared_service_unhealthy' in result['codes']
+    view['shared_service_health']='healthy';m.check(tmp_path,**args)
+    assert any(c=='recovered' and f.get('previous')=='shared_service_unhealthy' for c,f in notices)
+
+
+def test_daily_acceptance_cannot_pass_with_a_current_incident(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,10,31,tzinfo=TZ);view=healthy(stamp)
+    view.update(closeout_date='2026-11-16',closeout_state='day_collection_finished',closeout_complete=True,closeout_remaining=0,critical_windows_observed=True,gap_count=0,active_incidents=['checkpoint_failed'])
+    observed=dict(samples=90,flow_samples=80,max_backlog=0,max_lag_seconds=0,unhealthy_seen=False,first_at=stamp.replace(hour=9,minute=30).isoformat(),last_at=stamp.replace(minute=16).isoformat(),max_poll_gap_seconds=31)
+    m.daily_acceptance(tmp_path,p,stamp,view,{'daily_observations':{'2026-11-16':observed}},lambda *a:True)
+    assert not json.loads((tmp_path/'daily_acceptance_2026-11-16.json').read_text())['passed']

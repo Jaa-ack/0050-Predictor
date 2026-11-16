@@ -45,6 +45,10 @@ MESSAGES = {
     'market_data_gaps': '當日已記錄觀測缺口，受影響答案與失敗分母保留；恢復連線不能補回缺失行情。',
     'collector_closeout_incomplete': '採集窗口已結束，但收尾完成回執缺失、積壓未清空或有明確遺失；不宣稱全部資料已保存。',
     'wal_large': '研究WAL已超過512MiB，可能增加I/O與恢復成本；不在發報路徑強制整理或刪除WAL。',
+    'checkpoint_failed': '有界WAL整理未完成或被中斷，下一個允許時段會再試；不刪資料、不改發布門檻。',
+    'shared_service_unhealthy': '原Telegram容器的健康狀態異常或無法確認；研究監控不會擅自重啟原服務。',
+    'daily_validation_failed': '當日盤中營運驗收未通過，私人逐項結果已保存；晚發、缺口及失敗分母保留。',
+    'supervision_ready': '下一個宣告交易日的研究排程與Telegram通知通道已完成設定驗證；這不是盤中驗收通過或準確率達標通知。',
     'forecast_missing': '10:00完整預測或發布封印缺失。補發不會倒填時間，也不會取得準時信用。',
     'forecast_late': '預測發布逾時；原始發布時間及扣分保留。',
     'backup_missing': '當日一致性備份未完成，會在空間足夠時有限重試。',
@@ -88,6 +92,88 @@ def age(value, stamp):
         return float('inf')
 
 
+def report_key(protocol,stamp):
+    def decision(day):return datetime.fromisoformat(day+'T'+protocol.get('prediction_time','10:00:00')).replace(tzinfo=TZ)
+    days=[d for d in protocol['dates'] if decision(d)+timedelta(seconds=301)<=stamp]
+    if not days or stamp>decision(protocol['dates'][-1]).replace(hour=14,minute=0,second=0)+timedelta(days=1):return None
+    return dict(day=days[-1],final=stamp>=decision(protocol['dates'][-1])+timedelta(hours=3,minutes=40))
+
+
+def report_fingerprint(root):
+    files={}
+    for name in ['pilot.sqlite3','pilot.sqlite3-wal']:
+        try:stat=(root/name).stat()
+        except FileNotFoundError:continue
+        if name.endswith('-wal') and stat.st_size==0:continue
+        files[name]=[stat.st_size,stat.st_mtime_ns]
+    return dict(files=files,protocol=hashlib.sha256((root/'protocol.json').read_bytes()).hexdigest())
+
+
+def report_current(root,protocol,stamp):
+    cache=read_json(root/'report_cache.json',{});key=report_key(protocol,stamp)
+    report=read_json(root/'evaluation.json',{})
+    try:
+        return bool(key and cache.get('key')==key and (not key['final'] or report.get('final') is True)
+            and cache.get('fingerprint')==report_fingerprint(root)
+            and cache.get('report_sha256')==hashlib.sha256((root/'evaluation.json').read_bytes()).hexdigest())
+    except OSError:return False
+
+
+def report_wanted(root,protocol,stamp):
+    return report_key(protocol,stamp) is not None and not report_current(root,protocol,stamp)
+
+
+def begin_report(root,protocol,stamp):
+    private_json(root/'report_input.json',dict(at=stamp.isoformat(),fingerprint=report_fingerprint(root)))
+
+
+def record_report(root,protocol,stamp):
+    source=read_json(root/'report_input.json',{});report=read_json(root/'evaluation.json',{})
+    key=report_key(protocol,stamp);fingerprint=report_fingerprint(root)
+    valid=bool(key and source.get('fingerprint')==fingerprint and report.get('as_of','')>=source.get('at','~')
+        and (not key['final'] or report.get('final') is True))
+    if valid:private_json(root/'report_cache.json',dict(at=stamp.isoformat(),key=key,fingerprint=fingerprint,
+        report_sha256=hashlib.sha256((root/'evaluation.json').read_bytes()).hexdigest()))
+    return dict(cached=valid)
+
+
+def daily_acceptance(root,protocol,stamp,current,state,send):
+    day=stamp.date().isoformat();policy=read_json(root/'supervision_policy.json',{})
+    if day not in protocol['dates'] or day<policy.get('daily_checks_from',protocol['dates'][0]):return
+    start=datetime.fromisoformat(day+'T'+protocol.get('collection_start','09:30:00')).replace(tzinfo=TZ)
+    end=datetime.fromisoformat(day+'T'+protocol.get('collection_end','10:15:00')).replace(tzinfo=TZ)
+    observed=state.setdefault('daily_observations',{}).setdefault(day,dict(samples=0,max_backlog=0,max_lag_seconds=0,unhealthy_seen=False))
+    observed.setdefault('flow_samples',0)
+    if start<=stamp<end+timedelta(seconds=150):
+        if observed.get('last_at'):observed['max_poll_gap_seconds']=max(observed.get('max_poll_gap_seconds',0),age(observed['last_at'],stamp))
+        observed.setdefault('first_at',stamp.isoformat());observed['last_at']=stamp.isoformat()
+        backlog=current.get('collector_backlog') or 0;observed['samples']+=1
+        if stamp>=start+timedelta(seconds=120):
+            observed['flow_samples']+=1;observed['max_backlog']=max(observed['max_backlog'],backlog)
+            if backlog:observed['max_lag_seconds']=max(observed['max_lag_seconds'],stamp.timestamp()-current.get('last_event_ns',0)/1e9)
+        if current.get('shared_service_health')!='healthy':observed['unhealthy_seen']=True
+    if stamp.strftime('%H:%M:%S')<'10:30:00':return
+    path=root/('daily_acceptance_'+day+'.json');result=read_json(path)
+    if result is None:
+        decision=datetime.fromisoformat(day+'T'+protocol.get('prediction_time','10:00:00')).replace(tzinfo=TZ)
+        delay=current.get('release_ns',0)/1e9-decision.timestamp() if current.get('release_ns') else None
+        checks=dict(environment=all(current.get(k) for k in ['configured','source_matches','database_ok','ntp']),
+            no_active_incidents=not current.get('active_incidents'),
+            preflight=current.get('preflight_current') is True,
+            full_grid=current.get('predictions')==current.get('targets',53),publication_on_time=delay is not None and 0<=delay<=protocol.get('max_emission_lateness_seconds',1),
+            both_windows_observed=current.get('critical_windows_observed') is True,no_recorded_gaps=current.get('gap_count')==0,
+            capture_closeout=current.get('closeout_date')==day and current.get('closeout_state')=='day_collection_finished' and current.get('closeout_complete') is True and current.get('closeout_remaining')==0,
+            backup=current.get('backup_current') is True,report=current.get('report_current') is True,
+            data_flow_stable=observed['flow_samples']>0 and observed['max_backlog']<1024 and observed['max_lag_seconds']<=5,
+            shared_service_stable=observed['samples']>0 and not observed['unhealthy_seen'],provider_ok=not current.get('fatal'))
+        checks['monitoring_coverage']=(observed['samples']>=30 and bool(observed.get('first_at')) and bool(observed.get('last_at')) and age(observed.get('first_at'),start+timedelta(seconds=120))>=0
+            and age(observed.get('last_at'),end)<=0 and observed.get('max_poll_gap_seconds',float('inf'))<=90)
+        result=dict(at=stamp.isoformat(),date=day,scope='daily_operations_not_accuracy_claim',checks=checks,passed=all(checks.values()),publication_delay_seconds=delay,observations=observed.copy())
+        private_json(path,result)
+    notified=state.setdefault('daily_notifications',{})
+    if not result['passed'] and not notified.get(day):notified[day]=send('daily_validation_failed',{})
+
+
 def assess(protocol, stamp, snapshot):
     """Return fixed incident codes and allowlisted recovery suggestions only."""
     local = stamp.astimezone(TZ); day = local.date().isoformat()
@@ -114,6 +200,9 @@ def assess(protocol, stamp, snapshot):
     decision = datetime.fromisoformat(day + 'T' + protocol.get('prediction_time', '10:00:00')).replace(tzinfo=TZ)
     if snapshot.get('gap_count',0)>0:add('market_data_gaps')
     if snapshot.get('wal_bytes',0)>=512*1024**2:add('wal_large')
+    if snapshot.get('checkpoint_error'):add('checkpoint_failed')
+    if start<=local<end+timedelta(seconds=150) and snapshot.get('shared_service_health') in ('unhealthy','starting','unavailable'):
+        add('shared_service_unhealthy')
     if local.strftime('%H:%M:%S') >= '08:42:00' and not snapshot.get('preflight_current'):
         retry = local < start and not snapshot.get('preflight_active')
         add('preflight_failed', 'start_preflight' if retry else None)
@@ -204,6 +293,17 @@ def snapshot(root, prefix, stamp):
     report = read_json(root / 'evaluation.json', {})
     backup_state = read_json(root / 'backup_status.json', {})
     closeout=read_json(root/'collector_closeout.json',{})
+    checkpoint=read_json(root/'checkpoint_status.json',{})
+    shared_health=None
+    local=stamp.astimezone(TZ);day=local.date().isoformat()
+    if day in protocol.get('dates',[]):
+        start=datetime.fromisoformat(day+'T'+protocol.get('collection_start','09:30:00')).replace(tzinfo=TZ)
+        end=datetime.fromisoformat(day+'T'+protocol.get('collection_end','10:15:00')).replace(tzinfo=TZ)
+        if start<=local<end+timedelta(seconds=150) or 'shared_service_unhealthy' in read_json(root/'watchdog_state.json',{}).get('incidents',{}):
+            try:
+                health_probe=subprocess.run(['docker','--config',str(prefix/'docker-observer'),'inspect','--format={{.State.Health.Status}}','telegram-reminder-bot-1'],capture_output=True,text=True,timeout=3)
+                shared_health=health_probe.stdout.strip() if health_probe.returncode==0 and health_probe.stdout.strip() in ('healthy','unhealthy','starting') else 'unavailable'
+            except (OSError,subprocess.TimeoutExpired):shared_health='unavailable'
     try:wal_bytes=(root/'pilot.sqlite3-wal').stat().st_size
     except FileNotFoundError:wal_bytes=0
     try:
@@ -220,10 +320,11 @@ def snapshot(root, prefix, stamp):
                   closeout_state=closeout.get('state'),closeout_complete=closeout.get('complete'),
                   closeout_remaining=closeout.get('remaining_messages'),
                   wal_bytes=wal_bytes,
+                  shared_service_health=shared_health,checkpoint_error=checkpoint.get('date')==day and checkpoint.get('state')=='error',
                   backup_active=unit_active('backup'), targets=len(set(protocol.get('members', []) + ['0050', '1216', '2002', '2412', 'IX0001'])),
                   preflight_active=unit_active('preflight'),
                   preflight_current=probe.get('date') == stamp.date().isoformat() and probe.get('state') == 'verified',
-                  report_current=age(report.get('as_of'), stamp) < 600,
+                  report_current=report_current(root,protocol,stamp),
                   report_final=report.get('final') is True,
                   backup_current=backup_state.get('date') == stamp.date().isoformat() and backup_state.get('state') == 'complete',
                   complete=(root / 'cloud_complete').exists() and report.get('final') is True)
@@ -235,6 +336,12 @@ def snapshot(root, prefix, stamp):
             result['predictions'] = db.execute('SELECT count(*) FROM predictions WHERE day=?', (day,)).fetchone()[0]
             row = db.execute('SELECT at_ns FROM releases WHERE day=?', (day,)).fetchone()
             result['release_ns'] = row[0] if row else None
+            windows=[]
+            if row:
+                for horizon in (60,300):
+                    stop=row[0]+horizon*10**9
+                    windows.append(bool(db.execute('SELECT 1 FROM coverage WHERE start_ns<=? AND end_ns>=?',(row[0],stop)).fetchone()) and not db.execute('SELECT 1 FROM gaps WHERE start_ns<=? AND end_ns>=?',(stop,row[0])).fetchone())
+            result['critical_windows_observed']=len(windows)==2 and all(windows)
             begin=datetime.fromisoformat(day+'T00:00:00').replace(tzinfo=TZ);low=int(begin.timestamp())*10**9
             result['gap_count']=db.execute('SELECT count(*) FROM gaps WHERE start_ns<? AND end_ns>=?',
                 (low+86400*10**9,low)).fetchone()[0]
@@ -288,12 +395,15 @@ def check(root, *, prefix=Path('/opt/twquant-pilot'), clock=now, inspect=None, c
         state['incidents'][code] = previous
     trusted=all(current.get(k) for k in ('configured','source_matches','database_ok','ntp'))
     for code in list(state['incidents']):
-        if code not in active and trusted:
+        if code not in active and trusted and (code!='shared_service_unhealthy' or current.get('shared_service_health')=='healthy'):
             if send('recovered', {'previous': code}):
                 del state['incidents'][code]
+    current['active_incidents']=sorted(active|set(state['incidents']))
+    daily_acceptance(root,protocol,stamp,current,state,send)
     state['checked_at'] = stamp.isoformat()
     private_json(root / 'watchdog_state.json', state)
-    return dict(state='healthy' if not issues else 'incidents', codes=sorted(active), at=stamp.isoformat())
+    pending=active|set(state['incidents'])
+    return dict(state='healthy' if not pending else 'incidents', codes=sorted(pending), at=stamp.isoformat())
 
 
 def backup(root, *, stamp=None, free_bytes=None):

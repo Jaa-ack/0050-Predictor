@@ -47,3 +47,9 @@ def test_startup_install_is_idempotent_and_limits_changes_to_sqlite_connections(
     assert sqlite3.connect is installed
     with sqlite3.connect(':memory:') as con:
         assert con.execute('pragma wal_autocheckpoint').fetchone()[0]==0
+
+
+def test_checkpoint_gate_rejects_engines_before_the_wal_reset_fix():
+    m=module()
+    assert not m.checkpoint_supported((3,40,1)) and not m.checkpoint_supported((3,51,2))
+    assert m.checkpoint_supported((3,51,3)) and m.checkpoint_supported((3,54,1))

@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 TZ=ZoneInfo('Asia/Taipei')
 PREFIX=Path('/opt/twquant-pilot')
-KINDS=('collect','forecast','report','preflight','backup','watchdog','quiet','fault','report-stress','final','safety')
+KINDS=('collect','forecast','report','preflight','backup','watchdog','quiet','checkpoint','fault','report-stress','final','safety')
 
 
 def make_plan(start):
@@ -99,12 +99,12 @@ def render_units(plan):
                 first=datetime.fromisoformat(plan['preflight'])+timedelta(minutes=1)
                 timing='OnCalendar='+first.strftime('%Y-%m-%d %H:%M:%S')+' Asia/Taipei\nOnUnitInactiveSec=30s'
             else:
-                key={'collect':'start','forecast':'decision','report':'start','preflight':'preflight','backup':'backup','quiet':'quiet'}[kind]
+                key={'collect':'start','checkpoint':'start','forecast':'decision','report':'start','preflight':'preflight','backup':'backup','quiet':'quiet'}[kind]
                 value=datetime.fromisoformat(plan[key])
                 if kind=='forecast':value-=timedelta(minutes=1)
                 if kind=='report':value+=timedelta(minutes=5)
                 timing='OnCalendar='+value.strftime('%Y-%m-%d %H:%M:%S')+' Asia/Taipei'
-                if kind in ('collect','report'):timing+='\nOnUnitInactiveSec='+('60s' if kind=='collect' else '300s')
+                if kind in ('collect','checkpoint','report'):timing+='\nOnUnitInactiveSec='+('300s' if kind=='report' else '60s')
             text='[Unit]\nDescription=Isolated validation '+kind+'\n[Timer]\n'+timing+'\nAccuracySec=1us\nRandomizedDelaySec=0\nPersistent=true\nUnit='+plan['session']+'-'+kind+'.service\n[Install]\nWantedBy=timers.target\n'
         elif kind in ('watchdog','preflight','backup'):
             phase='watchdog' if kind=='watchdog' else kind
@@ -211,10 +211,10 @@ def run_phase(plan,phase):
         value=quiet_evidence(quiet,report,now=stamp(),monotonic_now=time.monotonic())
         receipt(root,'quiet_observed.json',value);return value
     if phase in ('restore','cleanup'):
-        kinds=['collect','forecast','report','preflight','backup','quiet','fault','report-stress','final']
+        kinds=['collect','forecast','report','preflight','backup','quiet','checkpoint','fault','report-stress','final']
         if phase=='cleanup':kinds+=['watchdog','safety']
         execute(['systemctl','disable','--now',*[session+'-'+k+'.timer' for k in kinds]])
-        execute(['systemctl','stop',*[session+'-'+k+'.service' for k in ['collect','forecast','report']]])
+        execute(['systemctl','stop',*[session+'-'+k+'.service' for k in ['collect','forecast','report','checkpoint']]])
         if plan.get('formal_report_was_active'):execute(['systemctl','start','twquant-pilot-report.timer'])
         result=dict(state='restored',at=stamp().isoformat(),formal_report_timer_restored=bool(plan.get('formal_report_was_active')))
         receipt(root,'restoration.json',result);return result

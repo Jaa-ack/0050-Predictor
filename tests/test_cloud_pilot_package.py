@@ -121,6 +121,15 @@ def test_cloud_collector_has_time_to_drain_and_report_quiet_begins_before_captur
     assert '2026-11-16 09:28:00 Asia/Taipei' in generated['twquant-pilot-quiet.timer']
 
 
+def test_checkpoint_service_is_bounded_and_uses_the_research_sqlite_backend():
+    u=module().units('/opt/twquant-pilot','twquant',['2026-11-17'],memory_max='640M')
+    s=u['twquant-pilot-checkpoint.service'];t=u['twquant-pilot-checkpoint.timer']
+    assert 'TimeoutStartSec=45' in s and 'Nice=19' in s and 'Slice=twquant-pilot.slice' in s
+    assert '/venv/bin/python /opt/twquant-pilot/checkpoint.py' in s
+    assert '--interrupted' in s and '2026-11-17 09:30:00 Asia/Taipei' in t
+    assert 'twquant-pilot-checkpoint.timer' in u['twquant-pilot-finalize.service']
+
+
 def test_shared_host_stops_already_running_reports_before_forecast():
     generated=module().units('/opt/twquant-pilot','twquant',['2026-11-16'],memory_max='512M')
     service=generated['twquant-pilot-quiet.service']
