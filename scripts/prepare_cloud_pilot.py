@@ -53,7 +53,7 @@ Environment=TWQUANT_PILOT_MANAGED=0
 {guard}ExecStart={command}
 {post}TimeoutStartSec={'300' if mode=='report' else 'infinity'}
 RuntimeMaxSec={'21600' if mode=='collect' else '180' if mode=='forecast' else '600'}
-TimeoutStopSec=30
+TimeoutStopSec={'150' if memory_max and mode=='collect' else '30'}
 Restart=on-failure
 RestartSec=30
 NoNewPrivileges=true
@@ -104,11 +104,11 @@ Description=Memory budget for this pilot only
 MemoryAccounting=true
 MemoryMax={memory_max}
 '''
-    result.update(operations_units(prefix,user,dates))
+    result.update(operations_units(prefix,user,dates,quiet_clock='09:28:00' if memory_max else '09:58:00'))
     return result
 
 
-def operations_units(prefix,user,dates):
+def operations_units(prefix,user,dates,*,quiet_clock='09:58:00'):
     result={}
     for kind,phase,identity in [('watchdog','check','root'),('backup','backup',user),('preflight','preflight',user)]:
         result[f'twquant-pilot-{kind}.service']=f'''[Unit]
@@ -171,7 +171,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 '''
-    calendar='\n'.join(f'OnCalendar={day} 09:58:00 Asia/Taipei' for day in dates)
+    calendar='\n'.join(f'OnCalendar={day} {quiet_clock} Asia/Taipei' for day in dates)
     result['twquant-pilot-quiet.timer']=f'''[Unit]
 Description=Protect ten declared forecast windows from running reports
 

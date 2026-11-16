@@ -27,7 +27,7 @@ def make_plan(start):
     session='twquant-validation-'+start.strftime('%Y%m%d-%H%M')
     result=dict(session=session,root=str(PREFIX/'runtime'/session),control=str(PREFIX/'validation-control'/session),
                 day=start.date().isoformat(),prefix=str(PREFIX),diagnostic_only=True)
-    for key,minutes in [('preflight',-2),('start',0),('fault',12),('decision',30),('quiet',28),
+    for key,minutes in [('preflight',-4),('start',0),('fault',12),('decision',30),('quiet',-2),
                         ('end',45),('backup',50),('final',55),('safety',60)]:
         result[key]=(start+timedelta(minutes=minutes)).isoformat()
     return result
@@ -123,6 +123,8 @@ def render_units(plan):
     for kind,phase,key,user in [('fault','inject','fault','root'),('final','final','final','twquant-pilot'),('safety','cleanup','safety','root')]:
         result[plan['session']+'-'+kind+'.service']='[Unit]\nDescription=Bounded validation '+kind+'\n'+('OnSuccess='+plan['session']+'-finalize.service\n' if kind=='final' else '')+'[Service]\nType=oneshot\nUser='+user+'\nWorkingDirectory='+str(PREFIX)+'\nUMask=0077\nEnvironment=TZ=Asia/Taipei\nEnvironment=PYTHONPATH='+str(PREFIX/'app/src')+'\nExecStart='+('/opt/twquant-pilot/venv/bin/python '+driver+' --plan '+meta+' --phase final' if kind=='final' else command(phase))+'\nTimeoutStartSec=300\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths='+plan['root']+' '+str(PREFIX/'log')+'\n'
         if kind=='final':
+            targets=plan['session']+'-report.service '+plan['session']+'-report.timer'
+            result[plan['session']+'-'+kind+'.service']=result[plan['session']+'-'+kind+'.service'].replace('[Unit]\n','[Unit]\nConflicts='+targets+'\nAfter='+targets+'\n',1)
             result[plan['session']+'-'+kind+'.service']=result[plan['session']+'-'+kind+'.service'].replace('[Service]\n','[Service]\nSlice=twquant-pilot.slice\nNice=10\n',1)
         stamp=datetime.fromisoformat(plan[key]).strftime('%Y-%m-%d %H:%M:%S')
         result[plan['session']+'-'+kind+'.timer']='[Unit]\nDescription=Single validation '+kind+'\n[Timer]\nOnCalendar='+stamp+' Asia/Taipei\nAccuracySec=1us\nRandomizedDelaySec=0\nPersistent=true\nUnit='+plan['session']+'-'+kind+'.service\n[Install]\nWantedBy=timers.target\n'

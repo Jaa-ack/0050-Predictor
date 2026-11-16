@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime,timedelta
 import fcntl
 import json
 import os
@@ -23,7 +23,10 @@ def now():return datetime.now(TZ)
 def report_ready(protocol,stamp):
     local=stamp.astimezone(TZ)
     if local.date().isoformat() not in protocol['dates']:return True
-    return not ('09:58:00'<=local.strftime('%H:%M:%S')<'10:06:00')
+    day=local.date().isoformat()
+    start=datetime.fromisoformat(day+'T'+protocol.get('collection_start','09:30:00')).replace(tzinfo=TZ)
+    end=datetime.fromisoformat(day+'T'+protocol.get('collection_end','10:15:00')).replace(tzinfo=TZ)
+    return not (start-timedelta(minutes=2)<=local<end+timedelta(seconds=150))
 
 
 def write_status(root,result):
@@ -53,18 +56,21 @@ def supervise(root,*,clock=now,sleep=time.sleep,launch=subprocess.Popen,free_byt
             arguments=[sys.executable,str(entry),'--root',str(root)]
         else:arguments=[sys.executable,'-m','twquant.live_market','--root',str(root),'--mode','collect']
         child=launch(arguments)
-        reason='worker_exited'
+        reason='worker_exited';forced=False
         try:
             while child.poll() is None:
                 if clock().astimezone(TZ)>=end:reason='planned_window_end';break
                 if available()<reserve:reason='storage_reserve_reached';break
                 sleep(1)
         finally:
+            if child.poll() is None and cloud_runtime and reason=='planned_window_end':
+                try:child.wait(timeout=120)
+                except subprocess.TimeoutExpired:forced=True
             if child.poll() is None:
                 child.terminate()
-                try:child.wait(timeout=10)
-                except subprocess.TimeoutExpired:child.kill();child.wait(timeout=5)
-        return finish(reason,worker_returncode=child.poll())
+                try:child.wait(timeout=120 if cloud_runtime and reason!='planned_window_end' else 10)
+                except subprocess.TimeoutExpired:forced=True;child.kill();child.wait(timeout=5)
+        return finish(reason,worker_returncode=child.poll(),forced_termination=forced)
 
 
 def main(argv=None):

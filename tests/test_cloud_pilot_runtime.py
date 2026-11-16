@@ -44,6 +44,20 @@ def test_storage_reserve_stops_only_collector_and_never_deletes_data(tmp_path):
     assert existing.read_bytes()==b'preserve-all-records'
 
 
+def test_cloud_window_end_waits_for_accepted_data_to_drain_before_sending_a_signal(tmp_path,monkeypatch):
+    m=module();setup(tmp_path);clock=[datetime(2026,11,16,10,14,59,tzinfo=ZoneInfo('Asia/Taipei'))]
+    entry=Path(m.__file__).with_name('collector_runtime.py');monkeypatch.setattr(m,'__file__',str(tmp_path/'resource_guard.py'))
+    (tmp_path/'collector_runtime.py').write_text('# trusted test collector')
+    class DrainingChild(Child):
+        def wait(self,timeout):
+            assert timeout>=90 and not self.stopped
+            self.stopped=True;return 0
+        def terminate(self):raise AssertionError('A natural window end must allow draining first')
+    result=m.supervise(tmp_path,clock=lambda:clock[0],sleep=lambda s:clock.__setitem__(0,clock[0]+timedelta(seconds=s)),
+        launch=lambda args:DrainingChild(),free_bytes=lambda:10000,cloud_runtime=True)
+    assert result['state']=='planned_window_end' and not result['forced_termination']
+
+
 def test_outside_capture_window_never_starts_provider_process(tmp_path):
     m=module();setup(tmp_path)
     def forbidden(args):raise AssertionError('Provider must not start')
@@ -55,14 +69,22 @@ def test_report_work_is_deferred_around_forecast_on_small_shared_host(tmp_path):
     m=module();p=setup(tmp_path);tz=ZoneInfo('Asia/Taipei')
     assert not m.report_ready(p,datetime(2026,11,16,9,59,tzinfo=tz))
     assert not m.report_ready(p,datetime(2026,11,16,10,5,tzinfo=tz))
-    assert m.report_ready(p,datetime(2026,11,16,10,6,tzinfo=tz))
+    assert m.report_ready(p,datetime(2026,11,16,10,18,tzinfo=tz))
+
+
+def test_reports_yield_for_the_entire_capture_and_bounded_drain_window(tmp_path):
+    m=module();p=setup(tmp_path);tz=ZoneInfo('Asia/Taipei')
+    for hour,minute,second in [(9,28,0),(9,35,0),(10,10,0),(10,17,29)]:
+        assert not m.report_ready(p,datetime(2026,11,16,hour,minute,second,tzinfo=tz))
+    assert m.report_ready(p,datetime(2026,11,16,10,17,30,tzinfo=tz))
+    assert m.report_ready(p,datetime(2026,11,15,9,35,tzinfo=tz))
 
 
 def test_active_report_quiet_condition_is_bounded_to_declared_forecast_window(tmp_path,monkeypatch):
     m=module();setup(tmp_path);tz=ZoneInfo('Asia/Taipei')
     monkeypatch.setattr(m,'now',lambda:datetime(2026,11,16,9,58,tzinfo=tz))
     assert m.main(['--root',str(tmp_path),'--phase','report-quiet'])==0
-    monkeypatch.setattr(m,'now',lambda:datetime(2026,11,16,10,6,tzinfo=tz))
+    monkeypatch.setattr(m,'now',lambda:datetime(2026,11,16,10,18,tzinfo=tz))
     assert m.main(['--root',str(tmp_path),'--phase','report-quiet'])==1
     monkeypatch.setattr(m,'now',lambda:datetime(2026,11,15,9,58,tzinfo=tz))
     assert m.main(['--root',str(tmp_path),'--phase','report-quiet'])==1

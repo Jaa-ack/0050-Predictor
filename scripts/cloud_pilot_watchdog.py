@@ -35,11 +35,16 @@ MESSAGES = {
     'clock_unsynchronized': '主機時鐘未確認同步，請檢查對時；晚發報仍按原規則計分。',
     'disk_low': '磁碟低於保留量，收集將受限；不刪除資料、不購買容量。',
     'database_unreadable': '研究資料庫無法讀取，需人工檢查；不會刪除或重建原資料庫。',
+    'database_recovering': '研究資料庫正在恢復WAL或忙碌，暫不能確認資料；不會把既有異常宣告恢復。',
     'provider_fatal': '行情程式記錄供應商或訊息錯誤，保留原始失敗狀態，需人工檢查。',
     'collector_inactive': '收集窗口內採集服務未運行。',
     'collector_stalled': '採集程序心跳逾時。',
     'feed_not_ready': '行情訂閱持續未就緒。',
     'market_data_stale': '超過120秒未寫入新行情。缺口與受影響答案會保留。',
+    'collector_backlog': '採集佇列或落盤延遲偏高，可能影響輸入新鮮度；先告警，不以重啟丟棄待存資料。',
+    'market_data_gaps': '當日已記錄觀測缺口，受影響答案與失敗分母保留；恢復連線不能補回缺失行情。',
+    'collector_closeout_incomplete': '採集窗口已結束，但收尾完成回執缺失、積壓未清空或有明確遺失；不宣稱全部資料已保存。',
+    'wal_large': '研究WAL已超過512MiB，可能增加I/O與恢復成本；不在發報路徑強制整理或刪除WAL。',
     'forecast_missing': '10:00完整預測或發布封印缺失。補發不會倒填時間，也不會取得準時信用。',
     'forecast_late': '預測發布逾時；原始發布時間及扣分保留。',
     'backup_missing': '當日一致性備份未完成，會在空間足夠時有限重試。',
@@ -93,7 +98,7 @@ def assess(protocol, stamp, snapshot):
         issues.append(dict(code=code, action=action))
     for key, code in [('configured', 'configuration_missing'), ('source_matches', 'source_integrity_failed'),
                       ('ntp', 'clock_unsynchronized'), ('database_ok', 'database_unreadable')]:
-        if not snapshot.get(key): add(code)
+        if not snapshot.get(key):add('database_recovering' if key=='database_ok' and snapshot.get('database_recovering') else code)
     low_disk = snapshot.get('free_bytes', 0) < protocol.get('minimum_free_bytes', RESERVE)
     if low_disk: add('disk_low')
     if snapshot.get('fatal'): add('provider_fatal')
@@ -107,10 +112,16 @@ def assess(protocol, stamp, snapshot):
     start = datetime.fromisoformat(day + 'T' + protocol.get('collection_start', '09:30:00')).replace(tzinfo=TZ)
     end = datetime.fromisoformat(day + 'T' + protocol.get('collection_end', '10:15:00')).replace(tzinfo=TZ)
     decision = datetime.fromisoformat(day + 'T' + protocol.get('prediction_time', '10:00:00')).replace(tzinfo=TZ)
+    if snapshot.get('gap_count',0)>0:add('market_data_gaps')
+    if snapshot.get('wal_bytes',0)>=512*1024**2:add('wal_large')
     if local.strftime('%H:%M:%S') >= '08:42:00' and not snapshot.get('preflight_current'):
         retry = local < start and not snapshot.get('preflight_active')
         add('preflight_failed', 'start_preflight' if retry else None)
     if start + timedelta(seconds=30) <= local < end and not low_disk and not snapshot.get('fatal'):
+        backlog=snapshot.get('collector_backlog',0) or 0
+        lag=local.timestamp()-snapshot.get('last_event_ns',0)/1e9
+        if local>=start+timedelta(seconds=120) and (backlog>=1024 or (backlog>0 and lag>5)):
+            add('collector_backlog')
         if not snapshot.get('collector_active'):
             add('collector_inactive', 'start_collect')
         elif age(snapshot.get('collector_at'), local) > 30:
@@ -120,6 +131,9 @@ def assess(protocol, stamp, snapshot):
                 add('feed_not_ready', 'restart_collect')
             elif (local.timestamp() - snapshot.get('last_event_ns', 0) / 1e9) > 120:
                 add('market_data_stale', 'restart_collect')
+    if local>=end+timedelta(seconds=150) and (snapshot.get('closeout_date')!=day or
+            snapshot.get('closeout_state')!='day_collection_finished' or not snapshot.get('closeout_complete') or
+            snapshot.get('closeout_remaining')!=0):add('collector_closeout_incomplete')
     if local >= decision - timedelta(seconds=45):
         missing = snapshot.get('predictions', 0) != snapshot.get('targets', 53) or not snapshot.get('release_ns')
         can_start = local < decision + timedelta(seconds=300) and not snapshot.get('forecast_active')
@@ -189,6 +203,9 @@ def snapshot(root, prefix, stamp):
     collector = read_json(root / 'collector_status.json', {})
     report = read_json(root / 'evaluation.json', {})
     backup_state = read_json(root / 'backup_status.json', {})
+    closeout=read_json(root/'collector_closeout.json',{})
+    try:wal_bytes=(root/'pilot.sqlite3-wal').stat().st_size
+    except FileNotFoundError:wal_bytes=0
     try:
         synced = subprocess.run(['timedatectl', 'show', '-p', 'NTPSynchronized', '--value'],
                                 capture_output=True, text=True, timeout=10).stdout.strip() == 'yes'
@@ -199,6 +216,10 @@ def snapshot(root, prefix, stamp):
                   free_bytes=shutil.disk_usage(root).free, fatal=(root / 'fatal.json').exists(),
                   collector_active=unit_active('collect'), collector_at=collector.get('at'),
                   stream_ready=collector.get('stream_ready', False), forecast_active=unit_active('forecast'),
+                  collector_backlog=collector.get('backlog'),closeout_date=closeout.get('date'),
+                  closeout_state=closeout.get('state'),closeout_complete=closeout.get('complete'),
+                  closeout_remaining=closeout.get('remaining_messages'),
+                  wal_bytes=wal_bytes,
                   backup_active=unit_active('backup'), targets=len(set(protocol.get('members', []) + ['0050', '1216', '2002', '2412', 'IX0001'])),
                   preflight_active=unit_active('preflight'),
                   preflight_current=probe.get('date') == stamp.date().isoformat() and probe.get('state') == 'verified',
@@ -214,9 +235,13 @@ def snapshot(root, prefix, stamp):
             result['predictions'] = db.execute('SELECT count(*) FROM predictions WHERE day=?', (day,)).fetchone()[0]
             row = db.execute('SELECT at_ns FROM releases WHERE day=?', (day,)).fetchone()
             result['release_ns'] = row[0] if row else None
+            begin=datetime.fromisoformat(day+'T00:00:00').replace(tzinfo=TZ);low=int(begin.timestamp())*10**9
+            result['gap_count']=db.execute('SELECT count(*) FROM gaps WHERE start_ns<? AND end_ns>=?',
+                (low+86400*10**9,low)).fetchone()[0]
             result['database_ok'] = True
-    except sqlite3.Error:
+    except sqlite3.Error as error:
         result['database_ok'] = False
+        result['database_recovering']=getattr(error,'sqlite_errorcode',0) in (sqlite3.SQLITE_BUSY,getattr(sqlite3,'SQLITE_BUSY_RECOVERY',261))
     return result
 
 
@@ -261,8 +286,9 @@ def check(root, *, prefix=Path('/opt/twquant-pilot'), clock=now, inspect=None, c
         if not previous.get('notified'):
             previous['notified'] = send(code, {'action': action if attempted else None})
         state['incidents'][code] = previous
+    trusted=all(current.get(k) for k in ('configured','source_matches','database_ok','ntp'))
     for code in list(state['incidents']):
-        if code not in active:
+        if code not in active and trusted:
             if send('recovered', {'previous': code}):
                 del state['incidents'][code]
     state['checked_at'] = stamp.isoformat()

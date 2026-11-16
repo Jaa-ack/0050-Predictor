@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-16 — Bounded collector closeout and missing operational alerts
+
+- Reproduced accepted messages being left in RAM at capture end. Added bounded draining on natural completion and SIGTERM, original receipt timestamps, explicit incomplete counts/gaps and private append-only closeout receipts. The supervisor waits before terminating the cloud child, and systemd permits150seconds for stop; hard crashes and exhausted budgets remain failures.
+- Deferred reports across the whole existing-host capture and drain window09:28–10:17:30, retaining the frozen model, publication limit, target horizons and declared dates. Future isolated rehearsals stop reports before capture and exclude report services/timers from final evaluation.
+- Added fixed backlog, daily-gap, missing/incomplete-closeout and large-WAL alerts without discarding pending data through automatic restarts. Distinguished SQLite recovery/busy status and prevented unreadable or untrusted snapshots from falsely resolving existing incidents.
+- Deployed only the changed operations helpers and units to the existing VM, verified unchanged formal protocol/predictions/seals/events, and preserved Telegram configuration. A real SIGTERM under the service account/sandbox drained954pending messages and durably retained all1000synthetic events with no predictions or broker authentication.
+- Verified701Python tests,10frontend tests, secret publication checks and systemd syntax. Documented remaining live deadline/throughput validation, WAL maintenance, volatile queues, external supervision, off-disk recovery and provider/statistical evidence limits. Today's failures remain unchanged; synthetic checks do not establish live acceptance.
+
 ## Unreleased — 2026-11-16 — Full-session live operational validation
 
 - Added a bounded, isolated real-stream rehearsal with45minutes of capture, the frozen53query model, separate60/300second checks, deliberate collector interruption, private incident/recovery notifications, backup verification and unconditional cleanup. Formal ten-session evidence remains separate.

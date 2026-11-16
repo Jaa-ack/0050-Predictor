@@ -115,13 +115,19 @@ def test_shared_host_collection_and_report_yield_cpu_without_delaying_forecast()
     assert 'Nice=10' not in generated['twquant-pilot-forecast.service']
 
 
+def test_cloud_collector_has_time_to_drain_and_report_quiet_begins_before_capture():
+    generated=module().units('/opt/twquant-pilot','twquant',['2026-11-16'],memory_max='640M')
+    assert 'TimeoutStopSec=150' in generated['twquant-pilot-collect.service']
+    assert '2026-11-16 09:28:00 Asia/Taipei' in generated['twquant-pilot-quiet.timer']
+
+
 def test_shared_host_stops_already_running_reports_before_forecast():
     generated=module().units('/opt/twquant-pilot','twquant',['2026-11-16'],memory_max='512M')
     service=generated['twquant-pilot-quiet.service']
     assert '--phase report-quiet' in service
     assert 'ExecStart=/bin/systemctl stop twquant-pilot-report.service' in service
     assert 'twquant-pilot-collect.service' not in service and 'twquant-pilot-forecast.service' not in service
-    assert '2026-11-16 09:58:00 Asia/Taipei' in generated['twquant-pilot-quiet.timer']
+    assert '2026-11-16 09:28:00 Asia/Taipei' in generated['twquant-pilot-quiet.timer']
     assert 'twquant-pilot-quiet.timer' in generated['twquant-pilot-finalize.service']
 
 

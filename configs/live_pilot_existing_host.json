@@ -7,5 +7,5 @@
   "minimum_free_bytes": 4294967296,
   "new_paid_resources_allowed": false,
   "capture_scope": "pre-decision quotes and trades plus all first-change scoring windows",
-  "report_quiet_window": ["09:58:00", "10:06:00"]
+  "report_quiet_window": ["09:28:00", "10:17:30"]
 }

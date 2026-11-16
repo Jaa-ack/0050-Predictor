@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo('Asia/Taipei')
@@ -166,3 +167,54 @@ def test_monitor_exception_sends_fixed_diagnostic_without_raw_error(tmp_path,mon
     assert m.main(['--root',str(tmp_path),'--prefix',str(tmp_path)])==1
     assert notices==['watchdog_failed']
     assert json.loads(capsys.readouterr().out)=={'state':'error','code':'watchdog_operation_failed'}
+
+
+def test_backlog_and_recorded_gaps_alert_without_restarting_a_working_collector(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,9,45,tzinfo=TZ);view=healthy(stamp)
+    view.update(collector_backlog=2000,gap_count=1,wal_bytes=600*1024**2)
+    issues=m.assess(p,stamp,view)
+    for code in ['collector_backlog','market_data_gaps','wal_large']:
+        assert {'code':code,'action':None} in issues
+    assert not any(x.get('action') in ('start_collect','restart_collect') for x in issues)
+
+
+def test_missing_or_partial_closeout_is_not_mistaken_for_a_successful_capture(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,10,18,tzinfo=TZ);view=healthy(stamp)
+    assert {'code':'collector_closeout_incomplete','action':None} in m.assess(p,stamp,view)
+    view.update(closeout_date='2026-11-16',closeout_state='day_collection_finished',closeout_complete=True,closeout_remaining=0)
+    assert not any(x['code']=='collector_closeout_incomplete' for x in m.assess(p,stamp,view))
+    view['closeout_remaining']=3
+    assert any(x['code']=='collector_closeout_incomplete' for x in m.assess(p,stamp,view))
+
+
+def test_busy_database_cannot_resolve_a_known_late_forecast(tmp_path):
+    m=module();protocol(tmp_path);stamp=datetime(2026,11,16,10,1,tzinfo=TZ);view=healthy(stamp)
+    view['release_ns']+=2*10**9;notices=[]
+    kwargs=dict(clock=lambda:stamp,inspect=lambda:view,control=lambda action:True,
+        send=lambda code,fields:notices.append((code,fields)) or True)
+    m.check(tmp_path,**kwargs);assert any(c=='forecast_late' for c,f in notices)
+    view.update(database_ok=False,database_recovering=True)
+    m.check(tmp_path,**kwargs)
+    assert not any(c=='recovered' and f.get('previous')=='forecast_late' for c,f in notices)
+    state=json.loads((tmp_path/'watchdog_state.json').read_text())
+    assert 'forecast_late' in state['incidents'] and 'database_recovering' in state['incidents']
+
+
+def test_snapshot_exposes_real_backlog_closeout_and_only_todays_gaps(tmp_path,monkeypatch):
+    m=module();protocol(tmp_path);stamp=datetime(2026,11,16,9,45,tzinfo=TZ)
+    (tmp_path/'collector_status.json').write_text('{"backlog":7}')
+    (tmp_path/'collector_closeout.json').write_text('{"date":"2026-11-16","state":"day_collection_finished","complete":true,"remaining_messages":0}')
+    with sqlite3.connect(tmp_path/'pilot.sqlite3') as db:
+        db.executescript('CREATE TABLE events(id INTEGER,received_ns INTEGER); CREATE TABLE predictions(day TEXT); CREATE TABLE releases(day TEXT,at_ns INTEGER); CREATE TABLE gaps(start_ns INTEGER,end_ns INTEGER);')
+        ns=int(stamp.timestamp())*10**9
+        db.executemany('INSERT INTO gaps VALUES(?,?)',[(ns,ns+1),(ns-86400*10**9,ns-86400*10**9+1)])
+    monkeypatch.setattr(m,'unit_active',lambda kind:False)
+    monkeypatch.setattr(m.subprocess,'run',lambda *a,**k:SimpleNamespace(stdout='yes'))
+    view=m.snapshot(tmp_path,tmp_path,stamp)
+    assert view['database_ok'] and view['gap_count']==1 and view['collector_backlog']==7
+    assert view['closeout_complete'] and view['closeout_remaining']==0 and view['wal_bytes']==0
+    error=sqlite3.OperationalError('synthetic recovery');error.sqlite_errorcode=261
+    def recovering(*a,**k):raise error
+    monkeypatch.setattr(m.sqlite3,'connect',recovering)
+    view=m.snapshot(tmp_path,tmp_path,stamp)
+    assert not view['database_ok'] and view['database_recovering']

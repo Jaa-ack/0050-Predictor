@@ -25,8 +25,8 @@ def test_full_validation_keeps_real_duration_and_relative_decision_windows():
     p=plan();stamp=lambda k:datetime.fromisoformat(p[k])
     assert stamp('end')-stamp('start')==timedelta(minutes=45)
     assert stamp('decision')-stamp('start')==timedelta(minutes=30)
-    assert stamp('quiet')==stamp('decision')-timedelta(minutes=2)
-    assert stamp('fault')<stamp('quiet')
+    assert stamp('quiet')==stamp('start')-timedelta(minutes=2)
+    assert stamp('start')<stamp('fault')<stamp('decision')-timedelta(minutes=2)
     assert stamp('backup')>stamp('end') and stamp('final')>stamp('backup')
     assert stamp('safety')<stamp('start').replace(hour=13,minute=30)
 
@@ -63,7 +63,7 @@ def test_rendered_validation_jobs_are_single_session_and_have_deadline_cleanup()
     assert p['session']+'-safety.timer' in units
     assert '11:55:00 Asia/Taipei' in units[p['session']+'-safety.timer']
     assert '11:24:00 Asia/Taipei' in units[p['session']+'-forecast.timer']
-    assert '11:23:00 Asia/Taipei' in units[p['session']+'-quiet.timer']
+    assert '10:53:00 Asia/Taipei' in units[p['session']+'-quiet.timer']
     for text in units.values():
         assert 'stop twquant-pilot-' not in text and 'disable --now twquant-pilot-' not in text
     assert '--root '+p['root'] in units[p['session']+'-collect.service']
@@ -72,6 +72,14 @@ def test_rendered_validation_jobs_are_single_session_and_have_deadline_cleanup()
 def test_final_validation_uses_the_same_research_memory_group():
     p=plan();units=module().render_units(p)
     assert 'Slice=twquant-pilot.slice' in units[p['session']+'-final.service']
+
+
+def test_validation_stops_reports_before_capture_and_excludes_them_from_finalization():
+    p=plan();units=module().render_units(p);unit=units[p['session']+'-final.service']
+    assert datetime.fromisoformat(p['quiet'])<datetime.fromisoformat(p['start'])
+    assert datetime.fromisoformat(p['preflight'])<datetime.fromisoformat(p['quiet'])-timedelta(seconds=45)
+    targets=p['session']+'-report.service '+p['session']+'-report.timer'
+    assert 'Conflicts='+targets in unit and 'After='+targets in unit
 
 
 def test_quiet_receipt_can_write_only_the_isolated_runtime_under_the_sandbox():
