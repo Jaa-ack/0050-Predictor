@@ -130,6 +130,16 @@ def test_checkpoint_service_is_bounded_and_uses_the_research_sqlite_backend():
     assert 'twquant-pilot-checkpoint.timer' in u['twquant-pilot-finalize.service']
 
 
+def test_journal_profile_separates_receipts_replay_and_local_archives():
+    u=module().units('/opt/twquant-pilot','twquant',['2026-11-18'],memory_max='640M')
+    assert '--receipt-journal' in u['twquant-pilot-collect.service']
+    assert 'OPENBLAS_NUM_THREADS=1' in u['twquant-pilot-forecast.service']
+    assert '--phase replay' in u['twquant-pilot-replay.service']
+    assert '2026-11-18 10:18:00' in u['twquant-pilot-replay.timer']
+    assert '2026-11-18 11:00:00' in u['twquant-pilot-archive.timer']
+    assert 'twquant-pilot-replay.timer' in u['twquant-pilot-finalize.service']
+
+
 def test_shared_host_stops_already_running_reports_before_forecast():
     generated=module().units('/opt/twquant-pilot','twquant',['2026-11-16'],memory_max='512M')
     service=generated['twquant-pilot-quiet.service']

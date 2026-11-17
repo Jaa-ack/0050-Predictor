@@ -88,3 +88,16 @@ def test_active_report_quiet_condition_is_bounded_to_declared_forecast_window(tm
     assert m.main(['--root',str(tmp_path),'--phase','report-quiet'])==1
     monkeypatch.setattr(m,'now',lambda:datetime(2026,11,15,9,58,tzinfo=tz))
     assert m.main(['--root',str(tmp_path),'--phase','report-quiet'])==1
+
+
+def test_journal_profile_launches_only_the_lightweight_receiver(tmp_path,monkeypatch):
+    m=module();setup(tmp_path);monkeypatch.setattr(m,'__file__',str(tmp_path/'resource_guard.py'))
+    (tmp_path/'receipt_journal.py').write_text('# trusted helper');clock=[datetime(2026,11,16,10,14,59,tzinfo=ZoneInfo('Asia/Taipei'))];calls=[];child=Child()
+    result=m.supervise(tmp_path,cloud_runtime=True,receipt_journal=True,clock=lambda:clock[0],sleep=lambda s:clock.__setitem__(0,clock[0]+timedelta(seconds=s)),launch=lambda args:calls.append(args) or child,free_bytes=lambda:10000)
+    assert calls[0][1]==str(tmp_path/'receipt_journal.py') and calls[0][-2:]==['--phase','capture']
+
+
+def test_failed_worker_propagates_a_nonzero_exit_status(tmp_path,monkeypatch):
+    m=module();setup(tmp_path)
+    monkeypatch.setattr(m,'supervise',lambda *a,**k:dict(state='worker_exited',worker_returncode=1))
+    assert m.main(['--root',str(tmp_path),'--phase','collect'])==1

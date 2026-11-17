@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 2026-11-17 — Durable receipts, daily working stores and local archives
+
+- Persisted frozen, allowlisted market messages to private32MiB receipt segments before indexed writes, with original timestamps, CRC checks, synchronized watermarks and conservative recovery of unclean tails. Removed the large RAM message queue; batches and receipt cursors commit together under WAL/FULL so replay remains idempotent.
+- Separated each day's acquisition/forecast database from the historical store. Retained causal background and equal-timestamp revisions, used the unchanged shared model and actual release seals, and merged after capture with conflict rejection for existing predictions/seals. Fixed historical seeding scans using the event-time index; no training universe, target, denominator or deadline changed.
+- Bounded indexed-consumer cache to64MiB within the existing640MiB slice, reserved publication writer time, limited consumer restarts and distinguished persisted backlog from RAM overflow while retaining the five-second lag gate. Deferred reports/backups until merge and retried due backups before10:30acceptance.
+- Added bounded10:18replay and11:00local gzip archives with32MiB parts, source/part SHA256 checks and restore verification. Existing backup/protocol archives totaled67985431compressed bytes and verified exactly. Supabase remains disabled per the user's choice; no provider data was uploaded or deleted.
+- Verified744Python tests,10frontend tests and secrets checks. Final isolated real-stream validation retained92294receipts/events with zero drops or remaining records,105subscriptions,53forecasts sealed0.049313seconds after the declared diagnostic decision, and separate complete60/300second observation windows. Earlier failed diagnostics and both failed formal sessions remain unchanged; midday validation does not guarantee opening-peak performance or75pctaccuracy.
+- Deployed four helpers and eight changed/new units, verified nine active timers, disabled intraday checkpoints, preserved formal records/frozen source and confirmed the original Telegram service remains healthy. The bounded November18–27schedule continues; no paid resources or orders were enabled.
+
 ## Unreleased — 2026-11-17 — Live failure diagnosis and checkpoint suspension
 
 - Inspected the actual session's journals, private acceptance/closeout receipts, storage and cgroup evidence. Found about20.96GiBfree disk, a44.339351second late publication, a100000message queue peak and775143dropped messages in the last saved worker heartbeat; these are incomplete operational counts, not exchange fill totals. Retained failed60/300second observation gates and all formal records.

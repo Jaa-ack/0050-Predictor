@@ -299,3 +299,52 @@ def test_daily_acceptance_cannot_pass_with_a_current_incident(tmp_path):
     observed=dict(samples=90,flow_samples=80,max_backlog=0,max_lag_seconds=0,unhealthy_seen=False,first_at=stamp.replace(hour=9,minute=30).isoformat(),last_at=stamp.replace(minute=16).isoformat(),max_poll_gap_seconds=31)
     m.daily_acceptance(tmp_path,p,stamp,view,{'daily_observations':{'2026-11-16':observed}},lambda *a:True)
     assert not json.loads((tmp_path/'daily_acceptance_2026-11-16.json').read_text())['passed']
+
+
+def test_durable_receipt_progress_prevents_destructive_restart_on_stale_metadata(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,9,45,tzinfo=TZ);view=healthy(stamp)
+    view.update(collector_at=stamp.replace(minute=40).isoformat(),receipt_progressing=True)
+    issues=m.assess(p,stamp,view)
+    assert not any(i.get('action')=='restart_collect' for i in issues)
+    assert any(i['code']=='collector_backlog' for i in issues)
+
+
+def test_pending_receipts_defer_reports_and_backup_without_losing_data(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,10,25,tzinfo=TZ);view=healthy(stamp)
+    view.update(materialization_pending=True,report_current=False,backup_current=False)
+    assert not any(i.get('action') in ('start_report','start_backup') for i in m.assess(p,stamp,view))
+    (tmp_path/'receipt_watermark.json').write_text('{"events_total":12}');(tmp_path/'materializer_status.json').write_text('{"events_total":1}')
+    assert m.backup(tmp_path,stamp=stamp)['state']=='receipts_pending'
+
+
+def test_durable_disk_backlog_is_judged_by_lag_instead_of_ram_capacity(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,9,45,tzinfo=TZ);view=healthy(stamp)
+    view.update(durable_receipts=True,collector_backlog=5000,last_event_ns=int((stamp.timestamp()-3)*1e9))
+    assert not any(i['code']=='collector_backlog' for i in m.assess(p,stamp,view))
+    view['last_event_ns']=int((stamp.timestamp()-6)*1e9)
+    assert any(i['code']=='collector_backlog' for i in m.assess(p,stamp,view))
+
+
+def test_daily_flow_keeps_the_same_lag_gate_for_persisted_receipts(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,9,45,tzinfo=TZ);view=healthy(stamp)
+    view.update(durable_receipts=True,collector_backlog=5000,last_event_ns=int((stamp.timestamp()-3)*1e9),shared_service_health='healthy')
+    state={};m.daily_acceptance(tmp_path,p,stamp,view,state,lambda *a:True)
+    m.daily_acceptance(tmp_path,p,stamp.replace(hour=10,minute=31),view,state,lambda *a:True)
+    result=json.loads((tmp_path/'daily_acceptance_2026-11-16.json').read_text())
+    assert result['checks']['data_flow_stable']
+
+
+def test_report_and_backup_wait_for_daily_data_merge(tmp_path):
+    m=module();(tmp_path/'receipt_watermark.json').write_text('{"day":"2026-11-18","session_mode":true,"events_total":50}')
+    (tmp_path/'materializer_status.json').write_text('{"date":"2026-11-18","events_total":50}')
+    assert m.receipts_pending(tmp_path)
+    (tmp_path/'session_merge_status.json').write_text('{"date":"2026-11-18","state":"complete","events_total":50}')
+    assert not m.receipts_pending(tmp_path)
+
+
+def test_finished_merge_triggers_backup_before_the_daily_acceptance_deadline(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,10,23,tzinfo=TZ);view=healthy(stamp)
+    view.update(backup_current=False,backup_active=False,materialization_pending=False)
+    assert any(i.get('action')=='start_backup' for i in m.assess(p,stamp,view))
+    view['materialization_pending']=True
+    assert not any(i['code']=='backup_missing' for i in m.assess(p,stamp,view))

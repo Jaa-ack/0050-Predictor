@@ -25,6 +25,7 @@ ACTIONS = {
     'start_report': ['start', 'twquant-pilot-report.service'],
     'start_backup': ['start', 'twquant-pilot-backup.service'],
     'start_preflight': ['start', 'twquant-pilot-preflight.service'],
+    'start_archive': ['start', 'twquant-pilot-archive.service'],
     'retire_monitor': ['disable', '--now', 'twquant-pilot-watchdog.timer'],
 }
 MESSAGES = {
@@ -46,6 +47,8 @@ MESSAGES = {
     'collector_closeout_incomplete': '採集窗口已結束，但收尾完成回執缺失、積壓未清空或有明確遺失；不宣稱全部資料已保存。',
     'wal_large': '研究WAL已超過512MiB，可能增加I/O與恢復成本；不在發報路徑強制整理或刪除WAL。',
     'checkpoint_failed': '有界WAL整理未完成或被中斷，下一個允許時段會再試；不刪資料、不改發布門檻。',
+    'receipt_pipeline_failed': '耐久收件或批次匯入發生錯誤；私人收件日誌保留，未提交資料不宣稱已匯入。',
+    'archive_failed': '本機壓縮歸檔尚未完成或驗證失敗；保留來源與既有備份，不刪除唯一副本。',
     'shared_service_unhealthy': '原Telegram容器的健康狀態異常或無法確認；研究監控不會擅自重啟原服務。',
     'daily_validation_failed': '當日盤中營運驗收未通過，私人逐項結果已保存；晚發、缺口及失敗分母保留。',
     'supervision_ready': '下一個宣告交易日的研究排程與Telegram通知通道已完成設定驗證；這不是盤中驗收通過或準確率達標通知。',
@@ -123,6 +126,17 @@ def report_wanted(root,protocol,stamp):
     return report_key(protocol,stamp) is not None and not report_current(root,protocol,stamp)
 
 
+def receipts_pending(root):
+    watermark=read_json(root/'receipt_watermark.json',{});durable=watermark.get('events_total',0)
+    imported=read_json(root/'materializer_status.json',{})
+    count=imported.get('events_total',0) if not watermark.get('session_mode') or watermark.get('day')==imported.get('date') else 0
+    if durable>count:return True
+    if watermark.get('session_mode'):
+        merged=read_json(root/'session_merge_status.json',{})
+        return merged.get('date')!=watermark.get('day') or merged.get('state')!='complete' or merged.get('events_total',0)<durable
+    return False
+
+
 def begin_report(root,protocol,stamp):
     private_json(root/'report_input.json',dict(at=stamp.isoformat(),fingerprint=report_fingerprint(root)))
 
@@ -150,6 +164,7 @@ def daily_acceptance(root,protocol,stamp,current,state,send):
         backlog=current.get('collector_backlog') or 0;observed['samples']+=1
         if stamp>=start+timedelta(seconds=120):
             observed['flow_samples']+=1;observed['max_backlog']=max(observed['max_backlog'],backlog)
+            observed['ram_backlog_high_seen']=observed.get('ram_backlog_high_seen',False) or (not current.get('durable_receipts') and backlog>=1024)
             if backlog:observed['max_lag_seconds']=max(observed['max_lag_seconds'],stamp.timestamp()-current.get('last_event_ns',0)/1e9)
         if current.get('shared_service_health')!='healthy':observed['unhealthy_seen']=True
     if stamp.strftime('%H:%M:%S')<'10:30:00':return
@@ -159,12 +174,14 @@ def daily_acceptance(root,protocol,stamp,current,state,send):
         delay=current.get('release_ns',0)/1e9-decision.timestamp() if current.get('release_ns') else None
         checks=dict(environment=all(current.get(k) for k in ['configured','source_matches','database_ok','ntp']),
             no_active_incidents=not current.get('active_incidents'),
+            materialization_current=not current.get('materialization_pending'),
+            receipts_complete=current.get('receipt_complete') is not False,
             preflight=current.get('preflight_current') is True,
             full_grid=current.get('predictions')==current.get('targets',53),publication_on_time=delay is not None and 0<=delay<=protocol.get('max_emission_lateness_seconds',1),
             both_windows_observed=current.get('critical_windows_observed') is True,no_recorded_gaps=current.get('gap_count')==0,
             capture_closeout=current.get('closeout_date')==day and current.get('closeout_state')=='day_collection_finished' and current.get('closeout_complete') is True and current.get('closeout_remaining')==0,
             backup=current.get('backup_current') is True,report=current.get('report_current') is True,
-            data_flow_stable=observed['flow_samples']>0 and observed['max_backlog']<1024 and observed['max_lag_seconds']<=5,
+            data_flow_stable=observed['flow_samples']>0 and not observed.get('ram_backlog_high_seen',observed['max_backlog']>=1024 and not current.get('durable_receipts')) and observed['max_lag_seconds']<=5,
             shared_service_stable=observed['samples']>0 and not observed['unhealthy_seen'],provider_ok=not current.get('fatal'))
         checks['monitoring_coverage']=(observed['samples']>=30 and bool(observed.get('first_at')) and bool(observed.get('last_at')) and age(observed.get('first_at'),start+timedelta(seconds=120))>=0
             and age(observed.get('last_at'),end)<=0 and observed.get('max_poll_gap_seconds',float('inf'))<=90)
@@ -201,6 +218,9 @@ def assess(protocol, stamp, snapshot):
     if snapshot.get('gap_count',0)>0:add('market_data_gaps')
     if snapshot.get('wal_bytes',0)>=512*1024**2:add('wal_large')
     if snapshot.get('checkpoint_error'):add('checkpoint_failed')
+    if snapshot.get('receipt_error'):add('receipt_pipeline_failed')
+    if snapshot.get('archive_expected') and not snapshot.get('archive_current'):
+        add('archive_failed','start_archive' if not low_disk and not snapshot.get('archive_active') and not snapshot.get('materialization_pending') else None)
     if start<=local<end+timedelta(seconds=150) and snapshot.get('shared_service_health') in ('unhealthy','starting','unavailable'):
         add('shared_service_unhealthy')
     if local.strftime('%H:%M:%S') >= '08:42:00' and not snapshot.get('preflight_current'):
@@ -209,17 +229,18 @@ def assess(protocol, stamp, snapshot):
     if start + timedelta(seconds=30) <= local < end and not low_disk and not snapshot.get('fatal'):
         backlog=snapshot.get('collector_backlog',0) or 0
         lag=local.timestamp()-snapshot.get('last_event_ns',0)/1e9
-        if local>=start+timedelta(seconds=120) and (backlog>=1024 or (backlog>0 and lag>5)):
+        if local>=start+timedelta(seconds=120) and ((backlog>=1024 and not snapshot.get('durable_receipts')) or (backlog>0 and lag>5)):
             add('collector_backlog')
         if not snapshot.get('collector_active'):
             add('collector_inactive', 'start_collect')
         elif age(snapshot.get('collector_at'), local) > 30:
-            add('collector_stalled', 'restart_collect')
+            if snapshot.get('receipt_progressing'):add('collector_backlog')
+            else:add('collector_stalled', 'restart_collect')
         elif local >= start + timedelta(seconds=120):
             if not snapshot.get('stream_ready'):
                 add('feed_not_ready', 'restart_collect')
             elif (local.timestamp() - snapshot.get('last_event_ns', 0) / 1e9) > 120:
-                add('market_data_stale', 'restart_collect')
+                add('market_data_stale', None if snapshot.get('receipt_progressing') else 'restart_collect')
     if local>=end+timedelta(seconds=150) and (snapshot.get('closeout_date')!=day or
             snapshot.get('closeout_state')!='day_collection_finished' or not snapshot.get('closeout_complete') or
             snapshot.get('closeout_remaining')!=0):add('collector_closeout_incomplete')
@@ -230,10 +251,12 @@ def assess(protocol, stamp, snapshot):
             add('forecast_missing', 'start_forecast' if can_start else None)
         elif not missing and snapshot['release_ns'] / 1e9 > decision.timestamp() + protocol.get('max_emission_lateness_seconds', 1):
             add('forecast_late')
-    if local.strftime('%H:%M:%S') >= '10:30:00' and not snapshot.get('backup_current') and not snapshot.get('backup_active'):
-        add('backup_missing', None if low_disk else 'start_backup')
+    if local.strftime('%H:%M:%S') >= '10:20:00' and not snapshot.get('backup_current') and not snapshot.get('backup_active'):
+        pending=snapshot.get('materialization_pending')
+        if not pending or local.strftime('%H:%M:%S')>='10:30:00':
+            add('backup_missing', None if low_disk or pending else 'start_backup')
     if local.strftime('%H:%M:%S') >= '13:50:00' and not snapshot.get('report_current'):
-        add('report_missing', 'start_report')
+        add('report_missing', None if snapshot.get('materialization_pending') else 'start_report')
     return issues
 
 
@@ -294,6 +317,14 @@ def snapshot(root, prefix, stamp):
     backup_state = read_json(root / 'backup_status.json', {})
     closeout=read_json(root/'collector_closeout.json',{})
     checkpoint=read_json(root/'checkpoint_status.json',{})
+    receipt_error=read_json(root/'receipt_error.json',{});archive_state=read_json(root/'archive_status.json',{})
+    profile=read_json(root/'capture_profile.json',{});receipt_progressing=False
+    database_root=root
+    session=root/'sessions'/stamp.date().isoformat()
+    if (profile.get('session_mode') or collector.get('session_mode')) and (session/'pilot.sqlite3').is_file() and not session.is_symlink():database_root=session
+    for segment in (root/'receipts').glob('????????.twqj'):
+        if segment.stem.isdigit() and not segment.is_symlink():
+            receipt_progressing=receipt_progressing or 0<=stamp.timestamp()-segment.stat().st_mtime<=30
     shared_health=None
     local=stamp.astimezone(TZ);day=local.date().isoformat()
     if day in protocol.get('dates',[]):
@@ -304,7 +335,7 @@ def snapshot(root, prefix, stamp):
                 health_probe=subprocess.run(['docker','--config',str(prefix/'docker-observer'),'inspect','--format={{.State.Health.Status}}','telegram-reminder-bot-1'],capture_output=True,text=True,timeout=3)
                 shared_health=health_probe.stdout.strip() if health_probe.returncode==0 and health_probe.stdout.strip() in ('healthy','unhealthy','starting') else 'unavailable'
             except (OSError,subprocess.TimeoutExpired):shared_health='unavailable'
-    try:wal_bytes=(root/'pilot.sqlite3-wal').stat().st_size
+    try:wal_bytes=(database_root/'pilot.sqlite3-wal').stat().st_size
     except FileNotFoundError:wal_bytes=0
     try:
         synced = subprocess.run(['timedatectl', 'show', '-p', 'NTPSynchronized', '--value'],
@@ -317,10 +348,15 @@ def snapshot(root, prefix, stamp):
                   collector_active=unit_active('collect'), collector_at=collector.get('at'),
                   stream_ready=collector.get('stream_ready', False), forecast_active=unit_active('forecast'),
                   collector_backlog=collector.get('backlog'),closeout_date=closeout.get('date'),
+                  durable_receipts=collector.get('runtime')=='cloud_journal_v3',
                   closeout_state=closeout.get('state'),closeout_complete=closeout.get('complete'),
                   closeout_remaining=closeout.get('remaining_messages'),
                   wal_bytes=wal_bytes,
                   shared_service_health=shared_health,checkpoint_error=checkpoint.get('date')==day and checkpoint.get('state')=='error',
+                  receipt_progressing=receipt_progressing,materialization_pending=receipts_pending(root),
+                  receipt_complete=closeout.get('receipt_complete'),receipt_error=receipt_error.get('at','').startswith(day),
+                  archive_expected=day>=profile.get('archive_from','9999') and local.strftime('%H:%M:%S')>='11:15:00',
+                  archive_current=archive_state.get('at','').startswith(day) and archive_state.get('state')=='complete',archive_active=unit_active('archive'),
                   backup_active=unit_active('backup'), targets=len(set(protocol.get('members', []) + ['0050', '1216', '2002', '2412', 'IX0001'])),
                   preflight_active=unit_active('preflight'),
                   preflight_current=probe.get('date') == stamp.date().isoformat() and probe.get('state') == 'verified',
@@ -329,7 +365,7 @@ def snapshot(root, prefix, stamp):
                   backup_current=backup_state.get('date') == stamp.date().isoformat() and backup_state.get('state') == 'complete',
                   complete=(root / 'cloud_complete').exists() and report.get('final') is True)
     try:
-        with sqlite3.connect((root / 'pilot.sqlite3').as_uri() + '?mode=ro', uri=True, timeout=2) as db:
+        with sqlite3.connect((database_root / 'pilot.sqlite3').as_uri() + '?mode=ro', uri=True, timeout=2) as db:
             row = db.execute('SELECT received_ns FROM events ORDER BY id DESC LIMIT 1').fetchone()
             result['last_event_ns'] = row[0] if row else 0
             day = stamp.date().isoformat()
@@ -415,6 +451,7 @@ def backup(root, *, stamp=None, free_bytes=None):
         return result
     if day not in protocol['dates'] or stamp.strftime('%H:%M:%S') < '10:16:00':
         return dict(state='outside_backup_window')
+    if receipts_pending(root):return finish('receipts_pending')
     with (root / 'backup.lock').open('a') as lock:
         try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError: return dict(state='already_running')

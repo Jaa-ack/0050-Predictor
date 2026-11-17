@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 TZ=ZoneInfo('Asia/Taipei')
 PREFIX=Path('/opt/twquant-pilot')
-KINDS=('collect','forecast','report','preflight','backup','watchdog','quiet','checkpoint','fault','report-stress','final','safety')
+KINDS=('collect','forecast','report','preflight','backup','watchdog','quiet','checkpoint','replay','archive','fault','report-stress','final','safety')
 
 
 def make_plan(start):
@@ -99,8 +99,9 @@ def render_units(plan):
                 first=datetime.fromisoformat(plan['preflight'])+timedelta(minutes=1)
                 timing='OnCalendar='+first.strftime('%Y-%m-%d %H:%M:%S')+' Asia/Taipei\nOnUnitInactiveSec=30s'
             else:
-                key={'collect':'start','checkpoint':'start','forecast':'decision','report':'start','preflight':'preflight','backup':'backup','quiet':'quiet'}[kind]
+                key={'collect':'start','checkpoint':'start','forecast':'decision','report':'start','preflight':'preflight','backup':'backup','quiet':'quiet','replay':'end','archive':'end'}[kind]
                 value=datetime.fromisoformat(plan[key])
+                if kind in ('replay','archive'):value+=timedelta(minutes=3 if kind=='replay' else 45)
                 if kind=='forecast':value-=timedelta(minutes=1)
                 if kind=='report':value+=timedelta(minutes=5)
                 timing='OnCalendar='+value.strftime('%Y-%m-%d %H:%M:%S')+' Asia/Taipei'
@@ -168,7 +169,8 @@ def backup_integrity(path):
 
 
 def forecast_receipt(root,day):
-    with sqlite3.connect((root/'pilot.sqlite3').as_uri()+'?mode=ro',uri=True,timeout=5) as db:
+    daily=root/'sessions'/day/'pilot.sqlite3'
+    with sqlite3.connect((daily if daily.exists() else root/'pilot.sqlite3').as_uri()+'?mode=ro',uri=True,timeout=5) as db:
         rows=[x[0] for x in db.execute('select row from predictions where day=? order by ticker',(day,))]
         released=db.execute('select at_ns from releases where day=?',(day,)).fetchone()
     result=dict(at=stamp().isoformat(),count=len(rows),rows_sha256=hashlib.sha256('\n'.join(rows).encode()).hexdigest(),
@@ -211,10 +213,10 @@ def run_phase(plan,phase):
         value=quiet_evidence(quiet,report,now=stamp(),monotonic_now=time.monotonic())
         receipt(root,'quiet_observed.json',value);return value
     if phase in ('restore','cleanup'):
-        kinds=['collect','forecast','report','preflight','backup','quiet','checkpoint','fault','report-stress','final']
+        kinds=['collect','forecast','report','preflight','backup','quiet','checkpoint','replay','archive','fault','report-stress','final']
         if phase=='cleanup':kinds+=['watchdog','safety']
         execute(['systemctl','disable','--now',*[session+'-'+k+'.timer' for k in kinds]])
-        execute(['systemctl','stop',*[session+'-'+k+'.service' for k in ['collect','forecast','report','checkpoint']]])
+        execute(['systemctl','stop',*[session+'-'+k+'.service' for k in ['collect','forecast','report','checkpoint','replay','archive']]])
         if plan.get('formal_report_was_active'):execute(['systemctl','start','twquant-pilot-report.timer'])
         result=dict(state='restored',at=stamp().isoformat(),formal_report_timer_restored=bool(plan.get('formal_report_was_active')))
         receipt(root,'restoration.json',result);return result

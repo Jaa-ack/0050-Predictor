@@ -28,8 +28,9 @@ def units(prefix,user,dates,*,memory_max=None):
         success='OnSuccess=twquant-pilot-finalize.service\n' if mode=='report' else ''
         guard=(f'ExecCondition={prefix}/venv/bin/python {prefix}/resource_guard.py --root {runtime} --phase report-ready\n'
             if mode=='report' else '')
-        command=(f'{prefix}/venv/bin/python {prefix}/resource_guard.py --root {runtime} --phase collect --cloud-runtime'
+        command=(f'{prefix}/venv/bin/python {prefix}/resource_guard.py --root {runtime} --phase collect --cloud-runtime --receipt-journal'
             if mode=='collect' and memory_max else f'{prefix}/venv/bin/python -m twquant.live_market --root {runtime} --mode {mode}')
+        if mode=='forecast' and memory_max:command=f'{prefix}/venv/bin/python {prefix}/receipt_journal.py --root {runtime} --source {prefix}/app/src/twquant --sessions --phase forecast'
         result[f'twquant-pilot-{mode}.service']=f'''[Unit]
 Description=Bounded 0050 paper pilot {mode}
 After=network-online.target time-sync.target
@@ -50,6 +51,10 @@ Environment=TZ=Asia/Taipei
 Environment=PYTHONPATH={prefix}/app/src
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=LOKY_MAX_CPU_COUNT=1
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=OMP_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=NUMEXPR_NUM_THREADS=1
 Environment=TWQUANT_PILOT_MANAGED=0
 {guard}ExecStart={command}
 {post}TimeoutStartSec={'300' if mode=='report' else 'infinity'}
@@ -82,6 +87,7 @@ Unit=twquant-pilot-{mode}.service
 WantedBy=timers.target
 '''
     checkpoint_retire=('ExecStart=/bin/systemctl disable --now twquant-pilot-checkpoint.timer\nExecStart=/bin/systemctl stop twquant-pilot-checkpoint.service\n' if memory_max else '')
+    journal_retire=('ExecStart=/bin/systemctl disable --now twquant-pilot-replay.timer twquant-pilot-archive.timer\nExecStart=/bin/systemctl stop twquant-pilot-replay.service twquant-pilot-archive.service\n' if memory_max else '')
     result['twquant-pilot-finalize.service']=f'''[Unit]
 Description=Retire only this completed paper pilot
 ConditionPathExists={prefix}/runtime/cloud_complete
@@ -96,7 +102,7 @@ ExecStart=/bin/systemctl stop twquant-pilot-backup.service
 ExecStart=/bin/systemctl disable --now twquant-pilot-preflight.timer
 ExecStart=/bin/systemctl stop twquant-pilot-preflight.service
 ExecStart=/bin/systemctl disable --now twquant-pilot-quiet.timer
-{checkpoint_retire}ExecStart=/bin/systemctl start --no-block twquant-pilot-watchdog.service
+{checkpoint_retire}{journal_retire}ExecStart=/bin/systemctl start --no-block twquant-pilot-watchdog.service
 '''
     if memory_max:
         result['twquant-pilot.slice']=f'''[Unit]
@@ -132,6 +138,39 @@ ReadWritePaths={prefix}/runtime
 '''
         calendar='\n'.join(f'OnCalendar={d} 09:30:00 Asia/Taipei' for d in dates)
         result['twquant-pilot-checkpoint.timer']='[Unit]\nDescription=Bounded WAL maintenance\n[Timer]\n'+calendar+'\nOnUnitInactiveSec=60s\nAccuracySec=1s\nUnit=twquant-pilot-checkpoint.service\n[Install]\nWantedBy=timers.target\n'
+        for kind,clock in [('replay','10:18:00'),('archive','11:00:00')]:
+            command=(f'{prefix}/venv/bin/python {prefix}/receipt_journal.py --root {prefix}/runtime --source {prefix}/app/src/twquant --sessions --phase replay'
+                if kind=='replay' else f'/usr/bin/python3 {prefix}/archive.py --root {prefix}/runtime')
+            result[f'twquant-pilot-{kind}.service']=f'''[Unit]
+Description=Private pilot {kind} after capture
+ConditionPathExists={prefix}/runtime/protocol.json
+ConditionPathExists=!{prefix}/runtime/cloud_complete
+[Service]
+Type=oneshot
+User={user}
+Slice=twquant-pilot.slice
+Nice=15
+WorkingDirectory={prefix}
+UMask=0077
+Environment=TZ=Asia/Taipei
+Environment=PYTHONPATH={prefix}/app/src
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=OMP_NUM_THREADS=1
+ExecStart={command}
+TimeoutStartSec=600
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={prefix}/runtime
+StandardOutput=append:{prefix}/runtime/{kind}.log
+StandardError=append:{prefix}/runtime/{kind}.log
+'''
+            calendar='\n'.join(f'OnCalendar={d} {clock} Asia/Taipei' for d in dates)
+            repeat='OnUnitInactiveSec=60s\n' if kind=='replay' else ''
+            result[f'twquant-pilot-{kind}.timer']='[Unit]\nDescription=Private pilot '+kind+'\n[Timer]\n'+calendar+'\n'+repeat+'AccuracySec=1s\nUnit=twquant-pilot-'+kind+'.service\n[Install]\nWantedBy=timers.target\n'
     return result
 
 
@@ -257,6 +296,8 @@ install -m 0644 "$bundle_dir/resource_guard.py" '{prefix}/resource_guard.py'
 install -m 0644 "$bundle_dir/collector_runtime.py" '{prefix}/collector_runtime.py'
 install -m 0644 "$bundle_dir/watchdog.py" '{prefix}/watchdog.py'
 install -m 0644 "$bundle_dir/checkpoint.py" '{prefix}/checkpoint.py'
+install -m 0644 "$bundle_dir/receipt_journal.py" '{prefix}/receipt_journal.py'
+install -m 0644 "$bundle_dir/archive.py" '{prefix}/archive.py'
 for file in "$bundle_dir"/units/*; do install -m 0644 "$file" /etc/systemd/system/; done
 systemctl daemon-reload
 echo 'Installed inactive units. No credentials copied; no timer enabled.'
@@ -295,6 +336,8 @@ def prepare(workspace,root,output,*,prefix='/opt/twquant-pilot',user='twquant-pi
     sqlite_source=Path(__file__).with_name('cloud_pilot_sqlite.py').read_text()
     collector_source=Path(__file__).with_name('cloud_pilot_collector.py').read_text()
     checkpoint_source=Path(__file__).with_name('cloud_pilot_checkpoint.py').read_text()
+    journal_source=Path(__file__).with_name('cloud_receipt_journal.py').read_text()
+    archive_source=Path(__file__).with_name('cloud_pilot_archive.py').read_text()
     metadata=[workspace/'pyproject.toml',workspace/'README.md',workspace/'docs/licenses/TRADER_SKILLS_MIT.txt']
     if any(not p.is_file() or p.is_symlink() for p in metadata):raise ValueError('Public package metadata is missing')
     if output.exists():raise ValueError('Deployment preparation requires fresh output')
@@ -312,6 +355,8 @@ def prepare(workspace,root,output,*,prefix='/opt/twquant-pilot',user='twquant-pi
     (output/'sqlite_tuning.py').write_text(sqlite_source)
     (output/'collector_runtime.py').write_text(collector_source)
     (output/'checkpoint.py').write_text(checkpoint_source)
+    (output/'receipt_journal.py').write_text(journal_source)
+    (output/'archive.py').write_text(archive_source)
     result=dict(source_sha256=digest.hexdigest(),archive_sha256=archive_sha,files=manifest,dates=protocol['dates'],
         prefix=prefix,service_user=user,sdk_version='2.4.0',sdk_platform='linux_x86_64',sdk_sha256=SDK_SHA256,
         python_command=python,bootstrap_pip_version='26.0',bootstrap_pip_sha256=PIP_SHA256,

@@ -37,7 +37,7 @@ def write_status(root,result):
     os.replace(name,root/'cloud_collect_status.json')
 
 
-def supervise(root,*,clock=now,sleep=time.sleep,launch=subprocess.Popen,free_bytes=None,cloud_runtime=False):
+def supervise(root,*,clock=now,sleep=time.sleep,launch=subprocess.Popen,free_bytes=None,cloud_runtime=False,receipt_journal=False):
     root=Path(root).resolve();protocol=json.loads((root/'protocol.json').read_text())
     local=clock().astimezone(TZ);day=local.date().isoformat()
     start=datetime.fromisoformat(day+'T'+protocol.get('collection_start','08:45:00')).replace(tzinfo=TZ)
@@ -51,7 +51,11 @@ def supervise(root,*,clock=now,sleep=time.sleep,launch=subprocess.Popen,free_byt
     with (root/'cloud_collect.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:return finish('collector_already_running')
-        if cloud_runtime:
+        if receipt_journal:
+            entry=Path(__file__).resolve().with_name('receipt_journal.py')
+            if not entry.is_file() or entry.is_symlink():raise ValueError('Trusted receipt journal is missing')
+            arguments=[sys.executable,str(entry),'--root',str(root),'--source',str(entry.parent/'app/src/twquant'),'--sessions','--phase','capture']
+        elif cloud_runtime:
             entry=Path(__file__).resolve().with_name('collector_runtime.py')
             if not entry.is_file() or entry.is_symlink():raise ValueError('Trusted cloud collector is missing')
             arguments=[sys.executable,str(entry),'--root',str(root)]
@@ -79,6 +83,7 @@ def main(argv=None):
     parser.add_argument('--root',required=True,type=Path)
     parser.add_argument('--phase',choices=('collect','report-ready','report-quiet','report-record'),required=True)
     parser.add_argument('--cloud-runtime',action='store_true')
+    parser.add_argument('--receipt-journal',action='store_true')
     args=parser.parse_args(argv)
     if args.phase in ('report-ready','report-record'):
         path=Path(__file__).with_name('watchdog.py')
@@ -86,13 +91,13 @@ def main(argv=None):
         spec=importlib.util.spec_from_file_location('report_ops',path);ops=importlib.util.module_from_spec(spec);spec.loader.exec_module(ops)
         protocol=json.loads((args.root/'protocol.json').read_text());stamp=now()
         if args.phase=='report-record':ops.record_report(args.root,protocol,stamp);return 0
-        if not report_ready(protocol,stamp) or not ops.report_wanted(args.root,protocol,stamp):return 1
+        if not report_ready(protocol,stamp) or ops.receipts_pending(args.root) or not ops.report_wanted(args.root,protocol,stamp):return 1
         ops.begin_report(args.root,protocol,stamp);return 0
     if args.phase in ('report-ready','report-quiet'):
         protocol=json.loads((args.root/'protocol.json').read_text())
         ready=report_ready(protocol,now())
         return 0 if ready==(args.phase=='report-ready') else 1
-    result=supervise(args.root,cloud_runtime=args.cloud_runtime);print(json.dumps(result));return 0
+    result=supervise(args.root,cloud_runtime=args.cloud_runtime,receipt_journal=args.receipt_journal);print(json.dumps(result));return int(result.get('worker_returncode',0) not in (0,None))
 
 
 if __name__=='__main__':raise SystemExit(main())
