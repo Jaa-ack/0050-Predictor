@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-11-17 — Live failure diagnosis and checkpoint suspension
+
+- Inspected the actual session's journals, private acceptance/closeout receipts, storage and cgroup evidence. Found about20.96GiBfree disk, a44.339351second late publication, a100000message queue peak and775143dropped messages in the last saved worker heartbeat; these are incomplete operational counts, not exchange fill totals. Retained failed60/300second observation gates and all formal records.
+- Confirmed repeated45second checkpoint timeouts and one150second collector stop timeout followed by systemd SIGKILL. Cumulative cgroup pressure/limit counters support resource contention but do not isolate today's contributions or prove OOM;oom_killremained zero. Disabled only the repeatedly timed-out checkpoint timer/service as containment, keeping the seven existing research timers and original Telegram service active.
+- Verified376064events, identical full forecast hashes and both publication seals before/after suspension, with successful database quick checks. Existing backup and Telegram incident/daily-failure delivery receipts were confirmed. No WAL deletion, threshold relaxation, source/model changes or retroactive score repair occurred; live throughput remains unresolved.
+- Evaluated official Supabase free quotas,50MBfile limits and private storage. Documented asynchronous compressed archives as a possible future integration, with local hot data, retry/integrity/restore checks and quota planning. No Supabase account changes, credential collection, uploads or paid resources were introduced.
+- Re-ran68cloud operations Python tests,10frontend tests and the working-tree secrets audit. Updated operational documentation to distinguish prior preparation from the failed live session and the currently suspended eighth timer.
+
 ## Unreleased — 2026-11-17 — Market-session preparation and retained daily acceptance
 
 - Cached reports by observed storage/protocol fingerprints, matured session and final-report status, checking that inputs remain unchanged during evaluation. Aligned supervision with this cache while preserving full capture/drain report deferral and required new-session/final evaluations.
