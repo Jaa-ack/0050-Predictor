@@ -42,6 +42,44 @@ def test_low_space_preserves_sources_and_existing_archive(tmp_path):
     assert source.read_bytes()==b'keep'
 
 
+def test_sealed_receipts_can_be_compacted_and_replayed_without_losing_identity(tmp_path,monkeypatch):
+    from test_cloud_receipt_journal import module as receipt_module,SOURCE
+    from test_live_pilot import protocol,stamp,message
+    m=module();receipt=receipt_module();day='2026-11-16'
+    (tmp_path/'protocol.json').write_text(json.dumps(protocol()))
+    journal=receipt.Journal(tmp_path,SOURCE,day=day,session_mode=True)
+    for i in range(30):journal.event(message('trades',-2,serial=i),stamp(-1))
+    journal.close();original=journal.path;body=original.read_bytes()
+    result=m.archive(tmp_path,receipts_only=True,free_bytes=lambda:10**10)
+    assert result['state']=='complete' and not (tmp_path/'archive_status.json').exists()
+    result=m.compact_archived_receipts(tmp_path)
+    assert result['released_bytes']==len(body) and not original.exists()
+    opened=[];original_open=receipt.gzip.open
+    def tracked(*args,**kwargs):opened.append(args[0]);return original_open(*args,**kwargs)
+    monkeypatch.setattr(receipt.gzip,'open',tracked)
+    consumer=receipt.Materializer(tmp_path,SOURCE,session_day=day,full_history=True)
+    try:
+        while consumer.step(max_records=1)['records']:pass
+        assert consumer.store.db.execute('select count(*) from events').fetchone()[0]==30
+    finally:consumer.close()
+    assert len(opened)==1,'Sequential replay must reuse a gzip stream instead of decompressing every prefix again'
+    restarted=receipt.Journal(tmp_path,SOURCE,day=day,session_mode=True)
+    assert restarted.prior_events==30 and restarted.sequence==2
+    restarted.close()
+
+
+def test_corrupt_archive_never_replaces_the_original_receipt(tmp_path):
+    from test_cloud_receipt_journal import module as receipt_module,SOURCE
+    from test_live_pilot import protocol,stamp,message
+    m=module();receipt=receipt_module();(tmp_path/'protocol.json').write_text(json.dumps(protocol()))
+    journal=receipt.Journal(tmp_path,SOURCE);journal.event(message('trades',-2),stamp(-1));journal.close()
+    body=journal.path.read_bytes();result=m.archive(tmp_path,receipts_only=True,free_bytes=lambda:10**10)
+    folder=next(tmp_path/p for p in result['archives'] if 'twqj-' in p)
+    next(folder.glob('part-*')).write_bytes(b'corrupt')
+    with pytest.raises(ValueError,match='archive'):m.compact_archived_receipts(tmp_path)
+    assert journal.path.read_bytes()==body
+
+
 def test_archive_waits_for_the_full_history_instead_of_only_a_projection(tmp_path):
     m=module();(tmp_path/'protocol.json').write_text('{}');(tmp_path/'backups').mkdir();(tmp_path/'backups/latest.sqlite3').write_bytes(b'previous')
     (tmp_path/'receipt_watermark.json').write_text('{"day":"2026-11-18","session_mode":true,"events_total":50}')
@@ -57,6 +95,15 @@ def test_archive_waits_for_a_backup_of_the_rebuilt_day(tmp_path):
     result=m.archive(tmp_path,free_bytes=lambda:10**10)
     assert result['state']=='backup_pending'
     (tmp_path/'backup_status.json').write_text('{"date":"2026-11-18","state":"complete"}')
+    assert m.archive(tmp_path,free_bytes=lambda:10**10)['state']=='complete'
+
+
+def test_verified_daily_backup_can_be_archived_before_global_history_merge(tmp_path):
+    m=module();(tmp_path/'protocol.json').write_text('{}');(tmp_path/'backups').mkdir();(tmp_path/'backups/latest.sqlite3').write_bytes(b'day snapshot')
+    (tmp_path/'capture_profile.json').write_text('{"pipeline_from":"2026-11-18"}')
+    (tmp_path/'receipt_watermark.json').write_text('{"day":"2026-11-18","session_mode":true,"events_total":50}')
+    (tmp_path/'day_history_status.json').write_text('{"date":"2026-11-18","state":"complete","events_total":50}')
+    (tmp_path/'backup_status.json').write_text('{"date":"2026-11-18","state":"complete","scope":"daily_session"}')
     assert m.archive(tmp_path,free_bytes=lambda:10**10)['state']=='complete'
 
 

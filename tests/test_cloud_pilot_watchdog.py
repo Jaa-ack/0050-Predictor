@@ -44,6 +44,86 @@ def test_report_recovery_waits_for_backup_without_consuming_restart_attempts(tmp
     assert {'code':'report_missing','action':'start_report'} in m.assess(p,stamp,view)
 
 
+def test_interrupted_backup_cleanup_preserves_published_data_and_respects_the_lock(tmp_path):
+    import fcntl
+    m=module();directory=tmp_path/'backups';directory.mkdir()
+    (directory/'latest.sqlite3').write_bytes(b'published')
+    orphan=directory/'snapshot.deadbeef.sqlite3';orphan.write_bytes(b'partial')
+    (directory/'other.sqlite3').write_bytes(b'keep')
+    with (tmp_path/'backup.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        assert m.clean_incomplete_backups(tmp_path)['state']=='busy'
+        assert orphan.exists()
+    result=m.clean_incomplete_backups(tmp_path)
+    assert result['removed_bytes']==7 and not orphan.exists()
+    assert (directory/'latest.sqlite3').read_bytes()==b'published'
+    assert (directory/'other.sqlite3').exists()
+
+
+def test_daily_backup_uses_complete_day_store_instead_of_growing_global_history(tmp_path):
+    m=module();p=protocol(tmp_path);day=p['dates'][0];path=tmp_path/'sessions'/day;path.mkdir(parents=True)
+    for folder,value in [(tmp_path,'historical'),(path,'today')]:
+        with sqlite3.connect(folder/'pilot.sqlite3') as db:
+            db.execute('create table marker(value text)');db.execute('insert into marker values(?)',(value,))
+    (tmp_path/'capture_profile.json').write_text(json.dumps(dict(pipeline_from=day)))
+    (tmp_path/'day_history_status.json').write_text(json.dumps(dict(date=day,state='complete',events_total=3)))
+    (tmp_path/'receipt_watermark.json').write_text(json.dumps(dict(day=day,session_mode=True,events_total=3)))
+    result=m.backup(tmp_path,stamp=datetime(2026,11,16,10,20,tzinfo=TZ),free_bytes=lambda:10**10)
+    assert result['state']=='complete' and result['scope']=='daily_session'
+    with sqlite3.connect(tmp_path/'backups/latest.sqlite3') as db:
+        assert db.execute('select value from marker').fetchone()[0]=='today'
+
+
+def test_running_pipeline_does_not_spend_recovery_attempts_on_queued_heavy_work(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,14,tzinfo=TZ);view=healthy(stamp)
+    view.update(maintenance_active=True,backup_current=False,report_current=False,archive_expected=True,archive_current=False,archive_active=False)
+    issues=m.assess(p,stamp,view)
+    assert all(i['action'] is None for i in issues if i['code'] in ('backup_missing','report_missing','archive_failed'))
+
+
+def test_failed_pipeline_has_a_fixed_notice_and_resumes_only_outside_capture(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,14,tzinfo=TZ);view=healthy(stamp)
+    view.update(maintenance_error=True,maintenance_retryable=True,maintenance_active=False)
+    assert {'code':'maintenance_failed','action':'start_replay'} in m.assess(p,stamp,view)
+    assert 'maintenance_failed' in m.MESSAGES
+    assert {'code':'maintenance_failed','action':None} in m.assess(p,stamp.replace(hour=9,minute=59),view)
+
+
+def test_report_fingerprint_tracks_protocol_values_not_json_whitespace(tmp_path):
+    m=module();p=protocol(tmp_path);before=m.report_fingerprint(tmp_path)
+    (tmp_path/'protocol.json').write_text(json.dumps(p,indent=2))
+    assert m.report_fingerprint(tmp_path)==before
+
+
+def test_live_verification_is_separate_from_pending_maintenance_without_relaxing_total_pass(tmp_path):
+    m=module();p=protocol(tmp_path);day='2026-11-16';at=datetime(2026,11,16,10,30,tzinfo=TZ)
+    observed=dict(samples=90,flow_samples=86,max_backlog=0,max_lag_seconds=1,unhealthy_seen=False,
+        first_at='2026-11-16T09:30:00+08:00',last_at='2026-11-16T10:16:00+08:00',max_poll_gap_seconds=30)
+    state=dict(daily_observations={day:observed});view=healthy(at)
+    view.update(receipt_complete=True,critical_windows_observed=True,gap_count=0,closeout_date=day,
+        closeout_state='day_collection_finished',closeout_complete=True,closeout_remaining=0,
+        materialization_pending=True,backup_current=False,report_current=False,active_incidents=['backup_missing'])
+    notices=[];m.daily_acceptance(tmp_path,p,at,view,state,lambda code,fields:notices.append(code) or True)
+    path=tmp_path/('daily_acceptance_'+day+'.json');value=json.loads(path.read_text());original=path.read_bytes()
+    assert value['core_live_passed'] and value['maintenance_pending'] and not value['passed']
+    assert notices==['maintenance_delayed']
+    view.update(materialization_pending=False,backup_current=True,report_current=True,active_incidents=[])
+    m.daily_acceptance(tmp_path,p,at+timedelta(hours=1),view,state,lambda *a:True)
+    assert path.read_bytes()==original
+
+
+def test_checkpoint_does_not_expire_a_report_of_the_same_committed_generation(tmp_path):
+    import hashlib
+    m=module();p=protocol(tmp_path);day='2026-11-16';at=datetime(2026,11,16,10,18,tzinfo=TZ)
+    (tmp_path/'capture_profile.json').write_text(json.dumps(dict(pipeline_from=day)))
+    (tmp_path/'session_merge_status.json').write_text(json.dumps(dict(date=day,state='complete',events_total=1,protocol=hashlib.sha256(json.dumps(p,sort_keys=True).encode()).hexdigest())))
+    db=sqlite3.connect(tmp_path/'pilot.sqlite3');db.execute('pragma journal_mode=WAL');db.execute('pragma wal_autocheckpoint=0');db.execute('create table evidence(value integer)');db.execute('insert into evidence values(1)');db.commit()
+    m.begin_report(tmp_path,p,at);(tmp_path/'evaluation.json').write_text(json.dumps(dict(as_of=at.isoformat(),final=False)))
+    assert m.record_report(tmp_path,p,at)['cached']
+    db.execute('pragma wal_checkpoint(TRUNCATE)');db.close()
+    assert m.report_current(tmp_path,p,at)
+
+
 def test_watchdog_restarts_stale_collector_but_retains_provider_fatal_and_low_disk(tmp_path):
     m = module(); p = protocol(tmp_path)
     stamp = datetime(2026, 11, 16, 9, 35, tzinfo=TZ)

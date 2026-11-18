@@ -95,7 +95,7 @@ def render_units(plan):
         name=name.replace('twquant-pilot-',plan['session']+'-')
         text=text.replace('twquant-pilot-',plan['session']+'-').replace(str(PREFIX/'runtime'),plan['root'])
         if plan.get('helper_prefix'):
-            for helper in ['resource_guard.py','receipt_journal.py','archive.py','checkpoint.py']:
+            for helper in ['resource_guard.py','receipt_journal.py','archive.py','checkpoint.py','pipeline.py','watchdog.py']:
                 text=text.replace(str(PREFIX/helper),str(Path(plan['helper_prefix'])/helper))
         kind=name.removeprefix(plan['session']+'-').split('.')[0]
         if name.endswith('.timer'):

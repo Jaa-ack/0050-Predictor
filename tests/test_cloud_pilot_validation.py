@@ -73,7 +73,7 @@ def test_candidate_validation_uses_staged_helpers_without_replacing_formal_code(
     m=module();p=dict(plan(),helper_prefix=str(m.PREFIX/'projection-candidate'))
     units=m.render_units(p)
     assert '11:22:00 Asia/Taipei' in units[p['session']+'-forecast.timer']
-    for kind,name in [('collect','resource_guard.py'),('forecast','receipt_journal.py'),('replay','receipt_journal.py'),('archive','archive.py')]:
+    for kind,name in [('collect','resource_guard.py'),('forecast','receipt_journal.py'),('replay','pipeline.py'),('archive','pipeline.py')]:
         assert p['helper_prefix']+'/'+name in units[p['session']+'-'+kind+'.service']
     with pytest.raises(ValueError):m.validate_plan(dict(p,helper_prefix='/tmp/untrusted'))
 

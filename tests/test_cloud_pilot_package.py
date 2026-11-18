@@ -103,7 +103,7 @@ def test_shared_host_profile_limits_only_pilot_memory_and_uses_supervisor(tmp_pa
     collector=(out/'units/twquant-pilot-collect.service').read_text()
     assert 'Slice=twquant-pilot.slice' in collector and 'resource_guard.py' in collector
     assert (out/'resource_guard.py').exists()
-    assert 'report-ready' in (out/'units/twquant-pilot-report.service').read_text()
+    assert '--phase condition' in (out/'units/twquant-pilot-report.service').read_text()
     assert '--cloud-runtime' in collector
     assert (out/'collector_runtime.py').is_file()
 
@@ -118,7 +118,7 @@ def test_shared_host_collection_and_report_yield_cpu_without_delaying_forecast()
 def test_cloud_collector_has_time_to_drain_and_report_quiet_begins_before_capture():
     generated=module().units('/opt/twquant-pilot','twquant',['2026-11-16'],memory_max='640M')
     assert 'TimeoutStopSec=150' in generated['twquant-pilot-collect.service']
-    assert '2026-11-16 09:28:00 Asia/Taipei' in generated['twquant-pilot-quiet.timer']
+    assert '2026-11-16 08:38:00 Asia/Taipei' in generated['twquant-pilot-quiet.timer']
 
 
 def test_checkpoint_service_is_bounded_and_uses_the_research_sqlite_backend():
@@ -146,17 +146,35 @@ def test_journal_profile_separates_receipts_replay_and_local_archives():
     assert 'TimeoutStartSec=1800' in u['twquant-pilot-backup.service']
     assert 'Slice=twquant-pilot.slice' in u['twquant-pilot-backup.service']
     assert 'MemoryMax=640M' in u['twquant-pilot-backup.service']
-    assert 'ExecStartPre=+/bin/systemctl stop twquant-pilot-report.service' in u['twquant-pilot-backup.service']
+    assert 'ExecStartPre=' not in u['twquant-pilot-backup.service']
     assert 'After=network-online.target time-sync.target twquant-pilot-backup.service' in u['twquant-pilot-report.service']
+
+
+def test_heavy_jobs_share_the_same_resumable_worker_without_restart_loops():
+    u=module().units('/opt/twquant-pilot','twquant',['2026-11-18'],memory_max='640M')
+    for kind in ['replay','backup','archive','report']:
+        text=u['twquant-pilot-'+kind+'.service']
+        assert '/pipeline.py --root /opt/twquant-pilot/runtime' in text
+        assert '--phase '+kind in text and '--phase condition' in text
+        assert 'Restart=on-failure' not in text
+        assert 'ExecStartPre=' not in text
+        assert 'Environment=PYTHONPATH=/opt/twquant-pilot/app/src' in text
+        assert 'Environment=OPENBLAS_NUM_THREADS=1' in text
+        assert 'ExecStartPost=' not in text
+    for kind in ['replay','backup','archive','report']:
+        assert 'twquant-pilot-'+kind+'.service' in u['twquant-pilot-quiet.service']
+    assert '08:38:00 Asia/Taipei' in u['twquant-pilot-quiet.timer']
+    assert '--phase quiet-condition' in u['twquant-pilot-quiet.service']
+    assert '--phase cleanup' in u['twquant-pilot-quiet.service']
 
 
 def test_shared_host_stops_already_running_reports_before_forecast():
     generated=module().units('/opt/twquant-pilot','twquant',['2026-11-16'],memory_max='512M')
     service=generated['twquant-pilot-quiet.service']
-    assert '--phase report-quiet' in service
+    assert '--phase quiet-condition' in service
     assert 'ExecStart=/bin/systemctl stop twquant-pilot-report.service' in service
     assert 'twquant-pilot-collect.service' not in service and 'twquant-pilot-forecast.service' not in service
-    assert '2026-11-16 09:28:00 Asia/Taipei' in generated['twquant-pilot-quiet.timer']
+    assert '2026-11-16 08:38:00 Asia/Taipei' in generated['twquant-pilot-quiet.timer']
     assert 'twquant-pilot-quiet.timer' in generated['twquant-pilot-finalize.service']
 
 

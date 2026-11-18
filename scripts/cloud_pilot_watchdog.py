@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from datetime import datetime, timedelta
 import fcntl
 import hashlib
@@ -26,6 +27,7 @@ ACTIONS = {
     'start_backup': ['start', 'twquant-pilot-backup.service'],
     'start_preflight': ['start', 'twquant-pilot-preflight.service'],
     'start_archive': ['start', 'twquant-pilot-archive.service'],
+    'start_replay': ['start', 'twquant-pilot-replay.service'],
     'retire_monitor': ['disable', '--now', 'twquant-pilot-watchdog.timer'],
 }
 MESSAGES = {
@@ -49,8 +51,10 @@ MESSAGES = {
     'checkpoint_failed': '有界WAL整理未完成或被中斷，下一個允許時段會再試；不刪資料、不改發布門檻。',
     'receipt_pipeline_failed': '耐久收件或批次匯入發生錯誤；私人收件日誌保留，未提交資料不宣稱已匯入。',
     'archive_failed': '本機壓縮歸檔尚未完成或驗證失敗；保留來源與既有備份，不刪除唯一副本。',
+    'maintenance_failed': '收件後的順序維護未完成，已保留原資料與階段狀態；只會在採集保護時段之外有限續跑。',
     'shared_service_unhealthy': '原Telegram容器的健康狀態異常或無法確認；研究監控不會擅自重啟原服務。',
     'daily_validation_failed': '當日盤中營運驗收未通過，私人逐項結果已保存；晚發、缺口及失敗分母保留。',
+    'maintenance_delayed': '盤中採集與發布條件已通過，但10:30時資料整理、備份或報告尚未全部完成；原整體驗收仍保留為未通過，順序維護會在保護時段之外續跑。',
     'supervision_ready': '下一個宣告交易日的研究排程與Telegram通知通道已完成設定驗證；這不是盤中驗收通過或準確率達標通知。',
     'forecast_missing': '10:00完整預測或發布封印缺失。補發不會倒填時間，也不會取得準時信用。',
     'forecast_late': '預測發布逾時；原始發布時間及扣分保留。',
@@ -103,13 +107,18 @@ def report_key(protocol,stamp):
 
 
 def report_fingerprint(root):
+    protocol=read_json(root/'protocol.json');digest=hashlib.sha256(json.dumps(protocol,sort_keys=True).encode()).hexdigest()
+    merged=read_json(root/'session_merge_status.json',{})
+    if (pipeline_enabled(root,merged.get('date','')) and merged.get('state')=='complete'
+            and merged.get('protocol')==digest and (root/'pilot.sqlite3').is_file()):
+        return dict(protocol=digest,generation={key:merged.get(key) for key in ['date','events_total','at']})
     files={}
     for name in ['pilot.sqlite3','pilot.sqlite3-wal']:
         try:stat=(root/name).stat()
         except FileNotFoundError:continue
         if name.endswith('-wal') and stat.st_size==0:continue
         files[name]=[stat.st_size,stat.st_mtime_ns]
-    return dict(files=files,protocol=hashlib.sha256((root/'protocol.json').read_bytes()).hexdigest())
+    return dict(files=files,protocol=digest)
 
 
 def report_current(root,protocol,stamp):
@@ -124,6 +133,35 @@ def report_current(root,protocol,stamp):
 
 def report_wanted(root,protocol,stamp):
     return report_key(protocol,stamp) is not None and not report_current(root,protocol,stamp)
+
+
+def pipeline_enabled(root,day):
+    first=read_json(Path(root)/'capture_profile.json',{}).get('pipeline_from')
+    return bool(isinstance(first,str) and first and day>=first)
+
+
+def day_history_ready(root,day):
+    ready=read_json(Path(root)/'day_history_status.json',{});watermark=read_json(Path(root)/'receipt_watermark.json',{})
+    return ready.get('date')==day and ready.get('state')=='complete' and watermark.get('day')==day and ready.get('events_total',0)>=watermark.get('events_total',0)
+
+
+def maintenance_busy(root):
+    path=Path(root)/'maintenance.lock'
+    if path.is_symlink():return True
+    if not path.exists():return False
+    with path.open('a') as lock:
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:return True
+    return False
+
+
+def maintenance_protected(protocol,stamp):
+    day=stamp.date().isoformat()
+    if day not in protocol['dates']:return False
+    start=datetime.fromisoformat(day+'T'+protocol.get('collection_start','09:30:00')).replace(tzinfo=TZ)
+    end=datetime.fromisoformat(day+'T'+protocol.get('collection_end','10:15:00')).replace(tzinfo=TZ)
+    preflight=datetime.fromisoformat(day+'T08:38:00').replace(tzinfo=TZ)
+    return min(preflight,start-timedelta(minutes=2))<=stamp<end+timedelta(seconds=150)
 
 
 def receipts_pending(root):
@@ -185,10 +223,14 @@ def daily_acceptance(root,protocol,stamp,current,state,send):
             shared_service_stable=observed['samples']>0 and not observed['unhealthy_seen'],provider_ok=not current.get('fatal'))
         checks['monitoring_coverage']=(observed['samples']>=30 and bool(observed.get('first_at')) and bool(observed.get('last_at')) and age(observed.get('first_at'),start+timedelta(seconds=120))>=0
             and age(observed.get('last_at'),end)<=0 and observed.get('max_poll_gap_seconds',float('inf'))<=90)
-        result=dict(at=stamp.isoformat(),date=day,scope='daily_operations_not_accuracy_claim',checks=checks,passed=all(checks.values()),publication_delay_seconds=delay,observations=observed.copy())
+        core={k:v for k,v in checks.items() if k not in ('no_active_incidents','materialization_current','backup','report')}
+        post_codes={'backup_missing','report_missing','archive_failed','maintenance_failed'}
+        core['no_critical_incidents']=not(set(current.get('active_incidents',[]))-post_codes)
+        maintenance_pending=not all(checks[k] for k in ['materialization_current','backup','report']) or bool(set(current.get('active_incidents',[]))&post_codes)
+        result=dict(at=stamp.isoformat(),date=day,scope='daily_operations_not_accuracy_claim',checks=checks,passed=all(checks.values()),publication_delay_seconds=delay,observations=observed.copy(),core_live_checks=core,core_live_passed=all(core.values()),maintenance_pending=maintenance_pending)
         private_json(path,result)
     notified=state.setdefault('daily_notifications',{})
-    if not result['passed'] and not notified.get(day):notified[day]=send('daily_validation_failed',{})
+    if not result['passed'] and not notified.get(day):notified[day]=send('maintenance_delayed' if result.get('core_live_passed') and result.get('maintenance_pending') else 'daily_validation_failed',{})
 
 
 def assess(protocol, stamp, snapshot):
@@ -215,12 +257,15 @@ def assess(protocol, stamp, snapshot):
     start = datetime.fromisoformat(day + 'T' + protocol.get('collection_start', '09:30:00')).replace(tzinfo=TZ)
     end = datetime.fromisoformat(day + 'T' + protocol.get('collection_end', '10:15:00')).replace(tzinfo=TZ)
     decision = datetime.fromisoformat(day + 'T' + protocol.get('prediction_time', '10:00:00')).replace(tzinfo=TZ)
+    if snapshot.get('maintenance_error'):
+        resume=snapshot.get('maintenance_retryable') and not snapshot.get('maintenance_active') and not maintenance_protected(protocol,local)
+        add('maintenance_failed','start_replay' if resume else None)
     if snapshot.get('gap_count',0)>0:add('market_data_gaps')
     if snapshot.get('wal_bytes',0)>=512*1024**2:add('wal_large')
     if snapshot.get('checkpoint_error'):add('checkpoint_failed')
     if snapshot.get('receipt_error'):add('receipt_pipeline_failed')
     if snapshot.get('archive_expected') and not snapshot.get('archive_current'):
-        add('archive_failed','start_archive' if not low_disk and not snapshot.get('archive_active') and not snapshot.get('materialization_pending') else None)
+        add('archive_failed','start_archive' if not low_disk and not snapshot.get('archive_active') and not snapshot.get('materialization_pending') and not snapshot.get('maintenance_active') else None)
     if start<=local<end+timedelta(seconds=150) and snapshot.get('shared_service_health') in ('unhealthy','starting','unavailable'):
         add('shared_service_unhealthy')
     if local.strftime('%H:%M:%S') >= '08:42:00' and not snapshot.get('preflight_current'):
@@ -254,9 +299,9 @@ def assess(protocol, stamp, snapshot):
     if local.strftime('%H:%M:%S') >= '10:20:00' and not snapshot.get('backup_current') and not snapshot.get('backup_active'):
         pending=snapshot.get('materialization_pending')
         if not pending or local.strftime('%H:%M:%S')>='10:30:00':
-            add('backup_missing', None if low_disk or pending else 'start_backup')
+            add('backup_missing', None if low_disk or pending or snapshot.get('maintenance_active') else 'start_backup')
     if local.strftime('%H:%M:%S') >= '13:50:00' and not snapshot.get('report_current'):
-        add('report_missing', None if snapshot.get('materialization_pending') or snapshot.get('backup_active') else 'start_report')
+        add('report_missing', None if snapshot.get('materialization_pending') or snapshot.get('backup_active') or snapshot.get('maintenance_active') else 'start_report')
     return issues
 
 
@@ -318,6 +363,7 @@ def snapshot(root, prefix, stamp):
     closeout=read_json(root/'collector_closeout.json',{})
     checkpoint=read_json(root/'checkpoint_status.json',{})
     receipt_error=read_json(root/'receipt_error.json',{});archive_state=read_json(root/'archive_status.json',{})
+    maintenance=read_json(root/'pipeline_state.json',{})
     profile=read_json(root/'capture_profile.json',{});receipt_progressing=False
     database_root=root
     session=root/'sessions'/stamp.date().isoformat()
@@ -350,6 +396,7 @@ def snapshot(root, prefix, stamp):
     result = dict(configured=(prefix / '.env').is_file() and any((prefix / '.secrets/fubon').glob('*')),
                   source_matches=digest.hexdigest() == protocol.get('source_sha256'), ntp=synced,
                   free_bytes=shutil.disk_usage(root).free, fatal=(root / 'fatal.json').exists(),
+                  maintenance_active=maintenance_busy(root),maintenance_error=maintenance.get('state')=='failed',maintenance_retryable=maintenance.get('retryable',False),
                   collector_active=unit_active('collect'), collector_at=collector.get('at'),
                   stream_ready=collector.get('stream_ready', False), forecast_active=unit_active('forecast'),
                   collector_backlog=collector.get('backlog'),closeout_date=closeout.get('date'),
@@ -450,21 +497,51 @@ def check(root, *, prefix=Path('/opt/twquant-pilot'), clock=now, inspect=None, c
     return dict(state='healthy' if not pending else 'incidents', codes=sorted(pending), at=stamp.isoformat())
 
 
-def backup(root, *, stamp=None, free_bytes=None):
+def _discard_snapshots(directory):
+    if directory.is_symlink():raise ValueError('unsafe_backup_path')
+    count=0;size=0
+    for path in directory.glob('snapshot.*.sqlite3'):
+        if path.is_symlink() or not path.is_file() or path.stat().st_nlink!=1:continue
+        size+=path.stat().st_size;path.unlink();count+=1
+        for suffix in ['-journal','-wal','-shm']:
+            side=path.with_name(path.name+suffix)
+            if side.is_file() and not side.is_symlink():size+=side.stat().st_size;side.unlink()
+    return dict(state='complete',removed_files=count,removed_bytes=size)
+
+
+def clean_incomplete_backups(root):
+    root=Path(root)
+    with (root/'backup.lock').open('a') as lock:
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:return dict(state='busy',removed_files=0,removed_bytes=0)
+        return _discard_snapshots(root/'backups')
+
+
+def backup(root, *, stamp=None, free_bytes=None,session_day=None):
     root = Path(root).resolve(); stamp = (stamp or now()).astimezone(TZ)
-    protocol = read_json(root / 'protocol.json'); day = stamp.date().isoformat()
+    protocol = read_json(root / 'protocol.json'); day = session_day or stamp.date().isoformat()
     def finish(state, **extra):
         result = dict(state=state, date=day, at=stamp.isoformat(), **extra)
         private_json(root / 'backup_status.json', result)
         return result
-    if day not in protocol['dates'] or stamp.strftime('%H:%M:%S') < '10:16:00':
+    if day not in protocol['dates'] or stamp<datetime.fromisoformat(day+'T10:16:00').replace(tzinfo=TZ):
         return dict(state='outside_backup_window')
-    if receipts_pending(root):return finish('receipts_pending')
+    daily=pipeline_enabled(root,day)
+    if (daily and not day_history_ready(root,day)) or (not daily and receipts_pending(root)):return finish('receipts_pending')
     with (root / 'backup.lock').open('a') as lock:
         try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError: return dict(state='already_running')
-        database = root / 'pilot.sqlite3'
-        size = sum(p.stat().st_size for p in [database, root / 'pilot.sqlite3-wal'] if p.exists())
+        directory=root/'backups'
+        if directory.is_symlink():return finish('unsafe_backup_path')
+        _discard_snapshots(directory)
+        database=(root/'sessions'/day if daily else root)/'pilot.sqlite3'
+        if daily and not database.exists():
+            previous=read_json(root/'backup_status.json',{});snapshot=directory/'latest.sqlite3'
+            if previous.get('date')==day and previous.get('state')=='complete' and previous.get('scope')=='daily_session' and snapshot.is_file() and not snapshot.is_symlink():
+                stat=snapshot.stat()
+                if previous.get('size_bytes')==stat.st_size and previous.get('snapshot_mtime_ns')==stat.st_mtime_ns:return dict(previous,cached=True)
+        if database.is_symlink() or database.parent.is_symlink() or not database.is_file():return finish('unsafe_backup_path')
+        size = sum(p.stat().st_size for p in [database,database.with_name(database.name+'-wal')] if p.exists())
         available = free_bytes or (lambda: shutil.disk_usage(root).free)
         if available() < size + protocol.get('minimum_free_bytes', RESERVE):
             return finish('insufficient_space')
@@ -477,15 +554,15 @@ def backup(root, *, stamp=None, free_bytes=None):
             def progress(*_):
                 if time.monotonic() > deadline or available() < protocol.get('minimum_free_bytes', RESERVE):
                     raise RuntimeError('backup_budget_reached')
-            with sqlite3.connect(database.as_uri() + '?mode=ro', uri=True, timeout=3) as source:
-                with sqlite3.connect(temporary) as destination:
+            with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True, timeout=3)) as source:
+                with closing(sqlite3.connect(temporary)) as destination:
                     source.backup(destination, pages=256, progress=progress, sleep=.01)
                     if destination.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
                         raise RuntimeError('backup_integrity_failed')
             with temporary.open('rb') as f: os.fsync(f.fileno())
             temporary.chmod(0o600)
             os.replace(temporary, directory / 'latest.sqlite3')
-            return finish('complete', size_bytes=(directory / 'latest.sqlite3').stat().st_size)
+            return finish('complete', size_bytes=(directory / 'latest.sqlite3').stat().st_size,snapshot_mtime_ns=(directory/'latest.sqlite3').stat().st_mtime_ns,scope='daily_session' if daily else 'canonical_history')
         except Exception:
             return finish('backup_failed')
         finally:
@@ -517,11 +594,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True, type=Path)
     parser.add_argument('--prefix', type=Path, default=Path('/opt/twquant-pilot'))
-    parser.add_argument('--phase', choices=('check', 'backup', 'preflight', 'notify-ready'), default='check')
+    parser.add_argument('--phase', choices=('check', 'backup', 'preflight', 'notify-ready','cleanup'), default='check')
     args = parser.parse_args(argv)
     os.umask(0o077)
     try:
-        if args.phase == 'backup': result = backup(args.root)
+        if args.phase == 'cleanup':result=clean_incomplete_backups(args.root)
+        elif args.phase == 'backup': result = backup(args.root)
         elif args.phase == 'preflight': result = preflight(args.root,args.prefix)
         elif args.phase == 'notify-ready': result = dict(notified=send_notice(args.prefix, 'ready', {}))
         else:

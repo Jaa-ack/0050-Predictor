@@ -244,3 +244,50 @@ def test_forecast_preloads_before_waiting_for_the_frozen_entry_window(tmp_path,m
     result=m.forecast_session(root,SOURCE)
     assert result['state']=='forecast_recorded'
     assert events==[('loaded',stamp(-170)),('forecast',stamp(-60))]
+
+
+def test_global_merge_uses_only_standard_library_and_restores_query_indexes(tmp_path):
+    m=module();root=setup_root(tmp_path/'pilot');journal=m.Journal(root,SOURCE,day=DAY,session_mode=True)
+    journal.event(message('trades',-2),stamp(-1));journal.close()
+    full=m.Materializer(root,SOURCE,session_day=DAY,full_history=True);drain(full);full.finish_history();full.close()
+    code='''import importlib.util,json,sys
+s=importlib.util.spec_from_file_location('receipt',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+m.merge_session(sys.argv[2],sys.argv[3],sys.argv[4])
+print(json.dumps([n for n in ['pandas','numpy','scipy','sklearn'] if n in sys.modules]))
+'''
+    result=subprocess.run([sys.executable,'-c',code,m.__file__,str(root),str(SOURCE),DAY],capture_output=True,text=True)
+    assert result.returncode==0
+    assert json.loads(result.stdout)==[]
+    import sqlite3
+    with sqlite3.connect(root/'pilot.sqlite3') as db:
+        assert db.execute('select count(*) from events').fetchone()[0]==1
+        assert {'event_lookup','receipt_lookup'}<={r[1] for r in db.execute('pragma index_list(events)')}
+    modified=(root/'pilot.sqlite3').stat().st_mtime_ns
+    assert m.merge_session(root,SOURCE,DAY).get('cached')
+    assert (root/'pilot.sqlite3').stat().st_mtime_ns==modified
+
+
+def test_failed_global_merge_keeps_indexes_available_for_next_capture(tmp_path):
+    import sqlite3
+    m=module();root=setup_root(tmp_path/'pilot');global_store=PilotStore(root,protocol());global_store.emit(stamp());global_store.close()
+    journal=m.Journal(root,SOURCE,day=DAY,session_mode=True);journal.event(message('trades',-2),stamp(-1));journal.close()
+    daily=m.Materializer(root,SOURCE,session_day=DAY,full_history=True);drain(daily)
+    daily.store.db.execute('insert into predictions values(?,?,?)',(DAY,'2330','{"conflict":true}'));daily.store.db.commit();daily.finish_history();daily.close()
+    with pytest.raises(ValueError,match='prediction_conflict'):m.merge_session(root,SOURCE,DAY)
+    with sqlite3.connect(root/'pilot.sqlite3') as db:
+        assert {'event_lookup','receipt_lookup'}<={r[1] for r in db.execute('pragma index_list(events)')}
+        assert db.execute('select count(*) from events').fetchone()[0]==0
+
+
+def test_bulk_history_builds_digest_uniqueness_once_and_keeps_first_receipt(tmp_path):
+    m=module();root=setup_root(tmp_path/'pilot');journal=m.Journal(root,SOURCE,day=DAY,session_mode=True)
+    item=message('trades',-2)
+    journal.event(item,stamp(-1));journal.event(item,stamp(-.1));journal.close()
+    consumer=m.Materializer(root,SOURCE,session_day=DAY,full_history=True)
+    try:
+        assert not any(row[2] for row in consumer.store.db.execute('pragma index_list(events)'))
+        drain(consumer);consumer.finish_history()
+        assert consumer.store.db.execute('select count(*) from events').fetchone()[0]==1
+        assert consumer.store.db.execute('select received_ns from events').fetchone()[0]==m.ns(stamp(-1))
+        assert any(row[2] for row in consumer.store.db.execute('pragma index_list(events)'))
+    finally:consumer.close()

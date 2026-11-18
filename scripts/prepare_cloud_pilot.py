@@ -114,7 +114,7 @@ Description=Memory budget for this pilot only
 MemoryAccounting=true
 MemoryMax={memory_max}
 '''
-    result.update(operations_units(prefix,user,dates,quiet_clock='09:28:00' if memory_max else '09:58:00'))
+    result.update(operations_units(prefix,user,dates,quiet_clock='08:38:00' if memory_max else '09:58:00'))
     if memory_max:
         result['twquant-pilot-checkpoint.service']=f'''[Unit]
 Description=Bounded PASSIVE WAL checkpoint outside protected forecast windows
@@ -173,6 +173,25 @@ StandardError=append:{prefix}/runtime/{kind}.log
             calendar='\n'.join(f'OnCalendar={d} {clock} Asia/Taipei' for d in dates)
             repeat='OnUnitInactiveSec=60s\n' if kind=='replay' else ''
             result[f'twquant-pilot-{kind}.timer']='[Unit]\nDescription=Private pilot '+kind+'\n[Timer]\n'+calendar+'\n'+repeat+'AccuracySec=1s\nUnit=twquant-pilot-'+kind+'.service\n[Install]\nWantedBy=timers.target\n'
+    if memory_max:
+        for kind in ['replay','backup','archive','report']:
+            name='twquant-pilot-'+kind+'.service';text=result[name]
+            command=f'{prefix}/venv/bin/python {prefix}/pipeline.py --root {prefix}/runtime --source {prefix}/app/src/twquant --phase {kind}'
+            condition=f'ExecCondition=/usr/bin/python3 {prefix}/pipeline.py --root {prefix}/runtime --source {prefix}/app/src/twquant --phase condition\n'
+            text=re.sub(r'^ExecCondition=.*\n','',text,flags=re.M)
+            text=re.sub(r'^ExecStartPre=.*\n','',text,flags=re.M)
+            text=re.sub(r'^ExecStartPost=.*\n','',text,flags=re.M)
+            text=re.sub(r'^ExecStart=.*$',condition+'ExecStart='+command,text,flags=re.M)
+            text=re.sub(r'^Restart=.*$','Restart=no',text,flags=re.M)
+            text=re.sub(r'^TimeoutStartSec=.*$','TimeoutStartSec=1800',text,flags=re.M)
+            text=re.sub(r'^RuntimeMaxSec=.*$','RuntimeMaxSec=1800',text,flags=re.M)
+            for key,value in [('PYTHONPATH',prefix+'/app/src'),('OPENBLAS_NUM_THREADS','1'),('OMP_NUM_THREADS','1'),('LOKY_MAX_CPU_COUNT','1')]:
+                if 'Environment='+key+'=' not in text:text=text.replace('[Service]\n','[Service]\nEnvironment='+key+'='+value+'\n',1)
+            if 'OnSuccess=' not in text:text=text.replace('[Unit]\n','[Unit]\nOnSuccess=twquant-pilot-finalize.service\n',1)
+            result[name]=text
+        result['twquant-pilot-quiet.service']=result['twquant-pilot-quiet.service'].replace('stop twquant-pilot-report.service','stop twquant-pilot-report.service twquant-pilot-replay.service twquant-pilot-backup.service twquant-pilot-archive.service')
+        result['twquant-pilot-quiet.service']=re.sub(r'^ExecCondition=.*$',f'ExecCondition=/usr/bin/python3 {prefix}/pipeline.py --root {prefix}/runtime --source {prefix}/app/src/twquant --phase quiet-condition',result['twquant-pilot-quiet.service'],flags=re.M)
+        result['twquant-pilot-quiet.service']+=f'\nReadWritePaths={prefix}/runtime\nExecStartPost=/usr/bin/python3 {prefix}/watchdog.py --root {prefix}/runtime --prefix {prefix} --phase cleanup\n'
     return result
 
 
@@ -302,6 +321,7 @@ install -m 0644 "$bundle_dir/watchdog.py" '{prefix}/watchdog.py'
 install -m 0644 "$bundle_dir/checkpoint.py" '{prefix}/checkpoint.py'
 install -m 0644 "$bundle_dir/receipt_journal.py" '{prefix}/receipt_journal.py'
 install -m 0644 "$bundle_dir/archive.py" '{prefix}/archive.py'
+install -m 0644 "$bundle_dir/pipeline.py" '{prefix}/pipeline.py'
 for file in "$bundle_dir"/units/*; do install -m 0644 "$file" /etc/systemd/system/; done
 systemctl daemon-reload
 echo 'Installed inactive units. No credentials copied; no timer enabled.'
@@ -342,6 +362,7 @@ def prepare(workspace,root,output,*,prefix='/opt/twquant-pilot',user='twquant-pi
     checkpoint_source=Path(__file__).with_name('cloud_pilot_checkpoint.py').read_text()
     journal_source=Path(__file__).with_name('cloud_receipt_journal.py').read_text()
     archive_source=Path(__file__).with_name('cloud_pilot_archive.py').read_text()
+    pipeline_source=Path(__file__).with_name('cloud_pilot_pipeline.py').read_text()
     metadata=[workspace/'pyproject.toml',workspace/'README.md',workspace/'docs/licenses/TRADER_SKILLS_MIT.txt']
     if any(not p.is_file() or p.is_symlink() for p in metadata):raise ValueError('Public package metadata is missing')
     if output.exists():raise ValueError('Deployment preparation requires fresh output')
@@ -361,6 +382,7 @@ def prepare(workspace,root,output,*,prefix='/opt/twquant-pilot',user='twquant-pi
     (output/'checkpoint.py').write_text(checkpoint_source)
     (output/'receipt_journal.py').write_text(journal_source)
     (output/'archive.py').write_text(archive_source)
+    (output/'pipeline.py').write_text(pipeline_source)
     result=dict(source_sha256=digest.hexdigest(),archive_sha256=archive_sha,files=manifest,dates=protocol['dates'],
         prefix=prefix,service_user=user,sdk_version='2.4.0',sdk_platform='linux_x86_64',sdk_sha256=SDK_SHA256,
         python_command=python,bootstrap_pip_version='26.0',bootstrap_pip_sha256=PIP_SHA256,

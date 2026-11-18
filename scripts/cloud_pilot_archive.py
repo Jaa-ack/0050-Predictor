@@ -4,6 +4,7 @@ No network requests or deletion of captured data. Remote storage stays disabled.
 """
 from __future__ import annotations
 import argparse
+from contextlib import ExitStack
 from datetime import datetime
 import fcntl
 import gzip
@@ -108,21 +109,25 @@ def restore_archive(folder,destination):
     finally:temporary.unlink(missing_ok=True)
 
 
-def archive(root,*,part_bytes=32*1024**2,free_bytes=None):
+def archive(root,*,part_bytes=32*1024**2,free_bytes=None,receipts_only=False):
     if not 1024<=part_bytes<=32*1024**2:raise ValueError('archive_part_limit_invalid')
     root=Path(root);directory=root/'archives'
     if directory.is_symlink():raise ValueError('archive_directory_untrusted')
     protocol=json.loads((root/'protocol.json').read_text());reserve=protocol.get('minimum_free_bytes',4*1024**3)
     try:watermark=json.loads((root/'receipt_watermark.json').read_text())
     except (OSError,ValueError):watermark={}
-    if watermark.get('session_mode'):
-        try:merged=json.loads((root/'session_merge_status.json').read_text())
+    if watermark.get('session_mode') and not receipts_only:
+        try:profile=json.loads((root/'capture_profile.json').read_text())
+        except (OSError,ValueError):profile={}
+        pipeline=bool(profile.get('pipeline_from') and watermark.get('day','')>=profile['pipeline_from'])
+        marker='day_history_status.json' if pipeline else 'session_merge_status.json'
+        try:merged=json.loads((root/marker).read_text())
         except (OSError,ValueError):merged={}
         if merged.get('date')!=watermark.get('day') or merged.get('state')!='complete' or merged.get('events_total',0)<watermark.get('events_total',0):
             return dict(state='receipts_pending',archives=[],remote_enabled=False)
         try:backup_state=json.loads((root/'backup_status.json').read_text())
         except (OSError,ValueError):backup_state={}
-        if backup_state.get('date')!=watermark.get('day') or backup_state.get('state')!='complete':
+        if backup_state.get('date')!=watermark.get('day') or backup_state.get('state')!='complete' or (pipeline and backup_state.get('scope')!='daily_session'):
             return dict(state='backup_pending',archives=[],remote_enabled=False)
     available=free_bytes or (lambda:shutil.disk_usage(root).free)
     if available()<reserve:return dict(state='storage_reserve_reached',archives=[],remote_enabled=False)
@@ -132,15 +137,23 @@ def archive(root,*,part_bytes=32*1024**2,free_bytes=None):
         except BlockingIOError:return dict(state='already_running',archives=[],remote_enabled=False)
         inputs=[]
         backup=root/'backups/latest.sqlite3'
-        if backup.is_file():inputs.append(backup)
+        if backup.is_file() and not receipts_only:inputs.append(backup)
+        compacted=[]
         for seal in sorted((root/'receipts').glob('*.seal.json')):
             data=root/'receipts'/seal.name.replace('.seal.json','.twqj')
             if data.is_file():inputs.extend([data,seal])
-        if inputs:inputs.append(root/'protocol.json')
+            elif data.with_name(data.name+'.gz').is_file():compacted.append((data,seal));inputs.append(seal)
+        if inputs or compacted:inputs.append(root/'protocol.json')
         index_path=directory/'index.json'
         try:index=json.loads(index_path.read_text())
         except (OSError,ValueError):index={}
         result=[]
+        for data,seal in compacted:
+            cached=index.get(str(data.relative_to(root)),{});folder=cached.get('directory','')
+            if not re.fullmatch(r'[A-Za-z0-9_.-]+-[a-f0-9]{24}',folder):raise ValueError('archive_compacted_source_missing')
+            manifest=check_parts(directory/folder);sealed=json.loads(seal.read_text());compressed=data.with_name(data.name+'.gz')
+            if manifest['source_sha256']!=sealed.get('sha256') or len(manifest['parts'])!=1 or compressed.is_symlink() or digest_file(compressed)!=manifest['parts'][0]['sha256']:raise ValueError('archive_compacted_source_invalid')
+            result.append(str((directory/folder).relative_to(root)))
         for source in inputs:
             if source.is_symlink():raise ValueError('archive_source_untrusted')
             before=source.stat()
@@ -171,8 +184,39 @@ def archive(root,*,part_bytes=32*1024**2,free_bytes=None):
             finally:
                 if parts.handle:parts.handle.close()
                 if staging.exists():shutil.rmtree(staging)
-        value=dict(state='complete',at=datetime.now(TZ).isoformat(),archives=result,remote_enabled=False)
-        private_json(root/'archive_status.json',value);return value
+        value=dict(state='complete',at=datetime.now(TZ).isoformat(),archives=result,remote_enabled=False,scope='receipts' if receipts_only else 'daily_backup_and_receipts')
+        private_json(root/('receipt_archive_status.json' if receipts_only else 'archive_status.json'),value);return value
+
+
+def compact_archived_receipts(root):
+    """Replace sealed raw files with verified, directly replayable gzip links."""
+    root=Path(root);released=0;count=0
+    with ExitStack() as stack:
+        for name in ['collector.lock','receipt_consumer.lock','archive.lock']:
+            lock=stack.enter_context((root/name).open('a'))
+            try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:return dict(state='busy',released_bytes=0,compacted_segments=0)
+        directory=root/'archives';index=json.loads((directory/'index.json').read_text())
+        for seal in sorted((root/'receipts').glob('*.seal.json')):
+            data=seal.with_name(seal.name.replace('.seal.json','.twqj'));sealed=json.loads(seal.read_text())
+            if not sealed.get('complete') or not data.exists():continue
+            if data.is_symlink() or seal.is_symlink():raise ValueError('archive_source_untrusted')
+            cached=index.get(str(data.relative_to(root)),{});name=cached.get('directory','')
+            if not re.fullmatch(r'[A-Za-z0-9_.-]+-[a-f0-9]{24}',name):raise ValueError('archive_receipt_missing')
+            folder=directory/name;manifest=check_parts(folder)
+            if len(manifest['parts'])!=1:continue
+            if manifest['source_sha256']!=sealed.get('sha256') or manifest['source_size_bytes']!=data.stat().st_size or digest_file(data)!=manifest['source_sha256']:raise ValueError('archive_source_changed')
+            verify_archive(folder)
+            compressed=data.with_name(data.name+'.gz');part=folder/manifest['parts'][0]['name']
+            if compressed.exists() or compressed.is_symlink():
+                if compressed.is_symlink() or digest_file(compressed)!=manifest['parts'][0]['sha256']:raise ValueError('archive_compacted_source_invalid')
+            else:os.link(part,compressed)
+            fd=os.open(data.parent,os.O_RDONLY)
+            try:
+                os.fsync(fd);size=data.stat().st_size;data.unlink();os.fsync(fd)
+            finally:os.close(fd)
+            released+=size;count+=1
+    return dict(state='complete',released_bytes=released,compacted_segments=count)
 
 
 def main():

@@ -6,9 +6,10 @@ Forecasting loads scientific dependencies; full historical indexing is deferred.
 from __future__ import annotations
 import argparse
 import ast
-from contextlib import closing
+from contextlib import closing,contextmanager
 from datetime import datetime,timedelta,timezone
 import fcntl
+import gzip
 import hashlib
 import json
 import math
@@ -85,6 +86,13 @@ def definitions(path,names):
     return ast.Module(body=nodes,type_ignores=[])
 
 
+def schema_statements(source):
+    tree=definitions(Path(source)/'live_pilot.py',['PilotStore'])
+    schemas=[n.args[0].value for n in ast.walk(tree) if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=='executescript' and n.args and isinstance(n.args[0],ast.Constant)]
+    if len(schemas)!=1:raise ValueError('journal_projection_schema_changed')
+    return [s.strip() for s in schemas[0].split(';') if s.strip()]
+
+
 class FrozenAdapter:
     """Run the exact frozen validation body against a row-capture connection."""
     def __init__(self,source,protocol):
@@ -133,6 +141,22 @@ def read_frame(handle,limit):
     except ValueError:raise ValueError('journal_frame_invalid') from None
 
 
+def receipt_paths(directory):
+    directory=Path(directory);names=set()
+    for path in [*directory.glob('*.twqj'),*directory.glob('*.twqj.gz')]:
+        if path.is_symlink():raise ValueError('journal_segment_untrusted')
+        name=path.name.removesuffix('.gz')
+        if not Path(name).stem.isdigit():raise ValueError('journal_segment_invalid')
+        names.add(name)
+    return [directory/name for name in sorted(names)]
+
+
+def open_receipt(path):
+    path=Path(path);actual=path if path.exists() else path.with_name(path.name+'.gz')
+    if actual.is_symlink():raise ValueError('journal_segment_untrusted')
+    return gzip.open(actual,'rb') if actual.suffix=='.gz' else actual.open('rb')
+
+
 class Journal:
     def __init__(self,root,source,*,segment_bytes=SEGMENT_BYTES,day=None,session_mode=False):
         self.root=Path(root);self.protocol=read_json(self.root/'protocol.json');self.encoder=FrozenAdapter(source,self.protocol)
@@ -141,12 +165,13 @@ class Journal:
         if self.directory.is_symlink():raise ValueError('journal_directory_untrusted')
         self.directory.mkdir(mode=0o700,exist_ok=True);self.directory.chmod(0o700)
         self.lock=threading.RLock();self.segment_bytes=segment_bytes;self.events=0;self.records=0;self.closed=False
-        files=sorted(self.directory.glob('*.twqj'));self.sequence=max([int(f.stem) for f in files],default=0)
+        files=receipt_paths(self.directory);self.sequence=max([int(f.stem) for f in files],default=0)
         recovered=[];self.prior_events=0
         for path in files:
             if path.is_symlink():raise ValueError('journal_segment_untrusted')
             seal=read_json(path.with_suffix('.seal.json'))
             if seal is None:
+                if not path.exists():raise ValueError('journal_compressed_unsealed')
                 with path.open('rb') as handle:
                     if handle.read(len(MAGIC))!=MAGIC:raise ValueError('journal_header_invalid')
                     header=read_frame(handle,path.stat().st_size)
@@ -263,14 +288,14 @@ class ProjectionStore:
             self.db=sqlite3.connect(database,timeout=30);database.chmod(0o600)
             self.db.execute('pragma journal_mode=WAL');self.db.execute('pragma synchronous=FULL');self.db.execute('pragma cache_size=-8192')
             self.db.execute('pragma wal_autocheckpoint='+('16384' if history else '128'))
-            # Reuse the source-verified schema verbatim without importing scipy/pandas.
-            tree=definitions(Path(source)/'live_pilot.py',['PilotStore'])
-            schemas=[n.args[0].value for n in ast.walk(tree) if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=='executescript' and n.args and isinstance(n.args[0],ast.Constant)]
-            if len(schemas)!=1:raise ValueError('journal_projection_schema_changed')
-            statements=[s.strip() for s in schemas[0].split(';') if s.strip()]
+            # Offline bulk stores defer equivalent digest uniqueness until sealing.
+            statements=schema_statements(source)
             self.index_statements=[s for s in statements if s.startswith('CREATE INDEX ')]
-            self.db.executescript(';'.join(s for s in statements if not history or s not in self.index_statements)+';')
-            if history:
+            ddl=[s.replace('digest TEXT UNIQUE','digest TEXT') if history else s for s in statements if not history or s not in self.index_statements]
+            self.db.executescript(';'.join(ddl)+';')
+            complete=self.db.execute("select value from metadata where key='cloud_history_complete'").fetchone()
+            self.bulk=bool(history and not any(row[2] for row in self.db.execute('pragma index_list(events)')))
+            if history and not complete:
                 for name in ['event_lookup','receipt_lookup']:self.db.execute('DROP INDEX IF EXISTS '+name)
             self.db.execute('CREATE TABLE IF NOT EXISTS projection_excluded(digest TEXT PRIMARY KEY)')
             old=self.db.execute("select value from metadata where key='protocol'").fetchone()
@@ -338,9 +363,19 @@ class Materializer:
             from twquant.live_pilot import PilotStore
             self.store=PilotStore(prepare_session(root,source,session_day) if session_day else self.root,protocol)
         self.store.db.execute('CREATE TABLE IF NOT EXISTS cloud_receipt_cursor(segment TEXT PRIMARY KEY,offset INTEGER NOT NULL,events INTEGER NOT NULL,records INTEGER NOT NULL)');self.store.db.commit()
-        self.store.db.execute('pragma cache_size='+('-8192' if self.projected else '-65536'))
+        self.store.db.execute('pragma cache_size='+('-8192' if self.projected else '-131072' if self.deferred else '-65536'))
         self.store.db.execute('pragma busy_timeout=100')
-        self.finished=set();self.last_received_ns=0
+        self.finished=set();self.last_received_ns=0;self.reader=None;self.reader_name=None
+
+    @contextmanager
+    def segment(self,path,limit):
+        if self.reader_name!=path.name:
+            if self.reader:self.reader.close()
+            self.reader=open_receipt(path);self.reader_name=path.name
+            if self.reader.read(len(MAGIC))!=MAGIC:raise ValueError('journal_header_invalid')
+            self.header=read_frame(self.reader,limit);self.header_offset=self.reader.tell()
+        yield self.reader,self.header,self.header_offset
+
     def step(self,*,max_records=1024,max_bytes=2*1024**2,stamp=None):
         if stamp is not None and stamp.date().isoformat() in self.store.protocol['dates']:
             decision=datetime.fromisoformat(stamp.date().isoformat()+'T'+self.store.protocol.get('prediction_time','10:00:00')).replace(tzinfo=TZ)
@@ -348,19 +383,17 @@ class Materializer:
         db=self.store.db;directory=self.root/'receipts';active=read_json(self.root/'receipt_watermark.json',{})
         if directory.is_symlink():raise ValueError('journal_directory_untrusted')
         batches=[];size=0;total=0;events=0
-        for path in sorted(directory.glob('*.twqj')):
+        for path in receipt_paths(directory):
             if path.name in self.finished:continue
             if path.is_symlink():raise ValueError('journal_segment_untrusted')
             seal=read_json(path.with_suffix('.seal.json'),{})
             limit=seal.get('offset',active.get('offset',0) if active.get('segment')==path.name else 0)
             if not limit:continue
-            with path.open('rb') as handle:
-                if handle.read(len(MAGIC))!=MAGIC:raise ValueError('journal_header_invalid')
-                header=read_frame(handle,limit)
+            with self.segment(path,limit) as (handle,header,header_offset):
                 if not header or header.get('protocol')!=protocol_hash(self.store.protocol):raise ValueError('journal_protocol_changed')
                 if self.session_day and header.get('day')!=self.session_day:self.finished.add(path.name);continue
                 old=db.execute('select offset,events,records from cloud_receipt_cursor where segment=?',(path.name,)).fetchone()
-                offset,previous_events,previous_records=old or (handle.tell(),0,0);handle.seek(offset);records=[];event_count=0
+                offset,previous_events,previous_records=old or (header_offset,0,0);handle.seek(offset);records=[];event_count=0
                 while total<max_records and size<max_bytes:
                     value=read_frame(handle,limit)
                     if value is None:break
@@ -391,12 +424,21 @@ class Materializer:
             if rows:self.last_received_ns=rows[-1][3]
         except BaseException:db.rollback();raise
         return dict(events=events,records=total)
-    def close(self):self.store.close()
+    def close(self):
+        if self.reader:self.reader.close()
+        self.store.close()
 
     def finish_history(self):
         if self.deferred:
-            for statement in self.store.index_statements:self.store.db.execute(statement)
-            self.store.db.commit()
+            db=self.store.db
+            try:
+                db.execute('begin immediate')
+                if self.store.bulk:
+                    db.execute('delete from events where id not in (select min(id) from events group by digest)')
+                    db.execute('create unique index if not exists event_digest on events(digest)')
+                for statement in self.store.index_statements:db.execute(statement)
+                db.execute("insert or replace into metadata values('cloud_history_complete',?)",(self.session_day,));db.commit()
+            except BaseException:db.rollback();raise
 
 
 def materializer_state(consumer):
@@ -430,22 +472,41 @@ def copy_publication(root,source,day,store):
 
 def merge_session(root,source,day):
     root=Path(root);path=session_path(root,day);protocol=read_json(root/'protocol.json');verify_source(source,protocol)
-    from twquant.live_pilot import PilotStore
-    store=PilotStore(root,protocol);db=store.db;db.execute('pragma cache_size=-65536');db.execute('pragma wal_autocheckpoint=16384')
+    database=root/'pilot.sqlite3'
+    if database.is_symlink():raise ValueError('journal_seed_path_untrusted')
+    previous=read_json(root/'session_merge_status.json',{})
+    if previous.get('date')==day and previous.get('state')=='complete' and previous.get('protocol')==protocol_hash(protocol) and database.is_file():
+        daily=path/'pilot.sqlite3';expected=None
+        if daily.is_file() and not daily.is_symlink():
+            with closing(sqlite3.connect(daily.as_uri()+'?mode=ro',uri=True,timeout=5)) as checkpoint:
+                expected=checkpoint.execute('select coalesce(sum(events),0) from cloud_receipt_cursor').fetchone()[0]
+        else:
+            ready=read_json(root/'day_history_status.json',{})
+            if ready.get('date')==day and ready.get('state')=='complete':expected=ready.get('events_total')
+        if expected is not None and previous.get('events_total')==expected:return dict(previous,cached=True)
+    db=sqlite3.connect(database,timeout=30);database.chmod(0o600)
     try:
+        statements=schema_statements(source);indexes=[s for s in statements if s.startswith('CREATE INDEX ')]
+        db.execute('pragma journal_mode=WAL');db.execute('pragma synchronous=FULL');db.execute('pragma cache_size=-262144');db.execute('pragma wal_autocheckpoint=0')
+        db.executescript(';'.join(s for s in statements if s not in indexes)+';')
+        old=db.execute("select value from metadata where key='protocol'").fetchone()
+        if old and old[0]!=protocol_hash(protocol):raise ValueError('journal_projection_protocol_changed')
+        db.execute("INSERT OR IGNORE INTO metadata VALUES('protocol',?)",(protocol_hash(protocol),));db.commit()
+        # Global readers must retain their indexes even if a later batch fails.
+        for statement in indexes:db.execute(statement)
+        db.commit()
         with closing(sqlite3.connect((path/'pilot.sqlite3').as_uri()+'?mode=ro',uri=True,timeout=30)) as session:
             db.execute('CREATE TABLE IF NOT EXISTS cloud_session_merge(day TEXT PRIMARY KEY,event_id INTEGER,gap_id INTEGER)');db.commit()
-            old=db.execute('select event_id,gap_id from cloud_session_merge where day=?',(day,)).fetchone() or (0,0)
-            event_id,gap_id=old
-            while True:
-                rows=session.execute('select id,ticker,channel,event_ns,received_ns,kind,serial,payload,digest from events where id>? order by id limit 8192',(event_id,)).fetchall()
-                if not rows:break
-                try:
-                    db.execute('begin immediate');db.executemany('INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?)',rows);event_id=rows[-1][0]
-                    db.execute('INSERT INTO cloud_session_merge VALUES(?,?,?) ON CONFLICT(day) DO UPDATE SET event_id=excluded.event_id',(day,event_id,gap_id));db.commit()
-                except BaseException:db.rollback();raise
             try:
                 db.execute('begin immediate')
+                # Schema changes and the entire append commit or roll back together.
+                for name in ['event_lookup','receipt_lookup']:db.execute('drop index if exists '+name)
+                old=db.execute('select event_id,gap_id from cloud_session_merge where day=?',(day,)).fetchone() or (0,0)
+                event_id,gap_id=old
+                while True:
+                    rows=session.execute('select id,ticker,channel,event_ns,received_ns,kind,serial,payload,digest from events where id>? order by id limit 8192',(event_id,)).fetchall()
+                    if not rows:break
+                    db.executemany('INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?)',rows);event_id=rows[-1][0]
                 for row in session.execute('select start_ns,end_ns from coverage'):
                     db.execute('INSERT INTO coverage VALUES(?,?) ON CONFLICT(start_ns) DO UPDATE SET end_ns=max(end_ns,excluded.end_ns)',row)
                 for row in session.execute('select rowid,start_ns,end_ns,reason from gaps where rowid>? order by rowid',(gap_id,)):
@@ -459,12 +520,14 @@ def merge_session(root,source,day):
                     existing=db.execute('select at_ns from releases where day=?',(day,)).fetchone()
                     if existing and existing!=seal:raise ValueError('journal_publication_conflict')
                     db.execute('INSERT OR IGNORE INTO releases VALUES(?,?)',(day,seal[0]))
-                db.execute('INSERT INTO cloud_session_merge VALUES(?,?,?) ON CONFLICT(day) DO UPDATE SET event_id=excluded.event_id,gap_id=excluded.gap_id',(day,event_id,gap_id));db.commit()
+                db.execute('INSERT INTO cloud_session_merge VALUES(?,?,?) ON CONFLICT(day) DO UPDATE SET event_id=excluded.event_id,gap_id=excluded.gap_id',(day,event_id,gap_id))
+                for statement in indexes:db.execute(statement)
+                db.commit()
             except BaseException:db.rollback();raise
             count=session.execute('select coalesce(sum(events),0) from cloud_receipt_cursor').fetchone()[0]
-        result=dict(at=now().isoformat(),date=day,state='complete',events_total=count)
+        result=dict(at=now().isoformat(),date=day,state='complete',events_total=count,protocol=protocol_hash(protocol))
         private_json(root/'session_merge_status.json',result);return result
-    finally:store.close()
+    finally:db.close()
 
 
 def consume(root,source,*,replay=False,session_mode=False):
