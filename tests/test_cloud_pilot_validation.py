@@ -69,9 +69,57 @@ def test_rendered_validation_jobs_are_single_session_and_have_deadline_cleanup()
     assert '--root '+p['root'] in units[p['session']+'-collect.service']
 
 
+def test_candidate_validation_uses_staged_helpers_without_replacing_formal_code():
+    m=module();p=dict(plan(),helper_prefix=str(m.PREFIX/'projection-candidate'))
+    units=m.render_units(p)
+    assert '11:22:00 Asia/Taipei' in units[p['session']+'-forecast.timer']
+    for kind,name in [('collect','resource_guard.py'),('forecast','receipt_journal.py'),('replay','receipt_journal.py'),('archive','archive.py')]:
+        assert p['helper_prefix']+'/'+name in units[p['session']+'-'+kind+'.service']
+    with pytest.raises(ValueError):m.validate_plan(dict(p,helper_prefix='/tmp/untrusted'))
+
+
+def test_validation_can_omit_unrequested_start_messages(tmp_path,monkeypatch):
+    m=module();p=plan();p['notify_start']=False;calls=[]
+    ops=SimpleNamespace(MESSAGES={},send_notice=lambda *args:calls.append(args))
+    monkeypatch.setattr(m,'load_module',lambda *args:ops)
+    assert m.run_phase(p,'notice')['state']=='not_requested'
+    assert calls==[]
+
+
+def test_projection_validation_retains_unplanned_lag_and_unhealthy_samples():
+    m=module();p=plan();start=datetime.fromisoformat(p['start']);fault=datetime.fromisoformat(p['fault']);samples=[]
+    for seconds in range(0,45*60+121,30):
+        at=start+timedelta(seconds=seconds)
+        samples.append(dict(at=at.isoformat(),collector_active=True,ready=True,last_event_ns=int((at.timestamp()-1)*1e9),shared_service_health='healthy',wal_bytes=1000))
+    # The declared fault has its own recovery gate and stays in the source audit.
+    samples[24].update(collector_active=False,ready=False,last_event_ns=0)
+    assert all(m.projection_flow_checks(p,samples)['checks'].values())
+    samples[60]['last_event_ns']-=10*10**9
+    result=m.projection_flow_checks(p,samples)
+    assert not result['checks']['steady_receipt_flow'] and result['max_lag_seconds']>=11
+    samples[61]['shared_service_health']='unavailable'
+    assert not m.projection_flow_checks(p,samples)['checks']['shared_service_stable']
+
+
 def test_final_validation_uses_the_same_research_memory_group():
     p=plan();units=module().render_units(p)
     assert 'Slice=twquant-pilot.slice' in units[p['session']+'-final.service']
+
+
+def test_publication_receipt_reads_the_small_projection_until_history_is_merged(tmp_path,monkeypatch):
+    m=module();day='2026-11-18';path=tmp_path/'projections'/day;path.mkdir(parents=True)
+    (tmp_path/'capture_profile.json').write_text(json.dumps(dict(projection_from=day)))
+    with sqlite3.connect(path/'pilot.sqlite3') as db:
+        db.executescript('CREATE TABLE predictions(day TEXT,ticker TEXT,row TEXT); CREATE TABLE releases(day TEXT,at_ns INTEGER)')
+        db.execute('INSERT INTO predictions VALUES(?,?,?)',(day,'2330','{}'));db.execute('INSERT INTO releases VALUES(?,?)',(day,42))
+    monkeypatch.setattr(m,'receipt',lambda root,name,value:None)
+    result=m.forecast_receipt(tmp_path,day)
+    assert result['count']==1 and result['release_ns']==42
+    with sqlite3.connect(tmp_path/'pilot.sqlite3') as db:
+        db.executescript('CREATE TABLE predictions(day TEXT,ticker TEXT,row TEXT); CREATE TABLE releases(day TEXT,at_ns INTEGER)')
+        db.execute('INSERT INTO predictions VALUES(?,?,?)',(day,'2330','{"preserved":true}'));db.execute('INSERT INTO releases VALUES(?,?)',(day,43))
+    (tmp_path/'session_merge_status.json').write_text(json.dumps(dict(date=day,state='complete')))
+    assert m.forecast_receipt(tmp_path,day)['release_ns']==43
 
 
 def test_validation_stops_reports_before_capture_and_excludes_them_from_finalization():

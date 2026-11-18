@@ -1,11 +1,12 @@
 """Private sequential receipts and atomic, bounded SQLite materialization.
 
-Receipt acquisition loads only the unchanged frozen encoder/feed definitions.
-Scientific dependencies and indexed database writes belong to the consumer.
+Receipt acquisition and projections load only source-verified frozen definitions.
+Forecasting loads scientific dependencies; full historical indexing is deferred.
 """
 from __future__ import annotations
 import argparse
 import ast
+from contextlib import closing
 from datetime import datetime,timedelta,timezone
 import fcntl
 import hashlib
@@ -216,12 +217,93 @@ class Journal:
             if not self.closed:self.flush();self._seal();self.closed=True
 
 
-def session_path(root,day):
+def projection_enabled(root,day):
+    first=read_json(Path(root)/'capture_profile.json',{}).get('projection_from')
+    return bool(isinstance(first,str) and first and day>=first)
+
+
+def session_path(root,day,*,projection=False):
     protocol=read_json(Path(root)/'protocol.json')
     if day not in protocol['dates']:raise ValueError('journal_session_date_invalid')
-    path=Path(root)/'sessions'/day
+    path=Path(root)/('projections' if projection else 'sessions')/day
     if path.is_symlink() or path.parent.is_symlink():raise ValueError('journal_session_path_untrusted')
     return path
+
+
+def causal_seeds(root,symbols,decision,received_cutoff):
+    source_db=Path(root)/'pilot.sqlite3';seeds=[]
+    if source_db.is_symlink():raise ValueError('journal_seed_path_untrusted')
+    if source_db.exists():
+        with closing(sqlite3.connect(source_db.as_uri()+'?mode=ro',uri=True,timeout=30)) as previous:
+            previous.execute('begin')
+            for ticker in symbols:
+                for channel in ['books','trades','indices']:
+                    row=previous.execute('select event_ns from events indexed by event_lookup where ticker=? and channel=? and event_ns<=? and received_ns<=? order by event_ns desc,id desc limit 1',(ticker,channel,decision,received_cutoff)).fetchone()
+                    if row and row[0] is not None:
+                        seeds.extend(previous.execute('select id,ticker,channel,event_ns,received_ns,kind,serial,payload,digest from events indexed by event_lookup where ticker=? and channel=? and event_ns=? and received_ns<=? order by id',(ticker,channel,row[0],received_cutoff)).fetchall())
+    return sorted(seeds)
+
+
+class ProjectionStore:
+    """Source-verified SQLite schema without scientific imports.
+
+    The projection retains only the fixed decision's latest eligible ties.
+    Deferred history uses a separate store and builds query indexes at the end.
+    """
+    def __init__(self,root,source,day,*,history=False):
+        self.protocol=read_json(Path(root)/'protocol.json');verify_source(source,self.protocol)
+        self.root=session_path(root,day,projection=not history);self.root.parent.mkdir(mode=0o700,exist_ok=True);self.root.mkdir(mode=0o700,exist_ok=True)
+        self.symbols=FrozenAdapter(source,self.protocol).symbols
+        self.cutoff=ns(datetime.fromisoformat(day+'T'+self.protocol.get('prediction_time','10:00:00')).replace(tzinfo=TZ))
+        ready_name='session_ready.json' if history else 'projection_ready.json'
+        with (Path(root)/(('session-' if history else 'projection-')+day+'.lock')).open('a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX)
+            database=self.root/'pilot.sqlite3'
+            if database.is_symlink():raise ValueError('journal_projection_path_untrusted')
+            self.db=sqlite3.connect(database,timeout=30);database.chmod(0o600)
+            self.db.execute('pragma journal_mode=WAL');self.db.execute('pragma synchronous=FULL');self.db.execute('pragma cache_size=-8192')
+            self.db.execute('pragma wal_autocheckpoint='+('16384' if history else '128'))
+            # Reuse the source-verified schema verbatim without importing scipy/pandas.
+            tree=definitions(Path(source)/'live_pilot.py',['PilotStore'])
+            schemas=[n.args[0].value for n in ast.walk(tree) if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=='executescript' and n.args and isinstance(n.args[0],ast.Constant)]
+            if len(schemas)!=1:raise ValueError('journal_projection_schema_changed')
+            statements=[s.strip() for s in schemas[0].split(';') if s.strip()]
+            self.index_statements=[s for s in statements if s.startswith('CREATE INDEX ')]
+            self.db.executescript(';'.join(s for s in statements if not history or s not in self.index_statements)+';')
+            if history:
+                for name in ['event_lookup','receipt_lookup']:self.db.execute('DROP INDEX IF EXISTS '+name)
+            self.db.execute('CREATE TABLE IF NOT EXISTS projection_excluded(digest TEXT PRIMARY KEY)')
+            old=self.db.execute("select value from metadata where key='protocol'").fetchone()
+            if old and old[0]!=protocol_hash(self.protocol):raise ValueError('journal_projection_protocol_changed')
+            self.db.execute("INSERT OR IGNORE INTO metadata VALUES('protocol',?)",(protocol_hash(self.protocol),));self.db.commit()
+            if not (self.root/ready_name).exists():
+                seeds=causal_seeds(root,self.symbols,self.cutoff,min(self.cutoff,ns(now())))
+                self.db.executemany('INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?)',seeds);self.db.commit()
+                private_json(self.root/'protocol.json',self.protocol)
+                private_json(self.root/ready_name,dict(date=day,protocol=protocol_hash(self.protocol),seed_rows=len(seeds),at=now().isoformat()))
+        self.exclusions=bool(self.db.execute('select 1 from projection_excluded limit 1').fetchone())
+
+    def project(self,rows):
+        """Preserve frozen event-time/id ordering and first-digest identity."""
+        candidates={};seen=set()
+        for row in rows:
+            identifier,ticker,channel,event_ns,received_ns,*_=row;digest=row[-1]
+            if digest in seen:continue
+            seen.add(digest)
+            if event_ns>self.cutoff:continue
+            if received_ns>self.cutoff:
+                self.db.execute('INSERT OR IGNORE INTO projection_excluded SELECT ? WHERE NOT EXISTS(SELECT 1 FROM events WHERE digest=?)',(digest,digest));self.exclusions=True;continue
+            if self.exclusions and self.db.execute('select 1 from projection_excluded where digest=?',(digest,)).fetchone():continue
+            key=(ticker,channel);group=candidates.get(key)
+            if not group or event_ns>group[0]:candidates[key]=(event_ns,[row])
+            elif event_ns==group[0]:group[1].append(row)
+        for (ticker,channel),(event_ns,latest) in candidates.items():
+            previous=self.db.execute('select event_ns from events where ticker=? and channel=? order by event_ns desc,id desc limit 1',(ticker,channel)).fetchone()
+            if previous and previous[0]>event_ns:continue
+            self.db.execute('delete from events where ticker=? and channel=? and event_ns<?',(ticker,channel,event_ns))
+            self.db.executemany('INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?)',latest)
+
+    def close(self):self.db.close()
 
 
 def prepare_session(root,source,day):
@@ -238,14 +320,7 @@ def prepare_session(root,source,day):
         store=PilotStore(path,protocol)
         try:
             decision=ns(datetime.fromisoformat(day+'T'+protocol.get('prediction_time','10:00:00')).replace(tzinfo=TZ));received_cutoff=min(decision,ns(now()))
-            source_db=root/'pilot.sqlite3';seeds=[]
-            if source_db.exists():
-                with sqlite3.connect(source_db.as_uri()+'?mode=ro',uri=True,timeout=30) as previous:
-                    for ticker in store.symbols:
-                        for channel in ['books','trades','indices']:
-                            row=previous.execute('select event_ns from events indexed by event_lookup where ticker=? and channel=? and event_ns<=? and received_ns<=? order by event_ns desc,id desc limit 1',(ticker,channel,decision,received_cutoff)).fetchone()
-                            if row and row[0] is not None:
-                                seeds.extend(previous.execute('select id,ticker,channel,event_ns,received_ns,kind,serial,payload,digest from events indexed by event_lookup where ticker=? and channel=? and event_ns=? and received_ns<=? order by id',(ticker,channel,row[0],received_cutoff)).fetchall())
+            seeds=causal_seeds(root,store.symbols,decision,received_cutoff)
             store.db.executemany('INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?)',sorted(seeds));store.flush()
             private_json(path/'session_ready.json',dict(protocol=protocol_hash(protocol),date=day,seed_rows=len(seeds),at=now().isoformat()))
         finally:store.close()
@@ -253,13 +328,17 @@ def prepare_session(root,source,day):
 
 
 class Materializer:
-    def __init__(self,root,source,*,session_day=None):
+    def __init__(self,root,source,*,session_day=None,full_history=False):
         self.root=Path(root);protocol=read_json(self.root/'protocol.json');verify_source(source,protocol)
         self.session_day=session_day
-        from twquant.live_pilot import PilotStore
-        self.store=PilotStore(prepare_session(root,source,session_day) if session_day else self.root,protocol)
+        self.projected=bool(session_day and projection_enabled(root,session_day) and not full_history)
+        self.deferred=bool(session_day and full_history)
+        if self.projected or self.deferred:self.store=ProjectionStore(root,source,session_day,history=self.deferred)
+        else:
+            from twquant.live_pilot import PilotStore
+            self.store=PilotStore(prepare_session(root,source,session_day) if session_day else self.root,protocol)
         self.store.db.execute('CREATE TABLE IF NOT EXISTS cloud_receipt_cursor(segment TEXT PRIMARY KEY,offset INTEGER NOT NULL,events INTEGER NOT NULL,records INTEGER NOT NULL)');self.store.db.commit()
-        self.store.db.execute('pragma cache_size=-65536')
+        self.store.db.execute('pragma cache_size='+('-8192' if self.projected else '-65536'))
         self.store.db.execute('pragma busy_timeout=100')
         self.finished=set();self.last_received_ns=0
     def step(self,*,max_records=1024,max_bytes=2*1024**2,stamp=None):
@@ -300,7 +379,9 @@ class Materializer:
                 rows=[v for kind,v in records if kind=='event']
                 if self.session_day:
                     slot=int(self.session_day.replace('-',''))*10**9
-                    db.executemany('INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?)',[(slot+event_base+i+1,*row) for i,row in enumerate(rows)])
+                    identified=[(slot+event_base+i+1,*row) for i,row in enumerate(rows)]
+                    if self.projected:self.store.project(identified)
+                    else:db.executemany('INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?)',identified)
                 else:db.executemany('INSERT OR IGNORE INTO events(ticker,channel,event_ns,received_ns,kind,serial,payload,digest) VALUES(?,?,?,?,?,?,?,?)',rows)
                 for kind,value in records:
                     if kind=='coverage':db.execute('INSERT INTO coverage VALUES(?,?) ON CONFLICT(start_ns) DO UPDATE SET end_ns=max(end_ns,excluded.end_ns)',value[:2])
@@ -312,23 +393,52 @@ class Materializer:
         return dict(events=events,records=total)
     def close(self):self.store.close()
 
+    def finish_history(self):
+        if self.deferred:
+            for statement in self.store.index_statements:self.store.db.execute(statement)
+            self.store.db.commit()
+
 
 def materializer_state(consumer):
     count=consumer.store.db.execute('select coalesce(sum(events),0) from cloud_receipt_cursor').fetchone()[0]
-    return dict(at=now().isoformat(),state='running',events_total=count,last_received_ns=consumer.last_received_ns,date=consumer.session_day)
+    return dict(at=now().isoformat(),state='running',events_total=count,last_received_ns=consumer.last_received_ns,date=consumer.session_day,projection_only=consumer.projected)
+
+
+def copy_publication(root,source,day,store):
+    verify_source(source,store.protocol)
+    path=session_path(root,day,projection=True)/'pilot.sqlite3'
+    if not path.exists():raise ValueError('journal_projection_missing')
+    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=10)) as original:
+        original.execute('begin')
+        rows=original.execute('select day,ticker,row from predictions where day=? order by ticker',(day,)).fetchall()
+        seal=original.execute('select at_ns from releases where day=?',(day,)).fetchone()
+    db=store.db
+    try:
+        db.execute('begin immediate')
+        for row in rows:
+            old=db.execute('select row from predictions where day=? and ticker=?',row[:2]).fetchone()
+            if old and old[0]!=row[2]:raise ValueError('journal_prediction_conflict')
+            db.execute('INSERT OR IGNORE INTO predictions VALUES(?,?,?)',row)
+        if seal:
+            if len(rows)!=len(store.symbols):raise ValueError('journal_projection_publication_incomplete')
+            old=db.execute('select at_ns from releases where day=?',(day,)).fetchone()
+            if old and old!=seal:raise ValueError('journal_publication_conflict')
+            db.execute('INSERT OR IGNORE INTO releases VALUES(?,?)',(day,seal[0]))
+        db.commit()
+    except BaseException:db.rollback();raise
 
 
 def merge_session(root,source,day):
     root=Path(root);path=session_path(root,day);protocol=read_json(root/'protocol.json');verify_source(source,protocol)
     from twquant.live_pilot import PilotStore
-    store=PilotStore(root,protocol);db=store.db;db.execute('pragma cache_size=-65536')
+    store=PilotStore(root,protocol);db=store.db;db.execute('pragma cache_size=-65536');db.execute('pragma wal_autocheckpoint=16384')
     try:
-        with sqlite3.connect((path/'pilot.sqlite3').as_uri()+'?mode=ro',uri=True,timeout=30) as session:
+        with closing(sqlite3.connect((path/'pilot.sqlite3').as_uri()+'?mode=ro',uri=True,timeout=30)) as session:
             db.execute('CREATE TABLE IF NOT EXISTS cloud_session_merge(day TEXT PRIMARY KEY,event_id INTEGER,gap_id INTEGER)');db.commit()
             old=db.execute('select event_id,gap_id from cloud_session_merge where day=?',(day,)).fetchone() or (0,0)
             event_id,gap_id=old
             while True:
-                rows=session.execute('select id,ticker,channel,event_ns,received_ns,kind,serial,payload,digest from events where id>? order by id limit 1024',(event_id,)).fetchall()
+                rows=session.execute('select id,ticker,channel,event_ns,received_ns,kind,serial,payload,digest from events where id>? order by id limit 8192',(event_id,)).fetchall()
                 if not rows:break
                 try:
                     db.execute('begin immediate');db.executemany('INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?,?,?,?)',rows);event_id=rows[-1][0]
@@ -364,14 +474,19 @@ def consume(root,source,*,replay=False,session_mode=False):
     if day not in protocol['dates']:return dict(state='outside_declared_dates')
     end=datetime.fromisoformat(day+'T'+protocol.get('collection_end','10:15:00')).replace(tzinfo=TZ)
     if replay and not end+timedelta(minutes=3)<=stamp<end+timedelta(minutes=45):return dict(state='outside_replay_window')
+    if replay:
+        done=read_json(root/'receipt_capture_done.json',{})
+        if done.get('date')!=day:return dict(state='capture_not_closed')
+        merged=read_json(root/'session_merge_status.json',{})
+        if merged.get('date')==day and merged.get('state')=='complete' and merged.get('events_total',0)>=done.get('events_total',0):return dict(state='already_materialized')
     if not replay and stamp>=end+timedelta(seconds=120):return dict(state='outside_consumer_window')
     with (root/'receipt_consumer.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:return dict(state='consumer_already_running')
-        consumer=Materializer(root,source,session_day=day if session_mode else None);last_status=0;deadline=time.monotonic()+(600 if replay else max(0,(end-now()).total_seconds())+120)
+        consumer=Materializer(root,source,session_day=day if session_mode else None,full_history=replay);last_status=0;deadline=time.monotonic()+(600 if replay else max(0,(end-now()).total_seconds())+120)
         try:
             while not stop.is_set() and time.monotonic()<deadline:
-                try:result=consumer.step(stamp=now())
+                try:result=consumer.step(stamp=now(),**(dict(max_records=8192,max_bytes=8*1024**2) if consumer.deferred else {}))
                 except sqlite3.OperationalError as error:
                     if getattr(error,'sqlite_errorcode',None) not in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED):raise
                     time.sleep(.1);continue
@@ -382,8 +497,14 @@ def consume(root,source,*,replay=False,session_mode=False):
                     if replay or done.get('date')==day:break
                     time.sleep(.05)
             state=materializer_state(consumer);state['state']='stopped';private_json(root/'materializer_status.json',state)
+            if consumer.deferred:
+                expected=read_json(root/'receipt_capture_done.json',{}).get('events_total',0)
+                if stop.is_set() or state['events_total']<expected:
+                    state['state']='partial';private_json(root/'materializer_status.json',state);return state
+                consumer.finish_history()
+                if projection_enabled(root,day):copy_publication(root,source,day,consumer.store)
         finally:consumer.close()
-        if session_mode and (replay or (now()>=end and read_json(root/'receipt_capture_done.json',{}).get('date')==day)):
+        if session_mode and not consumer.projected and (replay or (now()>=end and read_json(root/'receipt_capture_done.json',{}).get('date')==day)):
             merge_session(root,source,day)
         return state
 
@@ -392,10 +513,15 @@ def forecast_session(root,source,*,session_mode=True):
     root=Path(root);protocol=read_json(root/'protocol.json');verify_source(source,protocol);stamp=now();day=stamp.date().isoformat()
     if day not in protocol['dates']:return dict(state='outside_declared_dates')
     decision=datetime.fromisoformat(day+'T'+protocol.get('prediction_time','10:00:00')).replace(tzinfo=TZ)
-    if not decision-timedelta(seconds=65)<=stamp<=decision+timedelta(seconds=300):return dict(state='outside_forecast_window')
+    if not decision-timedelta(seconds=185)<=stamp<=decision+timedelta(seconds=300):return dict(state='outside_forecast_window')
     from twquant.live_market import PilotStore,forecast
-    path=prepare_session(root,source,day) if session_mode else root;store=PilotStore(path,protocol)
+    if session_mode and projection_enabled(root,day):
+        projection=ProjectionStore(root,source,day);path=projection.root;projection.close()
+    else:path=prepare_session(root,source,day) if session_mode else root
+    store=PilotStore(path,protocol)
     try:
+        while now()<decision-timedelta(seconds=60):time.sleep(max(0,min(1,(decision-timedelta(seconds=60)-now()).total_seconds())))
+        if now().date().isoformat()!=day or now()>decision+timedelta(seconds=300):return dict(state='outside_forecast_window')
         result=forecast(path,store);private_json(root/'last_forecast.json',result);return result
     finally:store.close()
 
@@ -405,7 +531,7 @@ def close_feed(feed):
         worker=threading.Thread(target=feed.close,daemon=True);worker.start();worker.join(timeout=2)
 
 
-def capture(root,source,*,feed_factory=None,clock=now,sleep=time.sleep,launch=subprocess.Popen,stop=None,drain_seconds=90,session_mode=False):
+def capture(root,source,*,feed_factory=None,clock=now,sleep=time.sleep,launch=subprocess.Popen,stop=None,drain_seconds=90,session_mode=False,background_connect=True):
     root=Path(root);protocol=read_json(root/'protocol.json');stamp=clock();day=stamp.date().isoformat()
     if day not in protocol['dates']:return dict(state='outside_declared_dates')
     start=datetime.fromisoformat(day+'T'+protocol.get('collection_start','09:30:00')).replace(tzinfo=TZ)
@@ -419,7 +545,7 @@ def capture(root,source,*,feed_factory=None,clock=now,sleep=time.sleep,launch=su
         journal=Journal(root,source,day=day if session_mode else None,session_mode=session_mode);(root/'receipt_capture_done.json').unlink(missing_ok=True)
         child_args=[sys.executable,str(Path(__file__).resolve()),'--root',str(root),'--source',str(source),*(['--sessions'] if session_mode else []),'--phase','consume']
         child=launch(child_args)
-        errors=queue.SimpleQueue();accepting=True;gate=threading.RLock();feed=None;generation=0;retries=0
+        errors=queue.SimpleQueue();accepting=True;gate=threading.RLock();feed=None;generation=0;retries=0;connector=None;connect_at=0.
         counts=dict(received_messages=0,invalid_messages=0,dropped_messages=0)
         previous=clock();previous_mono=time.monotonic();connected=None;last_flush=0.;last_status=0.;failure=None;last_child_retry=0.;child_restarts=0
         def receive(message,identity):
@@ -430,36 +556,51 @@ def capture(root,source,*,feed_factory=None,clock=now,sleep=time.sleep,launch=su
                 try:journal.event(message,received)
                 except (ValueError,TypeError,KeyError):counts['invalid_messages']+=1;errors.put('invalid_message')
                 except OSError:counts['dropped_messages']+=1;errors.put('receipt_write_failed');stop.set()
+        def connect(identity):
+            nonlocal feed
+            try:
+                candidate=feed_factory(journal.encoder.symbols)
+                with gate:
+                    accepted=accepting and identity==generation
+                    if accepted:feed=candidate
+                if not accepted:close_feed(candidate);return
+                candidate.connect(lambda message:receive(message,identity),lambda code:errors.put(code) if identity==generation else None)
+            except Exception:
+                if identity==generation:errors.put('transport_error')
         def status(state):
             imported=read_json(root/'materializer_status.json',{}).get('events_total',0)
             if session_mode and read_json(root/'materializer_status.json',{}).get('date')!=day:imported=0
             durable=read_json(root/'receipt_watermark.json',{}).get('events',0)
-            return dict(at=clock().isoformat(),date=day,state=state,runtime='cloud_journal_v3',accepting=accepting,
+            projected=session_mode and projection_enabled(root,day)
+            return dict(at=clock().isoformat(),date=day,state=state,runtime='cloud_projection_v4' if projected else 'cloud_journal_v3',accepting=accepting,
                 stream_ready=bool(feed and feed.ready),subscriptions=len(feed.subscriptions) if feed else 0,
                 required_subscriptions=len(feed.expected) if feed else 0,backlog=max(0,journal.prior_events+journal.events-imported),
                 processed_messages=max(0,imported-journal.prior_events),durable_received_messages=durable,
-                memory_backlog=0,session_mode=session_mode,materializer_pid=getattr(child,'pid',None),materializer_active=child.poll() is None,materializer_restarts=child_restarts,**counts)
+                memory_backlog=0,session_mode=session_mode,history_deferred=bool(projected),materializer_pid=getattr(child,'pid',None),materializer_active=child.poll() is None,materializer_restarts=child_restarts,**counts)
         try:
             while clock()<end and not stop.is_set():
                 current=clock();mono=time.monotonic()
                 if (current-previous).total_seconds()>2:journal.control('gap',previous,current,'stalled')
                 if abs((current-previous).total_seconds()-(mono-previous_mono))>.25:journal.control('gap',min(previous,current),max(previous,current),'clock_jump')
                 previous=current;previous_mono=mono
-                if feed is None:
-                    feed=feed_factory(journal.encoder.symbols);generation+=1;identity=generation
-                    try:feed.connect(lambda message,identity=identity:receive(message,identity),lambda code,identity=identity:errors.put(code) if identity==generation else None)
-                    except Exception:errors.put('transport_error')
+                if feed is None and connector is None:
+                    generation+=1;connect_at=mono
+                    if background_connect:
+                        connector=threading.Thread(target=connect,args=(generation,),daemon=True);connector.start()
+                    else:connect(generation)
+                if not (feed and feed.ready) and mono-connect_at>45:errors.put('transport_error')
                 if not errors.empty():
                     code=errors.get();journal.control('gap',current,clock(),'disconnected')
                     if code in ('provider_error','invalid_message','receipt_write_failed'):
                         failure=code;stop.set();break
-                    generation+=1;close_feed(feed);feed=None;connected=None;retries+=1
+                    generation+=1;close_feed(feed);feed=None;connector=None;connected=None;retries+=1
                     if retries>5:failure='connection_retries_exhausted';break
                     sleep(min(2**retries,30));continue
-                if feed.ready and feed.last_received_ns>=ns(current)-45*10**9:
-                    if connected is None:connected=current;retries=0
-                    if mono-last_flush>=1:journal.control('coverage',connected,current)
-                elif feed.last_received_ns and feed.last_received_ns<ns(current)-45*10**9:errors.put('transport_error')
+                if feed and feed.ready and feed.last_received_ns>=ns(current)-45*10**9:
+                    observed=clock()
+                    if connected is None:connected=observed;retries=0
+                    if mono-last_flush>=1:journal.control('coverage',connected,observed)
+                elif feed and feed.last_received_ns and feed.last_received_ns<ns(current)-45*10**9:errors.put('transport_error')
                 if mono-last_flush>=1:journal.flush();last_flush=mono
                 if mono-last_status>=5:
                     private_json(root/'collector_status.json',status('collecting'));last_status=mono

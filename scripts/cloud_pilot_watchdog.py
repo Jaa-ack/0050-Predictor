@@ -256,7 +256,7 @@ def assess(protocol, stamp, snapshot):
         if not pending or local.strftime('%H:%M:%S')>='10:30:00':
             add('backup_missing', None if low_disk or pending else 'start_backup')
     if local.strftime('%H:%M:%S') >= '13:50:00' and not snapshot.get('report_current'):
-        add('report_missing', None if snapshot.get('materialization_pending') else 'start_report')
+        add('report_missing', None if snapshot.get('materialization_pending') or snapshot.get('backup_active') else 'start_report')
     return issues
 
 
@@ -322,9 +322,14 @@ def snapshot(root, prefix, stamp):
     database_root=root
     session=root/'sessions'/stamp.date().isoformat()
     if (profile.get('session_mode') or collector.get('session_mode')) and (session/'pilot.sqlite3').is_file() and not session.is_symlink():database_root=session
+    projected=bool(profile.get('projection_from') and stamp.date().isoformat()>=profile['projection_from'])
+    projection=root/'projections'/stamp.date().isoformat();merged=read_json(root/'session_merge_status.json',{})
+    history_ready=merged.get('date')==stamp.date().isoformat() and merged.get('state')=='complete'
+    if projected and not history_ready and (projection/'pilot.sqlite3').is_file() and not projection.is_symlink():database_root=projection
     for segment in (root/'receipts').glob('????????.twqj'):
         if segment.stem.isdigit() and not segment.is_symlink():
-            receipt_progressing=receipt_progressing or 0<=stamp.timestamp()-segment.stat().st_mtime<=30
+            modified=segment.stat().st_mtime
+            receipt_progressing=receipt_progressing or 0<=now().timestamp()-modified<=30
     shared_health=None
     local=stamp.astimezone(TZ);day=local.date().isoformat()
     if day in protocol.get('dates',[]):
@@ -348,7 +353,7 @@ def snapshot(root, prefix, stamp):
                   collector_active=unit_active('collect'), collector_at=collector.get('at'),
                   stream_ready=collector.get('stream_ready', False), forecast_active=unit_active('forecast'),
                   collector_backlog=collector.get('backlog'),closeout_date=closeout.get('date'),
-                  durable_receipts=collector.get('runtime')=='cloud_journal_v3',
+                  durable_receipts=collector.get('runtime') in ('cloud_journal_v3','cloud_projection_v4'),
                   closeout_state=closeout.get('state'),closeout_complete=closeout.get('complete'),
                   closeout_remaining=closeout.get('remaining_messages'),
                   wal_bytes=wal_bytes,
@@ -368,6 +373,9 @@ def snapshot(root, prefix, stamp):
         with sqlite3.connect((database_root / 'pilot.sqlite3').as_uri() + '?mode=ro', uri=True, timeout=2) as db:
             row = db.execute('SELECT received_ns FROM events ORDER BY id DESC LIMIT 1').fetchone()
             result['last_event_ns'] = row[0] if row else 0
+            progress=read_json(root/'materializer_status.json',{})
+            if projected and progress.get('projection_only') and progress.get('date')==stamp.date().isoformat():
+                result['last_event_ns']=progress.get('last_received_ns',0)
             day = stamp.date().isoformat()
             result['predictions'] = db.execute('SELECT count(*) FROM predictions WHERE day=?', (day,)).fetchone()[0]
             row = db.execute('SELECT at_ns FROM releases WHERE day=?', (day,)).fetchone()

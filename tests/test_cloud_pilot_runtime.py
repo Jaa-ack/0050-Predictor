@@ -80,6 +80,18 @@ def test_reports_yield_for_the_entire_capture_and_bounded_drain_window(tmp_path)
     assert m.report_ready(p,datetime(2026,11,15,9,35,tzinfo=tz))
 
 
+def test_report_start_waits_until_the_backup_releases_its_lock(tmp_path,monkeypatch):
+    import fcntl
+    m=module();setup(tmp_path)
+    monkeypatch.setattr(m,'now',lambda:datetime(2026,11,16,10,18,tzinfo=ZoneInfo('Asia/Taipei')))
+    with (tmp_path/'backup.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        assert m.main(['--root',str(tmp_path),'--phase','report-ready'])==1
+        assert not (tmp_path/'report_input.json').exists()
+    assert m.main(['--root',str(tmp_path),'--phase','report-ready'])==0
+    assert (tmp_path/'report_input.json').exists()
+
+
 def test_active_report_quiet_condition_is_bounded_to_declared_forecast_window(tmp_path,monkeypatch):
     m=module();setup(tmp_path);tz=ZoneInfo('Asia/Taipei')
     monkeypatch.setattr(m,'now',lambda:datetime(2026,11,16,9,58,tzinfo=tz))

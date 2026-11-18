@@ -42,6 +42,24 @@ def test_low_space_preserves_sources_and_existing_archive(tmp_path):
     assert source.read_bytes()==b'keep'
 
 
+def test_archive_waits_for_the_full_history_instead_of_only_a_projection(tmp_path):
+    m=module();(tmp_path/'protocol.json').write_text('{}');(tmp_path/'backups').mkdir();(tmp_path/'backups/latest.sqlite3').write_bytes(b'previous')
+    (tmp_path/'receipt_watermark.json').write_text('{"day":"2026-11-18","session_mode":true,"events_total":50}')
+    result=m.archive(tmp_path,free_bytes=lambda:10**10)
+    assert result['state']=='receipts_pending' and not result['remote_enabled']
+    assert not (tmp_path/'archives/index.json').exists()
+
+
+def test_archive_waits_for_a_backup_of_the_rebuilt_day(tmp_path):
+    m=module();(tmp_path/'protocol.json').write_text('{}');(tmp_path/'backups').mkdir();(tmp_path/'backups/latest.sqlite3').write_bytes(b'previous')
+    (tmp_path/'receipt_watermark.json').write_text('{"day":"2026-11-18","session_mode":true,"events_total":50}')
+    (tmp_path/'session_merge_status.json').write_text('{"date":"2026-11-18","state":"complete","events_total":50}')
+    result=m.archive(tmp_path,free_bytes=lambda:10**10)
+    assert result['state']=='backup_pending'
+    (tmp_path/'backup_status.json').write_text('{"date":"2026-11-18","state":"complete"}')
+    assert m.archive(tmp_path,free_bytes=lambda:10**10)['state']=='complete'
+
+
 def test_unchanged_sources_do_not_repeat_compression_or_decompression(tmp_path,monkeypatch):
     m=module();(tmp_path/'protocol.json').write_text('{}');(tmp_path/'backups').mkdir();(tmp_path/'backups/latest.sqlite3').write_bytes(b'synthetic'*1000)
     first=m.archive(tmp_path,free_bytes=lambda:10**10)

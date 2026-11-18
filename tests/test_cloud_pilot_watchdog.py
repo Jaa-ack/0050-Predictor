@@ -36,6 +36,14 @@ def healthy(stamp):
                 preflight_current=True,preflight_active=False)
 
 
+def test_report_recovery_waits_for_backup_without_consuming_restart_attempts(tmp_path):
+    m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,14,tzinfo=TZ)
+    view=healthy(stamp);view.update(report_current=False,backup_active=True)
+    assert {'code':'report_missing','action':None} in m.assess(p,stamp,view)
+    view['backup_active']=False
+    assert {'code':'report_missing','action':'start_report'} in m.assess(p,stamp,view)
+
+
 def test_watchdog_restarts_stale_collector_but_retains_provider_fatal_and_low_disk(tmp_path):
     m = module(); p = protocol(tmp_path)
     stamp = datetime(2026, 11, 16, 9, 35, tzinfo=TZ)
@@ -348,3 +356,38 @@ def test_finished_merge_triggers_backup_before_the_daily_acceptance_deadline(tmp
     assert any(i.get('action')=='start_backup' for i in m.assess(p,stamp,view))
     view['materialization_pending']=True
     assert not any(i['code']=='backup_missing' for i in m.assess(p,stamp,view))
+
+
+def test_projection_monitor_tracks_receipt_progress_after_the_fixed_input_cutoff(tmp_path,monkeypatch):
+    m=module();protocol(tmp_path);stamp=datetime(2026,11,16,10,4,tzinfo=TZ);day=stamp.date().isoformat()
+    path=tmp_path/'projections'/day;path.mkdir(parents=True)
+    (tmp_path/'capture_profile.json').write_text(json.dumps(dict(projection_from=day,session_mode=True)))
+    (tmp_path/'collector_status.json').write_text(json.dumps(dict(runtime='cloud_projection_v4',session_mode=True,backlog=30)))
+    (tmp_path/'materializer_status.json').write_text(json.dumps(dict(date=day,projection_only=True,events_total=100,last_received_ns=int(stamp.timestamp()*10**9))))
+    with sqlite3.connect(path/'pilot.sqlite3') as db:
+        db.executescript('CREATE TABLE events(id INTEGER,received_ns INTEGER); CREATE TABLE predictions(day TEXT); CREATE TABLE releases(day TEXT,at_ns INTEGER); CREATE TABLE gaps(start_ns INTEGER,end_ns INTEGER);')
+        db.execute('insert into events values(1,?)',(int((stamp-timedelta(minutes=4)).timestamp()*10**9),))
+    monkeypatch.setattr(m,'unit_active',lambda kind:False)
+    monkeypatch.setattr(m.subprocess,'run',lambda *a,**k:SimpleNamespace(stdout='yes',returncode=0))
+    view=m.snapshot(tmp_path,tmp_path,stamp)
+    assert view['database_ok'] and view['durable_receipts']
+    assert view['last_event_ns']==int(stamp.timestamp()*10**9)
+    assert m.receipts_pending(tmp_path) is False  # No watermark exists in this minimal probe.
+
+
+def test_projection_cursor_cannot_substitute_for_completed_historical_replay(tmp_path):
+    m=module();day='2026-11-18'
+    (tmp_path/'receipt_watermark.json').write_text(json.dumps(dict(day=day,session_mode=True,events_total=50)))
+    (tmp_path/'materializer_status.json').write_text(json.dumps(dict(date=day,projection_only=True,events_total=50)))
+    assert m.receipts_pending(tmp_path)
+
+
+def test_receipt_progress_uses_a_fresh_clock_after_inspection_work(tmp_path,monkeypatch):
+    import os
+    m=module();protocol(tmp_path);stamp=datetime(2026,11,16,9,45,tzinfo=TZ)
+    directory=tmp_path/'receipts';directory.mkdir();segment=directory/'00000001.twqj';segment.write_bytes(b'receipt')
+    os.utime(segment,(stamp.timestamp()+1,stamp.timestamp()+1))
+    monkeypatch.setattr(m,'now',lambda:stamp+timedelta(seconds=2))
+    monkeypatch.setattr(m,'unit_active',lambda kind:False)
+    monkeypatch.setattr(m.subprocess,'run',lambda *a,**k:SimpleNamespace(stdout='yes',returncode=0))
+    assert m.snapshot(tmp_path,tmp_path,stamp)['receipt_progressing']

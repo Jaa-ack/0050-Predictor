@@ -37,6 +37,7 @@ def validate_plan(plan):
     if not re.fullmatch(r'twquant-validation-20\d{6}-\d{4}',plan['session']):raise ValueError('Invalid isolated session')
     if plan['prefix']!=str(PREFIX) or plan['root']!=str(PREFIX/'runtime'/plan['session']):raise ValueError('Untrusted validation path')
     if plan['control']!=str(PREFIX/'validation-control'/plan['session']):raise ValueError('Untrusted control path')
+    if plan.get('helper_prefix',str(PREFIX)) not in (str(PREFIX),str(PREFIX/'projection-candidate')):raise ValueError('Untrusted candidate helper path')
     if plan.get('diagnostic_only') is not True:raise ValueError('Diagnostics must remain separate')
 
 
@@ -93,6 +94,9 @@ def render_units(plan):
         if name.endswith('.slice'):continue
         name=name.replace('twquant-pilot-',plan['session']+'-')
         text=text.replace('twquant-pilot-',plan['session']+'-').replace(str(PREFIX/'runtime'),plan['root'])
+        if plan.get('helper_prefix'):
+            for helper in ['resource_guard.py','receipt_journal.py','archive.py','checkpoint.py']:
+                text=text.replace(str(PREFIX/helper),str(Path(plan['helper_prefix'])/helper))
         kind=name.removeprefix(plan['session']+'-').split('.')[0]
         if name.endswith('.timer'):
             if kind=='watchdog':
@@ -102,7 +106,7 @@ def render_units(plan):
                 key={'collect':'start','checkpoint':'start','forecast':'decision','report':'start','preflight':'preflight','backup':'backup','quiet':'quiet','replay':'end','archive':'end'}[kind]
                 value=datetime.fromisoformat(plan[key])
                 if kind in ('replay','archive'):value+=timedelta(minutes=3 if kind=='replay' else 45)
-                if kind=='forecast':value-=timedelta(minutes=1)
+                if kind=='forecast':value-=timedelta(minutes=3 if plan.get('helper_prefix') else 1)
                 if kind=='report':value+=timedelta(minutes=5)
                 timing='OnCalendar='+value.strftime('%Y-%m-%d %H:%M:%S')+' Asia/Taipei'
                 if kind in ('collect','checkpoint','report'):timing+='\nOnUnitInactiveSec='+('300s' if kind=='report' else '60s')
@@ -160,6 +164,23 @@ def read_lines(path):
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
+def projection_flow_checks(plan,samples):
+    start=datetime.fromisoformat(plan['start']);end=datetime.fromisoformat(plan['end']);fault=datetime.fromisoformat(plan['fault'])
+    observed=[s for s in samples if start<=datetime.fromisoformat(s['at'])<=end+timedelta(seconds=150)]
+    steady=[s for s in observed if start+timedelta(seconds=120)<=datetime.fromisoformat(s['at'])<end
+            and not fault-timedelta(seconds=2)<=datetime.fromisoformat(s['at'])<=fault+timedelta(seconds=120)]
+    lags=[max(0,datetime.fromisoformat(s['at']).timestamp()-s.get('last_event_ns',0)/1e9) for s in steady]
+    health=[s for s in observed if datetime.fromisoformat(s['at'])>=start+timedelta(seconds=120)]
+    polls=[(datetime.fromisoformat(b['at'])-datetime.fromisoformat(a['at'])).total_seconds() for a,b in zip(observed,observed[1:])]
+    max_lag=max(lags,default=float('inf'));max_wal=max((s.get('wal_bytes',0) for s in observed),default=0)
+    checks=dict(steady_receipt_flow=bool(steady) and all(s.get('collector_active') and s.get('ready') for s in steady) and max_lag<=5,
+        shared_service_stable=bool(health) and all(s.get('shared_service_health')=='healthy' for s in health),
+        bounded_projection_wal=bool(observed) and max_wal<512*1024**2,
+        sampled_monitoring_coverage=len(observed)>=30 and datetime.fromisoformat(observed[0]['at'])<=start+timedelta(seconds=120)
+            and datetime.fromisoformat(observed[-1]['at'])>=end and max(polls,default=float('inf'))<=90)
+    return dict(checks=checks,max_lag_seconds=max_lag if lags else None,max_wal_bytes=max_wal,samples=len(observed),declared_fault_window_retained=True)
+
+
 def backup_integrity(path):
     if path.is_symlink():return False
     try:
@@ -170,7 +191,12 @@ def backup_integrity(path):
 
 def forecast_receipt(root,day):
     daily=root/'sessions'/day/'pilot.sqlite3'
-    with sqlite3.connect((daily if daily.exists() else root/'pilot.sqlite3').as_uri()+'?mode=ro',uri=True,timeout=5) as db:
+    profile=json.loads((root/'capture_profile.json').read_text()) if (root/'capture_profile.json').exists() else {}
+    projection=root/'projections'/day/'pilot.sqlite3'
+    merged=json.loads((root/'session_merge_status.json').read_text()) if (root/'session_merge_status.json').exists() else {}
+    history_ready=merged.get('date')==day and merged.get('state')=='complete'
+    database=root/'pilot.sqlite3' if history_ready else projection if profile.get('projection_from') and day>=profile['projection_from'] and projection.exists() else daily if daily.exists() else root/'pilot.sqlite3'
+    with sqlite3.connect(database.as_uri()+'?mode=ro',uri=True,timeout=5) as db:
         rows=[x[0] for x in db.execute('select row from predictions where day=? order by ticker',(day,))]
         released=db.execute('select at_ns from releases where day=?',(day,)).fetchone()
     result=dict(at=stamp().isoformat(),count=len(rows),rows_sha256=hashlib.sha256('\n'.join(rows).encode()).hexdigest(),
@@ -179,7 +205,7 @@ def forecast_receipt(root,day):
 
 
 def run_phase(plan,phase):
-    validate_plan(plan);root=Path(plan['root']);ops=load_module(PREFIX/'watchdog.py','validation_ops')
+    validate_plan(plan);root=Path(plan['root']);helpers=Path(plan.get('helper_prefix',str(PREFIX)));ops=load_module(helpers/'watchdog.py','validation_ops')
     session=plan['session'];decision=datetime.fromisoformat(plan['decision'])
     shift=decision-decision.replace(hour=10,minute=0,second=0,microsecond=0)
     ops.MESSAGES={k:'【獨立流程演練 '+decision.strftime('%H:%M')+'，不計正式成績】'+v.replace('10:00',decision.strftime('%H:%M')) for k,v in ops.MESSAGES.items()}
@@ -190,9 +216,11 @@ def run_phase(plan,phase):
         ok=ops.send_notice(PREFIX,code,fields)
         audit(root,'notification_attempts.jsonl',dict(at=stamp().isoformat(),code=code,ok=ok))
         return ok
-    if phase=='notice':return dict(notified=send('validation_started',{}))
+    if phase=='notice':
+        if plan.get('notify_start') is False:return dict(state='not_requested',notified=False)
+        return dict(notified=send('validation_started',{}))
     if phase in ('quiet-condition','report-condition'):
-        guard=load_module(PREFIX/'resource_guard.py','validation_guard')
+        guard=load_module(helpers/'resource_guard.py','validation_guard')
         ready=guard.report_ready({'dates':[plan['day']]},stamp()-shift)
         return dict(condition_passed=ready if phase=='report-condition' else not ready)
     if phase=='preflight':return ops.preflight(root,PREFIX)
@@ -226,6 +254,9 @@ def run_phase(plan,phase):
         record=dict(at=stamp().isoformat(),kind='planned_collector_stop',persisted_id_before=before,command_ok=result.returncode==0)
         receipt(root,'fault_injection.json',record);return record
     if phase=='watchdog':
+        if (root/'cloud_complete').exists() and plan.get('notify_start') is False:
+            execute(['systemctl',*action_args(plan,'retire_monitor')])
+            return dict(state='complete',notification='not_requested')
         terminal=root/'validation_result.json'
         if terminal.exists() and json.loads(terminal.read_text()).get('passed') is False:
             notice=root/'validation_failure_notification.json'
@@ -246,7 +277,8 @@ def run_phase(plan,phase):
             return result.returncode==0
         sample=ops.snapshot(root,PREFIX,stamp())
         audit(root,'health_samples.jsonl',dict(at=stamp().isoformat(),collector_active=sample['collector_active'],collector_at=sample.get('collector_at'),
-            ready=sample['stream_ready'],last_event_ns=sample.get('last_event_ns',0),predictions=sample.get('predictions',0),release_ns=sample.get('release_ns')))
+            ready=sample['stream_ready'],last_event_ns=sample.get('last_event_ns',0),predictions=sample.get('predictions',0),release_ns=sample.get('release_ns'),
+            shared_service_health=sample.get('shared_service_health'),wal_bytes=sample.get('wal_bytes',0),backlog=sample.get('collector_backlog')))
         result=ops.check(root,prefix=PREFIX,inspect=lambda:sample,control=control,send=send)
         if result.get('state')=='complete':receipt(root,'completion_notification.json',dict(notified=result.get('notified'),at=stamp().isoformat()))
         return result
@@ -266,17 +298,22 @@ def run_phase(plan,phase):
                 scoring_window_observed=coverage and not gap,backup_complete=backup.get('state')=='complete',
                 database_integrity=store.db.execute('pragma quick_check').fetchone()[0]=='ok')
             notifications=read_lines(root/'notification_attempts.jsonl')
-            checks['start_notification']=any(x['code']=='validation_started' and x['ok'] for x in notifications)
+            checks['start_notification']=plan.get('notify_start') is False or any(x['code']=='validation_started' and x['ok'] for x in notifications)
             checks['fault_and_recovery_notifications']=any(x['code'] in ('collector_inactive','collector_stalled') and x['ok'] for x in notifications) and any(x['code']=='recovered' and x['ok'] for x in notifications)
             fault=json.loads((root/'fault_injection.json').read_text());fault_at=datetime.fromisoformat(fault['at'])
             samples=read_lines(root/'health_samples.jsonl')
+            flow=projection_flow_checks(plan,samples) if plan.get('helper_prefix') else None
+            if flow:
+                checks.update(flow['checks']);closeout=ops.read_json(root/'collector_closeout.json',{});done=ops.read_json(root/'receipt_capture_done.json',{});merged=ops.read_json(root/'session_merge_status.json',{})
+                checks['durable_capture_complete']=closeout.get('receipt_complete') is True and closeout.get('complete') is True and closeout.get('remaining_messages')==0 and closeout.get('state')=='day_collection_finished'
+                checks['full_history_materialized']=merged.get('date')==plan['day'] and merged.get('state')=='complete' and merged.get('events_total')==done.get('events_total')
             recovered=[x for x in samples if x['collector_active'] and x['ready'] and x.get('collector_at') and datetime.fromisoformat(x['collector_at'])>=fault_at]
             checks['bounded_fault_recovery']=bool(recovered and (datetime.fromisoformat(recovered[0]['at'])-fault_at).total_seconds()<=120)
             quiet=json.loads((root/'quiet_observed.json').read_text())
             checks['active_report_stopped_at_quiet']=quiet['report_stopped'] and quiet['report_was_running'] and abs((datetime.fromisoformat(quiet['stopped_at'])-datetime.fromisoformat(plan['quiet'])).total_seconds())<=15
             checks['backup_integrity']=backup_integrity(root/'backups/latest.sqlite3')
             result=dict(scope='isolated_full_session_validation_not_formal_scores',at=stamp().isoformat(),checks=checks,passed=all(checks.values()),
-                report='evaluation.json',publication_delay_seconds=(release-ns(decision))/1e9 if release else None)
+                report='evaluation.json',publication_delay_seconds=(release-ns(decision))/1e9 if release else None,flow=flow)
             receipt(root,'validation_result.json',result)
             if not result['passed']:raise RuntimeError('validation_gate_failed')
         finally:store.close()

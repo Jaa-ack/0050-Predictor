@@ -22,6 +22,7 @@ def units(prefix,user,dates,*,memory_max=None):
     if memory_max is not None and not re.fullmatch(r'[1-9][0-9]*(?:M|G)',memory_max):raise ValueError('Invalid pilot memory limit')
     result={}
     for mode,clock in [('collect','08:45:00'),('forecast','09:59:00'),('report','13:45:00')]:
+        if memory_max and mode=='forecast':clock='09:57:00'
         runtime=prefix+'/runtime'
         post=(f'ExecStartPost={prefix}/venv/bin/python {prefix}/finish.py {runtime}\n'
             + f'ExecStartPost={prefix}/venv/bin/python {prefix}/resource_guard.py --root {runtime} --phase report-record\n') if mode=='report' else ''
@@ -33,7 +34,7 @@ def units(prefix,user,dates,*,memory_max=None):
         if mode=='forecast' and memory_max:command=f'{prefix}/venv/bin/python {prefix}/receipt_journal.py --root {runtime} --source {prefix}/app/src/twquant --sessions --phase forecast'
         result[f'twquant-pilot-{mode}.service']=f'''[Unit]
 Description=Bounded 0050 paper pilot {mode}
-After=network-online.target time-sync.target
+After=network-online.target time-sync.target{' twquant-pilot-backup.service' if mode=='report' else ''}
 Wants=network-online.target
 ConditionPathExists={runtime}/protocol.json
 ConditionPathExists={prefix}/.env
@@ -58,7 +59,8 @@ Environment=NUMEXPR_NUM_THREADS=1
 Environment=TWQUANT_PILOT_MANAGED=0
 {guard}ExecStart={command}
 {post}TimeoutStartSec={'300' if mode=='report' else 'infinity'}
-RuntimeMaxSec={'21600' if mode=='collect' else '180' if mode=='forecast' else '600'}
+RuntimeMaxSec={'21600' if mode=='collect' else '480' if mode=='forecast' and memory_max else '180' if mode=='forecast' else '600'}
+{'CPUWeight=1000' if mode=='forecast' and memory_max else ''}
 TimeoutStopSec={'150' if memory_max and mode=='collect' else '30'}
 Restart=on-failure
 RestartSec=30
@@ -158,7 +160,7 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=OPENBLAS_NUM_THREADS=1
 Environment=OMP_NUM_THREADS=1
 ExecStart={command}
-TimeoutStartSec=600
+TimeoutStartSec={1800 if kind=='replay' else 600}
 TimeoutStopSec=10
 NoNewPrivileges=true
 PrivateTmp=true
@@ -186,15 +188,17 @@ ConditionPathExists={prefix}/runtime/protocol.json
 [Service]
 Type=oneshot
 User={identity}
+{'Slice=twquant-pilot.slice' if kind=='backup' else ''}
 WorkingDirectory={prefix}
 UMask=0077
 Environment=TZ=Asia/Taipei
 Environment=PYTHONDONTWRITEBYTECODE=1
+{'ExecStartPre=+/bin/systemctl stop twquant-pilot-report.service' if kind=='backup' else ''}
 ExecStart=/usr/bin/python3 {prefix}/watchdog.py --root {prefix}/runtime --prefix {prefix} --phase {phase}
-TimeoutStartSec={'180' if kind=='backup' else '90' if kind=='preflight' else '60'}
+TimeoutStartSec={'1800' if kind=='backup' else '90' if kind=='preflight' else '60'}
 Restart={'no' if kind=='preflight' else 'on-failure'}
 RestartSec=30
-MemoryMax={'256M' if kind=='preflight' else '96M' if kind=='backup' else '64M'}
+MemoryMax={'384M' if kind=='preflight' else '640M' if kind=='backup' else '64M'}
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

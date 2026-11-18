@@ -30,6 +30,16 @@ def report_ready(protocol,stamp):
     return not (start-timedelta(minutes=2)<=local<end+timedelta(seconds=150))
 
 
+def backup_busy(root):
+    path=Path(root)/'backup.lock'
+    if path.is_symlink():return True
+    if not path.exists():return False
+    with path.open('a') as lock:
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:return True
+    return False
+
+
 def write_status(root,result):
     fd,name=tempfile.mkstemp(dir=root,prefix='cloud_collect_status.',suffix='.tmp')
     with os.fdopen(fd,'w') as out:
@@ -91,7 +101,7 @@ def main(argv=None):
         spec=importlib.util.spec_from_file_location('report_ops',path);ops=importlib.util.module_from_spec(spec);spec.loader.exec_module(ops)
         protocol=json.loads((args.root/'protocol.json').read_text());stamp=now()
         if args.phase=='report-record':ops.record_report(args.root,protocol,stamp);return 0
-        if not report_ready(protocol,stamp) or ops.receipts_pending(args.root) or not ops.report_wanted(args.root,protocol,stamp):return 1
+        if not report_ready(protocol,stamp) or ops.receipts_pending(args.root) or backup_busy(args.root) or not ops.report_wanted(args.root,protocol,stamp):return 1
         ops.begin_report(args.root,protocol,stamp);return 0
     if args.phase in ('report-ready','report-quiet'):
         protocol=json.loads((args.root/'protocol.json').read_text())

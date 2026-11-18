@@ -113,6 +113,17 @@ def archive(root,*,part_bytes=32*1024**2,free_bytes=None):
     root=Path(root);directory=root/'archives'
     if directory.is_symlink():raise ValueError('archive_directory_untrusted')
     protocol=json.loads((root/'protocol.json').read_text());reserve=protocol.get('minimum_free_bytes',4*1024**3)
+    try:watermark=json.loads((root/'receipt_watermark.json').read_text())
+    except (OSError,ValueError):watermark={}
+    if watermark.get('session_mode'):
+        try:merged=json.loads((root/'session_merge_status.json').read_text())
+        except (OSError,ValueError):merged={}
+        if merged.get('date')!=watermark.get('day') or merged.get('state')!='complete' or merged.get('events_total',0)<watermark.get('events_total',0):
+            return dict(state='receipts_pending',archives=[],remote_enabled=False)
+        try:backup_state=json.loads((root/'backup_status.json').read_text())
+        except (OSError,ValueError):backup_state={}
+        if backup_state.get('date')!=watermark.get('day') or backup_state.get('state')!='complete':
+            return dict(state='backup_pending',archives=[],remote_enabled=False)
     available=free_bytes or (lambda:shutil.disk_usage(root).free)
     if available()<reserve:return dict(state='storage_reserve_reached',archives=[],remote_enabled=False)
     directory.mkdir(mode=0o700,exist_ok=True);directory.chmod(0o700)

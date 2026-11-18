@@ -119,7 +119,7 @@ def test_capture_spools_a_burst_without_an_in_memory_backlog(tmp_path):
         def poll(self):return 0
         def wait(self,timeout):return 0
     result=m.capture(tmp_path,SOURCE,feed_factory=Feed,clock=lambda:clock[0],
-        sleep=lambda seconds:clock.__setitem__(0,clock[0]+timedelta(seconds=seconds)),launch=lambda args:Child(),drain_seconds=0)
+        sleep=lambda seconds:clock.__setitem__(0,clock[0]+timedelta(seconds=seconds)),launch=lambda args:Child(),drain_seconds=0,background_connect=False)
     assert result['durable_received_messages']==2000 and result['dropped_messages']==0
     assert result['receipt_complete'] and not result['complete']
     consumer=m.Materializer(tmp_path,SOURCE)

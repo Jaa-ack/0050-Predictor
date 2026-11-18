@@ -138,6 +138,16 @@ def test_journal_profile_separates_receipts_replay_and_local_archives():
     assert '2026-11-18 10:18:00' in u['twquant-pilot-replay.timer']
     assert '2026-11-18 11:00:00' in u['twquant-pilot-archive.timer']
     assert 'twquant-pilot-replay.timer' in u['twquant-pilot-finalize.service']
+    assert 'TimeoutStartSec=1800' in u['twquant-pilot-replay.service']
+    assert 'CPUWeight=1000' in u['twquant-pilot-forecast.service']
+    assert 'RuntimeMaxSec=480' in u['twquant-pilot-forecast.service']
+    assert '2026-11-18 09:57:00' in u['twquant-pilot-forecast.timer']
+    assert 'MemoryMax=384M' in u['twquant-pilot-preflight.service']
+    assert 'TimeoutStartSec=1800' in u['twquant-pilot-backup.service']
+    assert 'Slice=twquant-pilot.slice' in u['twquant-pilot-backup.service']
+    assert 'MemoryMax=640M' in u['twquant-pilot-backup.service']
+    assert 'ExecStartPre=+/bin/systemctl stop twquant-pilot-report.service' in u['twquant-pilot-backup.service']
+    assert 'After=network-online.target time-sync.target twquant-pilot-backup.service' in u['twquant-pilot-report.service']
 
 
 def test_shared_host_stops_already_running_reports_before_forecast():
