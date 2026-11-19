@@ -98,6 +98,15 @@ def test_previous_day_maintenance_yields_to_next_premarket_probe(tmp_path):
     assert not (root/'archives').exists()
 
 
+def test_each_running_stage_renews_its_own_service_deadline(tmp_path,monkeypatch):
+    m=module();root=tmp_path/'pilot';prepare(root);notifications=[]
+    monkeypatch.setattr(m,'notify_service',lambda value:notifications.append(value),raising=False)
+    result=m.run(root,SOURCE,clock=lambda:stamp(18*60),report=report)
+    assert result['state']=='complete'
+    assert len(notifications)==len(m.STAGES),'Every stage needs its own finite timeout budget'
+    assert all('EXTEND_TIMEOUT_USEC=' in value for value in notifications)
+
+
 def test_reports_use_committed_history_before_the_explicit_checkpoint(tmp_path):
     m=module();root=tmp_path/'pilot';p=prepare(root);base=PilotStore(root,p);base.close()
     def observed(root,day,at):

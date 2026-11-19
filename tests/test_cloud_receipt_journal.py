@@ -31,6 +31,24 @@ def test_frozen_encoder_matches_reference_and_excludes_private_fields(tmp_path):
     reference.close()
 
 
+def test_validated_events_use_native_framing_without_changing_bytes(tmp_path,monkeypatch):
+    pytest.importorskip('orjson');m=module();p=protocol();(tmp_path/'protocol.json').write_text(json.dumps(p))
+    journal=m.Journal(tmp_path,SOURCE);item=message('trades',-2);item['data']['type']='測試: "值", \\n'
+    row=journal.encoder.encode(item,stamp(-1));expected=m.frame(['event',row]);before=journal.handle.tell()
+    original=m.frame
+    def control_only(value):
+        assert value[0]!='event','Validated rows must avoid the redundant Python JSON encoder'
+        return original(value)
+    monkeypatch.setattr(m,'frame',control_only);journal.event(item,stamp(-1));journal.close()
+    body=journal.path.read_bytes()
+    assert body[before:]==expected
+
+
+def test_receipt_native_framing_falls_back_without_losing_large_integers(tmp_path,monkeypatch):
+    m=module();row=m.FrozenAdapter(SOURCE,protocol()).encode(message('trades',-2),stamp(-1));row[2]=2**80
+    assert m.event_frame(row)==m.frame(['event',row])
+
+
 def test_receipts_survive_abrupt_process_exit_and_replay_is_idempotent(tmp_path):
     m=module();root=tmp_path/'pilot';root.mkdir();(root/'protocol.json').write_text(json.dumps(protocol()))
     program="""import importlib.util,json,os,sys
@@ -57,6 +75,43 @@ def test_batch_replay_keeps_forecasts_labels_and_gaps_identical(tmp_path):
     assert new.emit(stamp())==old.emit(stamp())
     assert new.evaluate(as_of=stamp(400))==old.evaluate(as_of=stamp(400))
     old.close();new.close()
+
+
+def test_idle_consumer_does_not_rescan_receipt_directory_and_discovers_rotations(tmp_path,monkeypatch):
+    m=module();(tmp_path/'protocol.json').write_text(json.dumps(protocol()))
+    journal=m.Journal(tmp_path,SOURCE)
+    for i in range(30):journal.event(message('trades',-2,serial=i),stamp(-1))
+    journal.close();consumer=m.Materializer(tmp_path,SOURCE);scans=[];original=m.os.scandir
+    def scandir(path):
+        if Path(path)==tmp_path/'receipts':scans.append(1)
+        return original(path)
+    monkeypatch.setattr(m.os,'scandir',scandir)
+    for _ in range(40):consumer.step(max_records=1)
+    assert len(scans)<=4,'Unchanged durable input must not repeatedly scan every historical segment'
+    journal=m.Journal(tmp_path,SOURCE);journal.event(message('trades',-2,serial=100),stamp(-1));journal.close()
+    consumer.step();assert consumer.store.db.execute('select count(*) from events').fetchone()[0]==31
+    before=len(scans)
+    for _ in range(20):assert consumer.step()['records']==0
+    assert len(scans)<=before+2
+    consumer.close()
+
+
+def test_watermark_rotation_is_discovered_even_with_coarse_directory_timestamps(tmp_path,monkeypatch):
+    m=module();(tmp_path/'protocol.json').write_text(json.dumps(protocol()))
+    original=Path.stat
+    class CoarseStat:
+        def __init__(self,value):self.value=value
+        def __getattr__(self,name):return 1 if name=='st_mtime_ns' else getattr(self.value,name)
+    def stat(path,*args,**kwargs):
+        value=original(path,*args,**kwargs)
+        return CoarseStat(value) if path==tmp_path/'receipts' else value
+    monkeypatch.setattr(Path,'stat',stat)
+    journal=m.Journal(tmp_path,SOURCE);journal.event(message('trades',-2,serial=1),stamp(-1));journal.close()
+    consumer=m.Materializer(tmp_path,SOURCE)
+    while consumer.step()['records']:pass
+    journal=m.Journal(tmp_path,SOURCE);journal.event(message('trades',-2,serial=2),stamp(-1));journal.close()
+    assert consumer.step()['events']==1
+    consumer.close()
 
 
 def test_failed_batch_does_not_advance_cursor_or_duplicate_gap_on_retry(tmp_path):
@@ -126,6 +181,82 @@ def test_capture_spools_a_burst_without_an_in_memory_backlog(tmp_path):
     while consumer.step()['records']:pass
     assert consumer.store.db.execute('select count(*) from events').fetchone()[0]==2000
     consumer.close()
+
+
+def test_capture_reports_event_age_separately_from_storage_backlog(tmp_path):
+    m=module();p=protocol();p.update(collection_start='09:59:59',collection_end='10:00:01')
+    (tmp_path/'protocol.json').write_text(json.dumps(p));clock=[stamp(-1)]
+    class Feed:
+        expected={('2330','trades')};subscriptions=expected;ready=True;failed=None
+        def __init__(self,symbols):self.last_received_ns=m.ns(clock[0])
+        def connect(self,receive,disconnect):
+            for i in range(20):receive(message('trades',-301,serial=i))
+        def close(self):pass
+    class Child:
+        def poll(self):return 0
+        def wait(self,timeout):return 0
+    result=m.capture(tmp_path,SOURCE,feed_factory=Feed,clock=lambda:clock[0],
+        sleep=lambda seconds:clock.__setitem__(0,clock[0]+timedelta(seconds=seconds)),launch=lambda args:Child(),drain_seconds=0,background_connect=False)
+    assert result.get('source_delay_p95_seconds')==300
+    assert result['source_delay_samples']==20
+    assert result['source_last_event_ns']==m.ns(stamp(-301))
+    assert result['durable_received_messages']==20 and result['dropped_messages']==0
+    assert result.get('callback_processing_samples',0)>0
+    assert 0<=result['callback_processing_p95_seconds']<1
+
+
+def test_bounded_source_drain_keeps_late_preclose_events_with_actual_receipt_times(tmp_path):
+    m=module();p=protocol();p.update(collection_start='09:59:59',collection_end='10:00:01')
+    (tmp_path/'protocol.json').write_text(json.dumps(p));(tmp_path/'capture_profile.json').write_text('{"source_drain_from":"2026-11-16"}')
+    clock=[stamp(-1)];stop=m.threading.Event();callback=[];injected=[False]
+    class Feed:
+        expected={('2330','trades')};subscriptions=expected;ready=True;failed=None
+        def __init__(self,symbols):self.last_received_ns=m.ns(clock[0])
+        def connect(self,receive,disconnect):callback.append(receive);receive(message('trades',-301,serial=1))
+        def close(self):pass
+    class Child:
+        def poll(self):return 0
+        def wait(self,timeout):return 0
+    def sleep(seconds):
+        clock[0]+=timedelta(seconds=seconds)
+        if not injected[0] and clock[0]>=stamp(1.5):
+            injected[0]=True;callback[0](message('trades',.5,serial=2));callback[0](message('trades',10,serial=3));stop.set()
+    result=m.capture(tmp_path,SOURCE,feed_factory=Feed,clock=lambda:clock[0],sleep=sleep,
+        launch=lambda args:Child(),drain_seconds=3,background_connect=False,stop=stop)
+    assert result['received_messages']==2 and result.get('tail_received_messages')==1
+    assert result['source_fresh_at_close'] is False
+    consumer=m.Materializer(tmp_path,SOURCE)
+    while consumer.step()['records']:pass
+    received=consumer.store.db.execute("select event_ns,received_ns from events where serial='2'").fetchone()
+    assert received==(m.ns(stamp(.5)),m.ns(clock[0]))
+    assert consumer.store.db.execute('select count(*) from events').fetchone()[0]==2
+    consumer.close()
+
+
+@pytest.mark.parametrize('source_seconds,fresh', [(-301,False),(0,True)])
+def test_source_drain_has_a_hard_deadline_and_checks_source_freshness(tmp_path,source_seconds,fresh):
+    m=module();p=protocol();p.update(collection_start='09:59:59',collection_end='10:00:01')
+    (tmp_path/'protocol.json').write_text(json.dumps(p))
+    (tmp_path/'capture_profile.json').write_text('{"source_drain_from":"2026-11-16"}')
+    clock=[stamp(-1)];feeds=[]
+    class Feed:
+        expected={('2330','trades')};subscriptions=expected;ready=True;failed=None
+        def __init__(self,symbols):self.last_received_ns=m.ns(clock[0]);feeds.append(self)
+        def connect(self,receive,disconnect):receive(message('trades',source_seconds,serial=1))
+        def close(self):pass
+    class Child:
+        def poll(self):return 0
+        def wait(self,timeout):return 0
+    def sleep(seconds):
+        clock[0]+=timedelta(seconds=seconds)
+        for feed in feeds:feed.last_received_ns=m.ns(clock[0])
+    result=m.capture(tmp_path,SOURCE,feed_factory=Feed,clock=lambda:clock[0],sleep=sleep,
+        launch=lambda args:Child(),drain_seconds=90,background_connect=False)
+    elapsed=(clock[0]-stamp(1)).total_seconds()
+    assert 0<=elapsed<=90.1
+    assert elapsed>=90 if not fresh else elapsed<=5
+    assert result['source_fresh_at_close'] is fresh
+    assert result['receipt_complete'] and result['durable_received_messages']==1
 
 
 def test_materializer_yields_the_writer_during_fixed_forecast_publication(tmp_path):

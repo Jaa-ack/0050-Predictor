@@ -6,6 +6,7 @@ from contextlib import closing
 from datetime import datetime, timedelta
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ import tempfile
 import time
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
+from functools import lru_cache
 
 TZ = ZoneInfo('Asia/Taipei')
 RESERVE = 4 * 1024**3
@@ -45,6 +47,9 @@ MESSAGES = {
     'feed_not_ready': '行情訂閱持續未就緒。',
     'market_data_stale': '超過120秒未寫入新行情。缺口與受影響答案會保留。',
     'collector_backlog': '採集佇列或落盤延遲偏高，可能影響輸入新鮮度；先告警，不以重啟丟棄待存資料。',
+    'source_data_delayed': '行情事件時間已明顯落後收件時間；收件積壓為零仍不能代表行情新鮮。不重啟以丟棄排隊資料，保留原始時間與失敗紀錄。',
+    'source_tail_delayed': '採集結束時來源行情仍未趕上，有界收尾已保留實際收到的資料與原接收時間；來源尾段完整性未通過，不回填預測或改寫分數。',
+    'forecast_inputs_degraded': '當日成分股預測有至少兩成使用原規則的fallback；輸入品質未通過，所有預測仍留在分母，不補發或改寫分數。',
     'market_data_gaps': '當日已記錄觀測缺口，受影響答案與失敗分母保留；恢復連線不能補回缺失行情。',
     'collector_closeout_incomplete': '採集窗口已結束，但收尾完成回執缺失、積壓未清空或有明確遺失；不宣稱全部資料已保存。',
     'wal_large': '研究WAL已超過512MiB，可能增加I/O與恢復成本；不在發報路徑強制整理或刪除WAL。',
@@ -155,13 +160,15 @@ def maintenance_busy(root):
     return False
 
 
-def maintenance_protected(protocol,stamp):
-    day=stamp.date().isoformat()
-    if day not in protocol['dates']:return False
-    start=datetime.fromisoformat(day+'T'+protocol.get('collection_start','09:30:00')).replace(tzinfo=TZ)
-    end=datetime.fromisoformat(day+'T'+protocol.get('collection_end','10:15:00')).replace(tzinfo=TZ)
-    preflight=datetime.fromisoformat(day+'T08:38:00').replace(tzinfo=TZ)
-    return min(preflight,start-timedelta(minutes=2))<=stamp<end+timedelta(seconds=150)
+@lru_cache(maxsize=1)
+def window_module():
+    path=Path(__file__).with_name('window.py')
+    if not path.exists():path=Path(__file__).with_name('cloud_pilot_window.py')
+    spec=importlib.util.spec_from_file_location('pilot_window',path)
+    value=importlib.util.module_from_spec(spec);spec.loader.exec_module(value);return value
+
+
+def maintenance_protected(protocol,stamp):return window_module().protected(protocol,stamp)
 
 
 def receipts_pending(root):
@@ -196,6 +203,8 @@ def daily_acceptance(root,protocol,stamp,current,state,send):
     end=datetime.fromisoformat(day+'T'+protocol.get('collection_end','10:15:00')).replace(tzinfo=TZ)
     observed=state.setdefault('daily_observations',{}).setdefault(day,dict(samples=0,max_backlog=0,max_lag_seconds=0,unhealthy_seen=False))
     observed.setdefault('flow_samples',0)
+    observed.setdefault('source_delay_samples',0)
+    observed.setdefault('max_source_delay_p95_seconds',0)
     if start<=stamp<end+timedelta(seconds=150):
         if observed.get('last_at'):observed['max_poll_gap_seconds']=max(observed.get('max_poll_gap_seconds',0),age(observed['last_at'],stamp))
         observed.setdefault('first_at',stamp.isoformat());observed['last_at']=stamp.isoformat()
@@ -204,6 +213,9 @@ def daily_acceptance(root,protocol,stamp,current,state,send):
             observed['flow_samples']+=1;observed['max_backlog']=max(observed['max_backlog'],backlog)
             observed['ram_backlog_high_seen']=observed.get('ram_backlog_high_seen',False) or (not current.get('durable_receipts') and backlog>=1024)
             if backlog:observed['max_lag_seconds']=max(observed['max_lag_seconds'],stamp.timestamp()-current.get('last_event_ns',0)/1e9)
+            if current.get('source_delay_known'):
+                observed['source_delay_samples']+=1
+                observed['max_source_delay_p95_seconds']=max(observed['max_source_delay_p95_seconds'],current.get('source_delay_p95_seconds',0))
         if current.get('shared_service_health')!='healthy':observed['unhealthy_seen']=True
     if stamp.strftime('%H:%M:%S')<'10:30:00':return
     path=root/('daily_acceptance_'+day+'.json');result=read_json(path)
@@ -223,6 +235,10 @@ def daily_acceptance(root,protocol,stamp,current,state,send):
             shared_service_stable=observed['samples']>0 and not observed['unhealthy_seen'],provider_ok=not current.get('fatal'))
         checks['monitoring_coverage']=(observed['samples']>=30 and bool(observed.get('first_at')) and bool(observed.get('last_at')) and age(observed.get('first_at'),start+timedelta(seconds=120))>=0
             and age(observed.get('last_at'),end)<=0 and observed.get('max_poll_gap_seconds',float('inf'))<=90)
+        if day>=policy.get('source_freshness_from','9999'):
+            checks['source_event_freshness']=observed['source_delay_samples']>0 and observed['max_source_delay_p95_seconds']<=min(5,protocol.get('max_input_age_seconds',60))
+            checks['forecast_inputs_usable']=bool(current.get('member_predictions')) and current.get('member_fallbacks',0)/current['member_predictions']<.2
+            checks['source_tail_fresh']=current.get('closeout_source_fresh') is True
         core={k:v for k,v in checks.items() if k not in ('no_active_incidents','materialization_current','backup','report')}
         post_codes={'backup_missing','report_missing','archive_failed','maintenance_failed'}
         core['no_critical_incidents']=not(set(current.get('active_incidents',[]))-post_codes)
@@ -257,7 +273,7 @@ def assess(protocol, stamp, snapshot):
     start = datetime.fromisoformat(day + 'T' + protocol.get('collection_start', '09:30:00')).replace(tzinfo=TZ)
     end = datetime.fromisoformat(day + 'T' + protocol.get('collection_end', '10:15:00')).replace(tzinfo=TZ)
     decision = datetime.fromisoformat(day + 'T' + protocol.get('prediction_time', '10:00:00')).replace(tzinfo=TZ)
-    if snapshot.get('maintenance_error'):
+    if snapshot.get('maintenance_error') or snapshot.get('maintenance_interrupted'):
         resume=snapshot.get('maintenance_retryable') and not snapshot.get('maintenance_active') and not maintenance_protected(protocol,local)
         add('maintenance_failed','start_replay' if resume else None)
     if snapshot.get('gap_count',0)>0:add('market_data_gaps')
@@ -266,12 +282,14 @@ def assess(protocol, stamp, snapshot):
     if snapshot.get('receipt_error'):add('receipt_pipeline_failed')
     if snapshot.get('archive_expected') and not snapshot.get('archive_current'):
         add('archive_failed','start_archive' if not low_disk and not snapshot.get('archive_active') and not snapshot.get('materialization_pending') and not snapshot.get('maintenance_active') else None)
-    if start<=local<end+timedelta(seconds=150) and snapshot.get('shared_service_health') in ('unhealthy','starting','unavailable'):
+    if (start<=local<end+timedelta(seconds=150) or snapshot.get('maintenance_active')) and snapshot.get('shared_service_health') in ('unhealthy','starting','unavailable'):
         add('shared_service_unhealthy')
     if local.strftime('%H:%M:%S') >= '08:42:00' and not snapshot.get('preflight_current'):
         retry = local < start and not snapshot.get('preflight_active')
         add('preflight_failed', 'start_preflight' if retry else None)
     if start + timedelta(seconds=30) <= local < end and not low_disk and not snapshot.get('fatal'):
+        if local>=start+timedelta(seconds=120) and snapshot.get('source_delay_known') and snapshot.get('source_delay_p95_seconds',0)>min(5,protocol.get('max_input_age_seconds',60)):
+            add('source_data_delayed')
         backlog=snapshot.get('collector_backlog',0) or 0
         lag=local.timestamp()-snapshot.get('last_event_ns',0)/1e9
         if local>=start+timedelta(seconds=120) and ((backlog>=1024 and not snapshot.get('durable_receipts')) or (backlog>0 and lag>5)):
@@ -289,7 +307,10 @@ def assess(protocol, stamp, snapshot):
     if local>=end+timedelta(seconds=150) and (snapshot.get('closeout_date')!=day or
             snapshot.get('closeout_state')!='day_collection_finished' or not snapshot.get('closeout_complete') or
             snapshot.get('closeout_remaining')!=0):add('collector_closeout_incomplete')
+    if local>=end+timedelta(seconds=150) and snapshot.get('closeout_date')==day and snapshot.get('closeout_source_fresh') is False:add('source_tail_delayed')
     if local >= decision - timedelta(seconds=45):
+        if local>=decision+timedelta(seconds=2) and snapshot.get('member_predictions',0) and snapshot.get('member_fallbacks',0)/snapshot['member_predictions']>=.2:
+            add('forecast_inputs_degraded')
         missing = snapshot.get('predictions', 0) != snapshot.get('targets', 53) or not snapshot.get('release_ns')
         can_start = local < decision + timedelta(seconds=300) and not snapshot.get('forecast_active')
         if missing and (local >= decision + timedelta(seconds=5) or can_start):
@@ -364,6 +385,8 @@ def snapshot(root, prefix, stamp):
     checkpoint=read_json(root/'checkpoint_status.json',{})
     receipt_error=read_json(root/'receipt_error.json',{});archive_state=read_json(root/'archive_status.json',{})
     maintenance=read_json(root/'pipeline_state.json',{})
+    maintenance_active=maintenance_busy(root)
+    interrupted=maintenance.get('state')=='running' and not maintenance_active and not maintenance_protected(protocol,stamp)
     profile=read_json(root/'capture_profile.json',{});receipt_progressing=False
     database_root=root
     session=root/'sessions'/stamp.date().isoformat()
@@ -381,7 +404,7 @@ def snapshot(root, prefix, stamp):
     if day in protocol.get('dates',[]):
         start=datetime.fromisoformat(day+'T'+protocol.get('collection_start','09:30:00')).replace(tzinfo=TZ)
         end=datetime.fromisoformat(day+'T'+protocol.get('collection_end','10:15:00')).replace(tzinfo=TZ)
-        if start<=local<end+timedelta(seconds=150) or 'shared_service_unhealthy' in read_json(root/'watchdog_state.json',{}).get('incidents',{}):
+        if start<=local<end+timedelta(seconds=150) or maintenance_active or 'shared_service_unhealthy' in read_json(root/'watchdog_state.json',{}).get('incidents',{}):
             try:
                 health_probe=subprocess.run(['docker','--config',str(prefix/'docker-observer'),'inspect','--format={{.State.Health.Status}}','telegram-reminder-bot-1'],capture_output=True,text=True,timeout=3)
                 shared_health=health_probe.stdout.strip() if health_probe.returncode==0 and health_probe.stdout.strip() in ('healthy','unhealthy','starting') else 'unavailable'
@@ -396,12 +419,16 @@ def snapshot(root, prefix, stamp):
     result = dict(configured=(prefix / '.env').is_file() and any((prefix / '.secrets/fubon').glob('*')),
                   source_matches=digest.hexdigest() == protocol.get('source_sha256'), ntp=synced,
                   free_bytes=shutil.disk_usage(root).free, fatal=(root / 'fatal.json').exists(),
-                  maintenance_active=maintenance_busy(root),maintenance_error=maintenance.get('state')=='failed',maintenance_retryable=maintenance.get('retryable',False),
+                  maintenance_active=maintenance_active,maintenance_error=maintenance.get('state')=='failed',maintenance_interrupted=interrupted,
+                  maintenance_retryable=(maintenance.get('attempts',{}).get(maintenance.get('phase'),0)<3 if interrupted else maintenance.get('retryable',False)),
+                  source_delay_known=collector.get('date')==stamp.date().isoformat() and collector.get('source_delay_samples',0)>0,
+                  source_delay_p95_seconds=max(collector.get('source_delay_p95_seconds') or 0,collector.get('source_age_at_status_seconds') or 0),
                   collector_active=unit_active('collect'), collector_at=collector.get('at'),
                   stream_ready=collector.get('stream_ready', False), forecast_active=unit_active('forecast'),
                   collector_backlog=collector.get('backlog'),closeout_date=closeout.get('date'),
                   durable_receipts=collector.get('runtime') in ('cloud_journal_v3','cloud_projection_v4'),
                   closeout_state=closeout.get('state'),closeout_complete=closeout.get('complete'),
+                  closeout_source_fresh=closeout.get('source_fresh_at_close'),
                   closeout_remaining=closeout.get('remaining_messages'),
                   wal_bytes=wal_bytes,
                   shared_service_health=shared_health,checkpoint_error=checkpoint.get('date')==day and checkpoint.get('state')=='error',
@@ -425,6 +452,10 @@ def snapshot(root, prefix, stamp):
                 result['last_event_ns']=progress.get('last_received_ns',0)
             day = stamp.date().isoformat()
             result['predictions'] = db.execute('SELECT count(*) FROM predictions WHERE day=?', (day,)).fetchone()[0]
+            if result['predictions'] and 'members' in protocol:
+                predictions=[json.loads(raw) for raw, in db.execute('SELECT row FROM predictions WHERE day=?',(day,))]
+                members=[v for v in predictions if v.get('ticker') in protocol['members']]
+                result['member_predictions']=len(members);result['member_fallbacks']=sum(v.get('fallback') is True for v in members)
             row = db.execute('SELECT at_ns FROM releases WHERE day=?', (day,)).fetchone()
             result['release_ns'] = row[0] if row else None
             windows=[]
@@ -486,6 +517,9 @@ def check(root, *, prefix=Path('/opt/twquant-pilot'), clock=now, inspect=None, c
         state['incidents'][code] = previous
     trusted=all(current.get(k) for k in ('configured','source_matches','database_ok','ntp'))
     for code in list(state['incidents']):
+        if code=='source_data_delayed' and (not current.get('source_delay_known') or current.get('source_delay_p95_seconds',0)>min(5,protocol.get('max_input_age_seconds',60))):continue
+        if code=='source_tail_delayed' and current.get('closeout_source_fresh') is not True:continue
+        if code=='forecast_inputs_degraded' and (not current.get('member_predictions') or current.get('member_fallbacks',0)/current['member_predictions']>=.2):continue
         if code not in active and trusted and (code!='shared_service_unhealthy' or current.get('shared_service_health')=='healthy'):
             if send('recovered', {'previous': code}):
                 del state['incidents'][code]

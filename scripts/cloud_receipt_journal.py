@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import ast
 from contextlib import closing,contextmanager
+from collections import deque
 from datetime import datetime,timedelta,timezone
 import fcntl
 import gzip
@@ -26,6 +27,8 @@ import threading
 import time
 import zlib
 from zoneinfo import ZoneInfo
+try:import orjson as fast_json
+except ImportError:fast_json=None
 
 TZ=ZoneInfo('Asia/Taipei')
 MAGIC=b'TWQJ1\n'
@@ -126,6 +129,15 @@ def frame(value):
     return struct.pack('!II',len(body),zlib.crc32(body))+body
 
 
+def event_frame(row):
+    """Encode an already source-validated row; retain canonical payload/digest."""
+    if fast_json is None:return frame(['event',row])
+    try:body=fast_json.dumps(['event',row])
+    except (TypeError,OverflowError):return frame(['event',row])
+    if len(body)>MAX_FRAME:raise ValueError('journal_frame_too_large')
+    return struct.pack('!II',len(body),zlib.crc32(body))+body
+
+
 def read_frame(handle,limit):
     start=handle.tell()
     if start+8>limit:return None
@@ -217,7 +229,7 @@ class Journal:
         private_json(self.path.with_suffix('.seal.json'),dict(offset=self.handle.tell(),events=self.segment_events,records=self.segment_records,sha256=self.digest.hexdigest(),complete=True,day=self.day))
         self.handle.close()
     def _append(self,value):
-        body=frame(value)
+        body=event_frame(value[1]) if value[0]=='event' else frame(value)
         if self.handle.tell()+len(body)>self.segment_bytes and self.segment_records:
             self._seal();self._open()
         self._write(body);self.records+=1;self.segment_records+=1
@@ -366,6 +378,7 @@ class Materializer:
         self.store.db.execute('pragma cache_size='+('-8192' if self.projected else '-131072' if self.deferred else '-65536'))
         self.store.db.execute('pragma busy_timeout=100')
         self.finished=set();self.last_received_ns=0;self.reader=None;self.reader_name=None
+        self.path_stamp=None;self.path_segment=None;self.paths=[];self.idle_token=None
 
     @contextmanager
     def segment(self,path,limit):
@@ -382,8 +395,13 @@ class Materializer:
             if decision-timedelta(seconds=2)<=stamp<decision+timedelta(seconds=1.25):return dict(state='forecast_priority',events=0,records=0)
         db=self.store.db;directory=self.root/'receipts';active=read_json(self.root/'receipt_watermark.json',{})
         if directory.is_symlink():raise ValueError('journal_directory_untrusted')
+        path_stamp=directory.stat().st_mtime_ns
+        token=(path_stamp,active.get('segment'),active.get('offset'))
+        if self.idle_token==token:return dict(events=0,records=0)
+        if path_stamp!=self.path_stamp or active.get('segment')!=self.path_segment:
+            self.paths=receipt_paths(directory);self.path_stamp=path_stamp;self.path_segment=active.get('segment')
         batches=[];size=0;total=0;events=0
-        for path in receipt_paths(directory):
+        for path in self.paths:
             if path.name in self.finished:continue
             if path.is_symlink():raise ValueError('journal_segment_untrusted')
             seal=read_json(path.with_suffix('.seal.json'),{})
@@ -405,7 +423,9 @@ class Materializer:
                 if records:batches.append((path.name,offset,previous_events+event_count,previous_records+len(records),records,header.get('event_base',0)+previous_events));events+=event_count
                 if seal and handle.tell()>=limit and not records:self.finished.add(path.name)
             if total>=max_records or size>=max_bytes:break
-        if not batches:return dict(events=0,records=0)
+        if not batches:
+            if max_records>0 and max_bytes>0:self.idle_token=token
+            return dict(events=0,records=0)
         try:
             db.execute('begin immediate')
             for name,offset,count,records_count,records,event_base in batches:
@@ -601,6 +621,8 @@ def capture(root,source,*,feed_factory=None,clock=now,sleep=time.sleep,launch=su
     end=datetime.fromisoformat(day+'T'+protocol.get('collection_end','10:15:00')).replace(tzinfo=TZ)
     if not start<=stamp<end:return dict(state='outside_collection_window')
     if (root/'fatal.json').exists():return dict(state='blocked_by_provider_error')
+    profile=read_json(root/'capture_profile.json',{})
+    source_drain=day>=profile.get('source_drain_from','9999')
     stop=stop or threading.Event();feed_factory=feed_factory or frozen_feed(source,protocol)
     with (root/'collector.lock').open('a') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -609,14 +631,36 @@ def capture(root,source,*,feed_factory=None,clock=now,sleep=time.sleep,launch=su
         child_args=[sys.executable,str(Path(__file__).resolve()),'--root',str(root),'--source',str(source),*(['--sessions'] if session_mode else []),'--phase','consume']
         child=launch(child_args)
         errors=queue.SimpleQueue();accepting=True;gate=threading.RLock();feed=None;generation=0;retries=0;connector=None;connect_at=0.
-        counts=dict(received_messages=0,invalid_messages=0,dropped_messages=0)
+        counts=dict(received_messages=0,invalid_messages=0,dropped_messages=0,tail_received_messages=0)
+        source_delays=deque(maxlen=512);source_last_event_ns=0;source_last_received_ns=0;source_latest_event_ns=0
+        callback_times=deque(maxlen=128);transport_times=deque(maxlen=128)
+        capture_started=time.monotonic();capture_cpu_started=time.process_time()
+        tail_until=None
         previous=clock();previous_mono=time.monotonic();connected=None;last_flush=0.;last_status=0.;failure=None;last_child_retry=0.;child_restarts=0
         def receive(message,identity):
+            nonlocal source_last_event_ns,source_last_received_ns,source_latest_event_ns
+            entered=time.perf_counter_ns()
             with gate:
                 received=clock()
-                if not accepting or identity!=generation or received>=end:return
+                if not accepting or identity!=generation:return
+                if received>=end:
+                    if not source_drain or received>=end+timedelta(seconds=drain_seconds):return
+                    data=message.get('data',{})
+                    timestamp=data.get('time') if isinstance(data,dict) else None
+                    if type(timestamp) is int and timestamp*1000>ns(end):return
+                    counts['tail_received_messages']+=1
                 counts['received_messages']+=1
-                try:journal.event(message,received)
+                try:
+                    if journal.event(message,received):
+                        row=journal.encoder.row
+                        if row[4]=='data':
+                            source_last_event_ns=row[2];source_last_received_ns=row[3]
+                            source_latest_event_ns=max(source_latest_event_ns,row[2])
+                            source_delays.append((row[3]-row[2])/1e9)
+                        if counts['received_messages']%128==1:
+                            callback_times.append((time.perf_counter_ns()-entered)/1e9)
+                            wire_received=getattr(feed,'last_received_ns',0)
+                            if wire_received and row[3]>=wire_received:transport_times.append((row[3]-wire_received)/1e9)
                 except (ValueError,TypeError,KeyError):counts['invalid_messages']+=1;errors.put('invalid_message')
                 except OSError:counts['dropped_messages']+=1;errors.put('receipt_write_failed');stop.set()
         def connect(identity):
@@ -635,18 +679,42 @@ def capture(root,source,*,feed_factory=None,clock=now,sleep=time.sleep,launch=su
             if session_mode and read_json(root/'materializer_status.json',{}).get('date')!=day:imported=0
             durable=read_json(root/'receipt_watermark.json',{}).get('events',0)
             projected=session_mode and projection_enabled(root,day)
-            return dict(at=clock().isoformat(),date=day,state=state,runtime='cloud_projection_v4' if projected else 'cloud_journal_v3',accepting=accepting,
+            with gate:delays=sorted(source_delays);callbacks=sorted(callback_times);transport=sorted(transport_times)
+            child_cpu=None;pid=getattr(child,'pid',None)
+            if type(pid) is int and pid>0:
+                try:
+                    fields=(Path('/proc')/str(pid)/'stat').read_text().rpartition(') ')[2].split()
+                    child_cpu=(int(fields[11])+int(fields[12]))/os.sysconf('SC_CLK_TCK')
+                except (OSError,ValueError,IndexError):pass
+            return dict(at=clock().isoformat(),date=day,state=state,runtime='cloud_projection_v4' if projected else 'cloud_journal_v3',accepting=accepting,transport_mode='speed',
+                receipt_framing='native' if fast_json is not None else 'standard',
+                source_delay_samples=len(delays),source_delay_p50_seconds=delays[len(delays)//2] if delays else None,
+                source_delay_p95_seconds=delays[math.ceil(len(delays)*.95)-1] if delays else None,
+                source_last_event_ns=source_last_event_ns,source_last_received_ns=source_last_received_ns,
+                source_latest_event_ns=source_latest_event_ns,source_age_at_status_seconds=(ns(clock())-source_latest_event_ns)/1e9 if source_latest_event_ns else None,
+                callback_processing_samples=len(callbacks),callback_processing_p95_seconds=callbacks[math.ceil(len(callbacks)*.95)-1] if callbacks else None,
+                transport_to_callback_p95_seconds=transport[math.ceil(len(transport)*.95)-1] if transport else None,
+                capture_elapsed_seconds=round(time.monotonic()-capture_started,6),parent_cpu_seconds=round(time.process_time()-capture_cpu_started,6),consumer_cpu_seconds=child_cpu,
                 stream_ready=bool(feed and feed.ready),subscriptions=len(feed.subscriptions) if feed else 0,
                 required_subscriptions=len(feed.expected) if feed else 0,backlog=max(0,journal.prior_events+journal.events-imported),
                 processed_messages=max(0,imported-journal.prior_events),durable_received_messages=durable,
                 memory_backlog=0,session_mode=session_mode,history_deferred=bool(projected),materializer_pid=getattr(child,'pid',None),materializer_active=child.poll() is None,materializer_restarts=child_restarts,**counts)
         try:
-            while clock()<end and not stop.is_set():
+            while not stop.is_set():
                 current=clock();mono=time.monotonic()
+                if current>=end:
+                    if not source_drain:break
+                    if tail_until is None:
+                        with gate:delays=sorted(source_delays)
+                        age=delays[math.ceil(len(delays)*.95)-1] if delays else drain_seconds
+                        if source_latest_event_ns:age=max(age,(ns(end)-source_latest_event_ns)/1e9)
+                        tail_until=end+timedelta(seconds=min(drain_seconds,max(2,age+2)))
+                    if current>=tail_until:break
                 if (current-previous).total_seconds()>2:journal.control('gap',previous,current,'stalled')
                 if abs((current-previous).total_seconds()-(mono-previous_mono))>.25:journal.control('gap',min(previous,current),max(previous,current),'clock_jump')
                 previous=current;previous_mono=mono
                 if feed is None and connector is None:
+                    if current>=end:break
                     generation+=1;connect_at=mono
                     if background_connect:
                         connector=threading.Thread(target=connect,args=(generation,),daemon=True);connector.start()
@@ -656,6 +724,7 @@ def capture(root,source,*,feed_factory=None,clock=now,sleep=time.sleep,launch=su
                     code=errors.get();journal.control('gap',current,clock(),'disconnected')
                     if code in ('provider_error','invalid_message','receipt_write_failed'):
                         failure=code;stop.set();break
+                    if current>=end:failure='source_tail_disconnected';break
                     generation+=1;close_feed(feed);feed=None;connector=None;connected=None;retries+=1
                     if retries>5:failure='connection_retries_exhausted';break
                     sleep(min(2**retries,30));continue
@@ -666,7 +735,7 @@ def capture(root,source,*,feed_factory=None,clock=now,sleep=time.sleep,launch=su
                 elif feed and feed.last_received_ns and feed.last_received_ns<ns(current)-45*10**9:errors.put('transport_error')
                 if mono-last_flush>=1:journal.flush();last_flush=mono
                 if mono-last_status>=5:
-                    private_json(root/'collector_status.json',status('collecting'));last_status=mono
+                    private_json(root/'collector_status.json',status('draining_source' if current>=end else 'collecting'));last_status=mono
                     if os.statvfs(root).f_bavail*os.statvfs(root).f_frsize<protocol.get('minimum_free_bytes',4*1024**3):failure='storage_reserve_reached';break
                 if child.poll() is not None and child_restarts<3 and mono-last_child_retry>=120:
                     child=launch(child_args);last_child_retry=mono;child_restarts+=1
@@ -677,6 +746,7 @@ def capture(root,source,*,feed_factory=None,clock=now,sleep=time.sleep,launch=su
             private_json(root/'receipt_capture_done.json',dict(date=day,at=clock().isoformat(),events_total=journal.prior_events+journal.events))
             close_feed(feed)
             deadline=time.monotonic()+drain_seconds
+            if source_drain:deadline=min(deadline,time.monotonic()+max(0,(end+timedelta(seconds=105)-clock()).total_seconds()))
             while child.poll() is None and time.monotonic()<deadline:sleep(.1)
             if child.poll() is None:
                 child.terminate()
@@ -684,6 +754,7 @@ def capture(root,source,*,feed_factory=None,clock=now,sleep=time.sleep,launch=su
                 except subprocess.TimeoutExpired:child.kill();child.wait(timeout=5)
         if counts['invalid_messages'] and not failure:failure='invalid_message'
         value=status('stopped' if clock()<end else 'day_collection_finished');value.update(remaining_messages=value['backlog'],receipt_complete=counts['dropped_messages']==0 and counts['invalid_messages']==0)
+        value['source_fresh_at_close']=bool(value['source_delay_samples'] and value['source_delay_p95_seconds']<=5 and source_latest_event_ns>=ns(end)-5*10**9)
         value['complete']=value['receipt_complete'] and not value['backlog'] and not failure
         if failure:value.update(state='blocked',code=failure)
         elif value['state']=='day_collection_finished' and not value['complete']:value['state']='collection_incomplete'

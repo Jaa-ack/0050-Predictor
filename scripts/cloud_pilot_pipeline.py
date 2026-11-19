@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import sqlite3
 import sys
 import time
@@ -21,6 +22,19 @@ from zoneinfo import ZoneInfo
 
 TZ=ZoneInfo('Asia/Taipei')
 STAGES=('cleanup','receipt_archive','compact','materialize','backup','archive','merge','verify','report','checkpoint','release')
+STAGE_SECONDS=dict(cleanup=120,receipt_archive=900,compact=900,materialize=1800,
+    backup=1800,archive=1200,merge=3600,verify=3600,report=1800,checkpoint=3600,release=120)
+
+
+def notify_service(value):
+    address=os.environ.get('NOTIFY_SOCKET')
+    if not address:return False
+    if address.startswith('@'):address='\0'+address[1:]
+    try:
+        with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as sock:
+            sock.settimeout(.1);sock.connect(address);sock.sendall(value.encode())
+        return True
+    except OSError:return False
 
 
 def load_helper(name):
@@ -50,12 +64,11 @@ def verify_merge(root,day):
         db.execute('pragma cache_size=-262144');db.execute('attach database ? as daily',(daily.as_uri()+'?mode=ro',))
         fields=['digest','payload','event_ns','received_ns','ticker','channel','kind','serial']
         same=' and '.join('c.'+key+' is s.'+key for key in fields)
-        conflict=db.execute('select 1 from daily.events s join main.events c on c.id=s.id where not ('+same+') limit 1').fetchone()
         # Stable IDs permit sequential table reads. Only a digest already kept
         # under an earlier ID needs the random digest-index fallback.
         alias=' and '.join('c.'+key+' is s.'+key for key in fields if key!='received_ns')
-        missing=db.execute('select 1 from daily.events s left join main.events same_id on same_id.id=s.id where same_id.id is null and not exists(select 1 from main.events c where '+alias+') limit 1').fetchone()
-        if conflict or missing:raise ValueError('pipeline_merge_mismatch')
+        mismatch=db.execute('select 1 from daily.events s left join main.events c on c.id=s.id where (c.id is not null and not ('+same+')) or (c.id is null and not exists(select 1 from main.events c where '+alias+')) limit 1').fetchone()
+        if mismatch:raise ValueError('pipeline_merge_mismatch')
         for table,columns in [('predictions','day,ticker,row'),('releases','day,at_ns')]:
             a=db.execute('select '+columns+' from daily.'+table+' where day=? order by 1,2',(day,)).fetchall()
             b=db.execute('select '+columns+' from main.'+table+' where day=? order by 1,2',(day,)).fetchall()
@@ -111,6 +124,7 @@ def run(root,source,*,clock=None,report=write_report):
                 state.update(state='failed',phase=phase,retryable=False);save();return state
             state['attempts'][phase]=state['attempts'].get(phase,0)+1
             state.update(state='running',phase=phase);save();started=time.monotonic()
+            notify_service('EXTEND_TIMEOUT_USEC='+str(STAGE_SECONDS[phase]*1000000)+'\nSTATUS=maintenance_'+phase)
             try:
                 if phase in ('merge','verify','report','checkpoint') and keeper is None and (root/'pilot.sqlite3').is_file():
                     # Keep committed WAL available to readers without an implicit
@@ -180,6 +194,7 @@ def main():
     receipt=load_helper('receipt_journal');ops=load_helper('watchdog');protocol=receipt.read_json(args.root/'protocol.json');stamp=now()
     if args.phase=='condition':return int(protected(protocol,stamp))
     if args.phase=='quiet-condition':return int(not protected(protocol,stamp))
+    notify_service('READY=1')
     if not ops.pipeline_enabled(args.root,stamp.date().isoformat()):
         if args.phase=='replay':result=receipt.consume(args.root,args.source,replay=True,session_mode=True)
         elif args.phase=='backup':result=ops.backup(args.root)

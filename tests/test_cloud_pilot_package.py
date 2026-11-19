@@ -161,6 +161,9 @@ def test_heavy_jobs_share_the_same_resumable_worker_without_restart_loops():
         assert 'Environment=PYTHONPATH=/opt/twquant-pilot/app/src' in text
         assert 'Environment=OPENBLAS_NUM_THREADS=1' in text
         assert 'ExecStartPost=' not in text
+        assert 'Type=notify' in text and 'NotifyAccess=main' in text
+        assert 'RuntimeMaxSec=1800' in text
+        assert 'ExecCondition=/usr/bin/python3 /opt/twquant-pilot/window.py ' in text
     for kind in ['replay','backup','archive','report']:
         assert 'twquant-pilot-'+kind+'.service' in u['twquant-pilot-quiet.service']
     assert '08:38:00 Asia/Taipei' in u['twquant-pilot-quiet.timer']

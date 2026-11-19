@@ -44,6 +44,85 @@ def test_report_recovery_waits_for_backup_without_consuming_restart_attempts(tmp
     assert {'code':'report_missing','action':'start_report'} in m.assess(p,stamp,view)
 
 
+def test_source_delay_is_alerted_even_when_receipt_backlog_is_zero(tmp_path):
+    m=module();p=protocol(tmp_path);at=datetime(2026,11,16,9,45,tzinfo=TZ);view=healthy(at)
+    view.update(collector_backlog=0,source_delay_known=True,source_delay_p95_seconds=300)
+    assert {'code':'source_data_delayed','action':None} in m.assess(p,at,view)
+
+
+def test_all_fallback_forecasts_are_alerted_without_republishing(tmp_path):
+    m=module();p=protocol(tmp_path);at=datetime(2026,11,16,10,0,10,tzinfo=TZ);view=healthy(at)
+    view.update(member_predictions=50,member_fallbacks=50)
+    assert {'code':'forecast_inputs_degraded','action':None} in m.assess(p,at,view)
+
+
+def test_dead_maintenance_worker_is_detected_and_resumed(tmp_path):
+    m=module();p=protocol(tmp_path);at=datetime(2026,11,16,14,tzinfo=TZ);view=healthy(at)
+    view.update(maintenance_interrupted=True,maintenance_retryable=True,maintenance_active=False)
+    assert {'code':'maintenance_failed','action':'start_replay'} in m.assess(p,at,view)
+
+
+def test_snapshot_exposes_source_delay_and_member_fallbacks(tmp_path,monkeypatch):
+    from test_live_pilot import protocol as live_protocol,stamp
+    from twquant.live_pilot import PilotStore
+    m=module();p=live_protocol();store=PilotStore(tmp_path,p);store.emit(stamp());store.seal('2026-11-16',stamp(.1));store.close()
+    (tmp_path/'collector_status.json').write_text(json.dumps(dict(date='2026-11-16',source_delay_samples=512,source_delay_p95_seconds=300)))
+    (tmp_path/'pipeline_state.json').write_text(json.dumps(dict(state='running',phase='verify',attempts={'verify':1})))
+    monkeypatch.setattr(m,'unit_active',lambda kind:False)
+    monkeypatch.setattr(m.subprocess,'run',lambda *a,**k:SimpleNamespace(stdout='yes',returncode=0))
+    view=m.snapshot(tmp_path,tmp_path,stamp(4*3600))
+    assert view.get('source_delay_known') and view['source_delay_p95_seconds']==300
+    assert view['member_predictions']==50 and view['member_fallbacks']==50
+    assert view['maintenance_interrupted'] and view['maintenance_retryable']
+
+
+def test_new_acceptance_keeps_an_observed_source_delay_failure(tmp_path):
+    m=module();p=protocol(tmp_path);day='2026-11-16'
+    (tmp_path/'supervision_policy.json').write_text(json.dumps(dict(source_freshness_from=day)))
+    at=datetime(2026,11,16,9,35,tzinfo=TZ);view=healthy(at);state={}
+    view.update(source_delay_known=True,source_delay_p95_seconds=300)
+    m.daily_acceptance(tmp_path,p,at,view,state,lambda *a:True)
+    view['source_delay_p95_seconds']=.1
+    m.daily_acceptance(tmp_path,p,at.replace(hour=10,minute=30),view,state,lambda *a:True)
+    result=json.loads((tmp_path/('daily_acceptance_'+day+'.json')).read_text())
+    assert result['checks'].get('source_event_freshness') is False
+    assert result['observations']['max_source_delay_p95_seconds']==300
+
+
+def test_fresh_full_coverage_can_pass_the_extended_acceptance(tmp_path):
+    m=module();p=protocol(tmp_path);day='2026-11-16';at=datetime(2026,11,16,10,30,tzinfo=TZ)
+    (tmp_path/'supervision_policy.json').write_text(json.dumps(dict(source_freshness_from=day)))
+    observed=dict(samples=90,flow_samples=86,max_backlog=0,max_lag_seconds=1,unhealthy_seen=False,
+        first_at='2026-11-16T09:30:00+08:00',last_at='2026-11-16T10:16:00+08:00',max_poll_gap_seconds=30,
+        source_delay_samples=86,max_source_delay_p95_seconds=.2)
+    view=healthy(at);view.update(member_predictions=50,member_fallbacks=0,closeout_source_fresh=True,
+        closeout_date=day,closeout_state='day_collection_finished',closeout_complete=True,closeout_remaining=0,
+        receipt_complete=True,critical_windows_observed=True,gap_count=0,materialization_pending=False,active_incidents=[])
+    m.daily_acceptance(tmp_path,p,at,view,dict(daily_observations={day:observed}),lambda *a:True)
+    assert json.loads((tmp_path/('daily_acceptance_'+day+'.json')).read_text())['passed']
+
+
+def test_late_source_data_is_not_reported_recovered_when_capture_ends(tmp_path):
+    m=module();protocol(tmp_path);at=datetime(2026,11,16,10,14,tzinfo=TZ);view=healthy(at);notices=[]
+    view.update(source_delay_known=True,source_delay_p95_seconds=300)
+    options=dict(inspect=lambda:view,control=lambda action:False,send=lambda code,fields:notices.append((code,fields)) or True)
+    m.check(tmp_path,clock=lambda:at,**options)
+    m.check(tmp_path,clock=lambda:at.replace(hour=13),**options)
+    assert not any(code=='recovered' and fields.get('previous')=='source_data_delayed' for code,fields in notices)
+
+
+def test_telegram_health_is_checked_during_maintenance_too(tmp_path):
+    m=module();p=protocol(tmp_path);at=datetime(2026,11,16,14,tzinfo=TZ);view=healthy(at)
+    view.update(maintenance_active=True,shared_service_health='unhealthy')
+    assert {'code':'shared_service_unhealthy','action':None} in m.assess(p,at,view)
+
+
+def test_unfresh_source_tail_is_alerted_after_the_capture_window(tmp_path):
+    m=module();p=protocol(tmp_path);at=datetime(2026,11,16,10,20,tzinfo=TZ);view=healthy(at)
+    view.update(closeout_source_fresh=False,closeout_date='2026-11-16')
+    assert {'code':'source_tail_delayed','action':None} in m.assess(p,at,view)
+
+
 def test_interrupted_backup_cleanup_preserves_published_data_and_respects_the_lock(tmp_path):
     import fcntl
     m=module();directory=tmp_path/'backups';directory.mkdir()
