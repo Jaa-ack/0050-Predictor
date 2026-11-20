@@ -59,6 +59,8 @@ MESSAGES = {
     'maintenance_failed': '收件後的順序維護未完成，已保留原資料與階段狀態；只會在採集保護時段之外有限續跑。',
     'shared_service_unhealthy': '原Telegram容器的健康狀態異常或無法確認；研究監控不會擅自重啟原服務。',
     'daily_validation_failed': '當日盤中營運驗收未通過，私人逐項結果已保存；晚發、缺口及失敗分母保留。',
+    'daily_paper_result': '0050 成分股紙上預測與評分',
+    'daily_result_pending': '當日紙上試驗的可驗證評分尚未產出。保留缺報或延誤狀態，資料就緒後回報。',
     'maintenance_delayed': '盤中採集與發布條件已通過，但10:30時資料整理、備份或報告尚未全部完成；原整體驗收仍保留為未通過，順序維護會在保護時段之外續跑。',
     'supervision_ready': '下一個宣告交易日的研究排程與Telegram通知通道已完成設定驗證；這不是盤中驗收通過或準確率達標通知。',
     'forecast_missing': '10:00完整預測或發布封印缺失。補發不會倒填時間，也不會取得準時信用。',
@@ -248,6 +250,59 @@ def daily_acceptance(root,protocol,stamp,current,state,send):
     notified=state.setdefault('daily_notifications',{})
     if not result['passed'] and not notified.get(day):notified[day]=send('maintenance_delayed' if result.get('core_live_passed') and result.get('maintenance_pending') else 'daily_validation_failed',{})
 
+def protocol_fingerprint(protocol):
+    return hashlib.sha256(json.dumps(protocol, sort_keys=True).encode()).hexdigest()
+
+
+def daily_results(root, protocol, stamp, state, send):
+    day = stamp.date().isoformat()
+    policy = read_json(root/'supervision_policy.json', {})
+    if day not in protocol['dates'] or day < policy.get('daily_results_from', '9999'):
+        return
+    delivery = state.setdefault('paper_result_delivery', {}).setdefault(day, {})
+    if delivery.get('sent') or stamp.strftime('%H:%M:%S') < '10:30:00':
+        return
+    acceptance = read_json(root/('daily_acceptance_'+day+'.json'), {})
+    result = read_json(root/('daily_evaluation_'+day+'.json'), {})
+    if result.get('date') != day or result.get('protocol_sha256') != protocol_fingerprint(protocol):
+        result = {}
+    if not result and report_current(root, protocol, stamp):
+        report = read_json(root/'evaluation.json', {})
+        horizons = report.get('horizons', {})
+        if report.get('protocol_sha256') == protocol_fingerprint(protocol) and all(
+            day in horizons.get(h, {}).get('per_day', {}) for h in ('60', '300')
+        ):
+            result = dict(date=day, directions=[], horizons={h:horizons[h]['per_day'][day] for h in ('60', '300')})
+    if result:
+        delivery['sent'] = send('daily_paper_result', dict(result=result, operational_passed=acceptance.get('core_live_passed')))
+    elif stamp.strftime('%H:%M:%S') >= '13:50:00' and not delivery.get('pending_sent'):
+        delivery['pending_sent'] = send('daily_result_pending', {})
+
+
+def daily_result_text(fields):
+    result = fields['result']
+    date = datetime.strptime(result['date'], '%Y-%m-%d').date().isoformat()
+    operational = {True:'通過', False:'未通過', None:'尚無驗收紀錄'}[fields.get('operational_passed')]
+    parts = [date, '盤中營運驗收 '+operational]
+    for horizon in ('60','300'):
+        score = result['horizons'][horizon]
+        expected, correct, missing, unknown = (score[k] for k in ('expected','correct','missing','unknown'))
+        if expected != 50 or any(type(v) is not int or not 0<=v<=50 for v in (correct, missing, unknown)):
+            raise ValueError('invalid_daily_result')
+        line = f'{horizon}秒 {correct}/{expected}（{correct/expected:.0%}），缺報{missing}，未知{unknown}'
+        timeouts = score.get('timeouts')
+        if type(timeouts) is int and 0<=timeouts<=50:
+            line += f'，逾時{timeouts}'
+        parts.append(line)
+    directions = result.get('directions', [])
+    if len(directions)==50 and all(t.isascii() and t.isdecimal() and 4<=len(t)<=6 and d in (-1,1)
+                                 and type(f) is bool for t,d,f in directions):
+        parts.append('準時發布' if result.get('publication_on_time') else '發布逾時')
+        parts.append(f'10:00 封存方向（* 為回退，共 {sum(f for _,_,f in directions)} 檔）')
+        items = [t+('↑' if d==1 else '↓')+('*' if f else '') for t,d,f in directions]
+        parts.extend(' '.join(items[i:i+10]) for i in range(0, 50, 10))
+    return '\n'.join(parts)
+
 
 def assess(protocol, stamp, snapshot):
     """Return fixed incident codes and allowlisted recovery suggestions only."""
@@ -348,6 +403,8 @@ def send_notice(prefix, code, fields, *, opener=urlopen):
         if type(config['chat_id']) is not int or config['chat_id'] <= 0:
             return False
         text = '[0050研究] ' + MESSAGES[code]
+        if code == 'daily_paper_result':
+            text += '\n' + daily_result_text(fields)
         if fields.get('action') in ACTIONS:
             text += '\n已嘗試有限復原：' + fields['action']
         if fields.get('previous') in MESSAGES:
@@ -485,6 +542,7 @@ def check(root, *, prefix=Path('/opt/twquant-pilot'), clock=now, inspect=None, c
     state.setdefault('incidents', {}); state.setdefault('attempts', {})
     last = datetime.fromisoformat(protocol['dates'][-1] + 'T14:00:00').replace(tzinfo=TZ) + timedelta(days=1)
     if current.get('complete') or stamp >= last:
+        daily_results(root, protocol, stamp, state, send)
         code = 'complete' if current.get('complete') else 'monitor_window_ended'
         if not state.get('final_notified'):
             state['final_notified'] = send(code, {})
@@ -525,6 +583,7 @@ def check(root, *, prefix=Path('/opt/twquant-pilot'), clock=now, inspect=None, c
                 del state['incidents'][code]
     current['active_incidents']=sorted(active|set(state['incidents']))
     daily_acceptance(root,protocol,stamp,current,state,send)
+    daily_results(root, protocol, stamp, state, send)
     state['checked_at'] = stamp.isoformat()
     private_json(root / 'watchdog_state.json', state)
     pending=active|set(state['incidents'])

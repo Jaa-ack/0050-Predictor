@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — 2026-11-20 — Daily scoring and private paper-forecast results
+
+- Assessed the five completed live sessions with full coverage penalties. The frozen rules scored 30/250 at 60 seconds and 36/250 at 300 seconds. November 20 sealed all 50 constituents about 0.53 seconds after the decision and scored 25/50 and 29/50. All 15 fallbacks had an empty side in the last causal book. Source freshness and shared-host stability still failed the operational gate.
+- Score the sealed daily working database before history merge and save a private result with the original directions, fallback flags and separate horizon counts. Use the existing private Telegram watchdog to send results, retry unsuccessful deliveries and indicate pending evaluation after the deadline. Keep the immutable acceptance and frozen scoring protocol.
+- The isolated real-stream rehearsal verified 105 subscriptions and published its 53 forecasts 6.286984 seconds after the test decision with shorter warm-up. A follow-up with the production warm-up and priority was deferred due to the shared service health check. Both outcomes remain separate from the official 10:00 scores.
+
 ## Unreleased — 2026-11-19 — Source freshness, bounded tail capture and lighter ingestion
 
 - Preserve November 19's failed acceptance: 1,114,162 received/persisted events and 53 timely forecasts do not establish usable inputs. Source events were about five minutes old at 10:00 and all 53 forecasts used fallback; gaps, reminder health failures and 50-member denominators remain. Maintenance finished at 12:08 after three aggregate-timeout interruptions; no forecast or score is rewritten.

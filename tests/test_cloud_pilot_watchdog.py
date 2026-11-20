@@ -35,6 +35,25 @@ def healthy(stamp):
                 report_current=True, backup_current=True, backup_active=False, complete=False,
                 preflight_current=True,preflight_active=False)
 
+def test_daily_report_retries_and_sends_once_for_a_failed_paper_session(tmp_path):
+    m=module();p=protocol(tmp_path);day=p['dates'][0]
+    stamp=datetime(2026,11,16,10,31,tzinfo=TZ)
+    (tmp_path/'supervision_policy.json').write_text(json.dumps(dict(daily_results_from=day)))
+    (tmp_path/('daily_acceptance_'+day+'.json')).write_text(json.dumps(dict(core_live_passed=False)))
+    horizon=dict(expected=50,correct=25,missing=0,unknown=1,timeouts=5)
+    result=dict(date=day,protocol_sha256=m.protocol_fingerprint(p),publication_on_time=True,
+                directions=[],horizons={'60':horizon,'300':horizon})
+    (tmp_path/('daily_evaluation_'+day+'.json')).write_text(json.dumps(result))
+    notices=[];state={}
+    def send(code, fields):
+        notices.append((code,fields))
+        return len(notices)>1
+    for _ in range(3):
+        m.daily_results(tmp_path,p,stamp,state,send)
+    assert [code for code,_ in notices]==['daily_paper_result','daily_paper_result']
+    assert notices[-1][1]['operational_passed'] is False
+    assert notices[-1][1]['result']['horizons']['60']['correct']==25
+
 
 def test_report_recovery_waits_for_backup_without_consuming_restart_attempts(tmp_path):
     m=module();p=protocol(tmp_path);stamp=datetime(2026,11,16,14,tzinfo=TZ)

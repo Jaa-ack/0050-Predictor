@@ -68,6 +68,25 @@ def test_pipeline_does_not_overlap_capture_or_an_existing_maintenance_worker(tmp
         assert m.run(root,SOURCE,clock=lambda:stamp(18*60),report=report)['state']=='busy'
     assert (root/'receipts/00000001.twqj').exists()
 
+def test_daily_score_is_available_even_if_the_historical_merge_fails(tmp_path, monkeypatch):
+    m=module();root=tmp_path/'pilot';prepare(root)
+    load=m.load_helper
+    def helpers(name):
+        helper=load(name)
+        if name=='receipt_journal':
+            def fail(*args):raise OSError('merge failed')
+            helper.merge_session=fail
+        return helper
+    monkeypatch.setattr(m,'load_helper',helpers)
+    result=m.run(root,SOURCE,clock=lambda:stamp(18*60),report=report)
+    assert result['phase']=='merge' and result['state']=='failed'
+    assert not (root/'evaluation.json').exists()
+    daily=json.loads((root/'daily_evaluation_2026-11-16.json').read_text())
+    assert daily['date']=='2026-11-16' and daily['publication_on_time']
+    assert len(daily['directions'])==50
+    assert daily['horizons']['60']==dict(expected=50, correct=1, missing=0, unknown=49, timeouts=0)
+    assert daily['horizons']['300']['expected']==50
+
 
 def test_failed_pipeline_keeps_data_and_resumes_at_the_failed_stage(tmp_path):
     m=module();root=tmp_path/'pilot';prepare(root)

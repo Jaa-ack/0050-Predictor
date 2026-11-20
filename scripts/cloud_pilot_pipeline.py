@@ -21,9 +21,9 @@ import time
 from zoneinfo import ZoneInfo
 
 TZ=ZoneInfo('Asia/Taipei')
-STAGES=('cleanup','receipt_archive','compact','materialize','backup','archive','merge','verify','report','checkpoint','release')
+STAGES=('cleanup','receipt_archive','compact','materialize','backup','daily_result','archive','merge','verify','report','checkpoint','release')
 STAGE_SECONDS=dict(cleanup=120,receipt_archive=900,compact=900,materialize=1800,
-    backup=1800,archive=1200,merge=3600,verify=3600,report=1800,checkpoint=3600,release=120)
+    daily_result=300,backup=1800,archive=1200,merge=3600,verify=3600,report=1800,checkpoint=3600,release=120)
 
 
 def notify_service(value):
@@ -56,6 +56,37 @@ def write_report(root,day,stamp):
     last=datetime.fromisoformat(protocol['dates'][-1]+'T'+protocol.get('prediction_time','10:00:00')).replace(tzinfo=TZ)
     try:return store.write_report(as_of=now(),final=day==protocol['dates'][-1] and now()>=last+timedelta(hours=3,minutes=40))
     finally:store.close()
+
+def write_daily_result(root, day, stamp):
+    from twquant.live_pilot import PilotStore, private_json
+    protocol = json.loads((root/'protocol.json').read_text())
+    session = root/'sessions'/day
+    if not (session/'pilot.sqlite3').is_file():
+        raise ValueError('daily_history_missing')
+    with closing(PilotStore(session, protocol)) as store:
+        marker = store.db.execute("select value from metadata where key='cloud_history_complete'").fetchone()
+        if marker != (day,):
+            raise ValueError('daily_history_not_sealed')
+        decision = store.decisions[day]
+        store.decisions = {day: decision}
+        report = store.evaluate(as_of=stamp)
+        if not all(day in h['per_day'] for h in report['horizons'].values()):
+            raise ValueError('daily_answers_pending')
+        release = store.db.execute('select at_ns from releases where day=?', (day,)).fetchone()
+        member_set = set(protocol['members'])
+        directions = []
+        for ticker, raw in store.db.execute('select ticker,row from predictions where day=? order by ticker', (day,)):
+            if ticker in member_set:
+                row = json.loads(raw)
+                directions.append([ticker, row['direction'], row['fallback']])
+        published = release and len(directions) == 50
+        result = dict(date=day, as_of=stamp.isoformat(), protocol_sha256=store.digest,
+            publication_on_time=bool(published and 0<=release[0]-decision<=protocol['max_emission_lateness_seconds']*10**9),
+            directions=directions if published else [],
+            horizons={key: dict(value['per_day'][day], timeouts=value['timeout_predictions'])
+                for key, value in report['horizons'].items()})
+    private_json(root/('daily_evaluation_'+day+'.json'), result)
+    return dict(state='complete')
 
 
 def verify_merge(root,day):
@@ -107,15 +138,16 @@ def run(root,source,*,clock=None,report=write_report):
         except BlockingIOError:return dict(state='busy')
         path=root/'pipeline_state.json';state=receipt.read_json(path,{})
         if state.get('identity')!=identity:state=dict(identity=identity,date=day,completed=[],attempts={})
+        stages=tuple(p for p in STAGES if p!='daily_result' or 'release' not in state['completed'])
         key=ops.report_key(protocol,stamp)
         if 'report' in state['completed'] and (state.get('report_key')!=key or not ops.report_current(root,protocol,stamp)):state['completed'].remove('report')
-        if state.get('state')=='complete' and all(p in state['completed'] for p in STAGES):
+        if state.get('state')=='complete' and all(p in state['completed'] for p in stages):
             mark_complete(root,protocol,day);return state
         if state.get('state')=='failed' and state.get('failed_at') and (stamp-datetime.fromisoformat(state['failed_at'])).total_seconds()<120:return dict(state='retry_wait',phase=state.get('phase'))
         def save():
             state['at']=clock().isoformat();receipt.private_json(path,state)
         keeper=None
-        for phase in STAGES:
+        for phase in stages:
             if phase in state['completed']:continue
             if protected(protocol,clock()):return dict(state='protected_window')
             if phase!='cleanup' and shutil.disk_usage(root).free<protocol.get('minimum_free_bytes',4*1024**3):
@@ -149,6 +181,7 @@ def run(root,source,*,clock=None,report=write_report):
                     result=dict(state='complete',date=day,events_total=count,at=clock().isoformat())
                     receipt.private_json(root/'day_history_status.json',result)
                     receipt.private_json(root/'materializer_status.json',dict(result,projection_only=False))
+                elif phase=='daily_result':result=write_daily_result(root,day,clock())
                 elif phase=='backup':result=ops.backup(root,stamp=clock(),session_day=day)
                 elif phase=='merge':
                     result=receipt.merge_session(root,source,day)
