@@ -5,6 +5,7 @@ import shutil
 
 from .credentials import load_credentials,redact
 from .data import PriceStore
+from .opening_web import synthetic_opening
 from .web_data import DashboardData,GITHUB_URL
 from .workflows import data_kind,write_json
 
@@ -46,10 +47,10 @@ def export_dashboard(root,destination):
     destination.mkdir(parents=True,exist_ok=True)
     public_assets=destination/'assets'
     public_assets.mkdir(exist_ok=True)
-    shutil.copyfile(assets/'index.html',destination/'index.html')
-    for name in ('app.css','app.js','state.js'):
-        if (assets/name).exists():
-            shutil.copyfile(assets/name,public_assets/name)
+    for page in ('index.html','legacy.html'):
+        shutil.copyfile(assets/page,destination/page)
+    for name in ('app.css','app.js','state.js','opening.css','opening.js','opening-state.js'):
+        shutil.copyfile(assets/name,public_assets/name)
     generated=datetime.now(timezone.utc).isoformat()
     config=dict(mode='snapshot',github_url=GITHUB_URL,capabilities=dict(actions=False),default_workspace='demo',
                 snapshot_generated_at=generated,generated_at=generated)
@@ -64,7 +65,7 @@ def export_dashboard(root,destination):
     from .source_workflows import source_status
     from .credentials import Credentials
     sources=dict(sources=source_status(Credentials({})),snapshots=[],sync=None)
-    payloads={'status':status,'workspaces':dict(workspaces=[dict(id='demo',name='合成研究快照',data_kind='synthetic',has_report=True)],default='demo'),
+    payloads={'opening':synthetic_opening(),'status':status,'workspaces':dict(workspaces=[dict(id='demo',name='合成研究快照',data_kind='synthetic',has_report=True)],default='demo'),
         'forecasts':forecasts,'equity':data.equity(),'sources':sources,'monitoring':status['monitoring'],
         'runs':[_report(r) for r in data.runs() if r.get('data_kind')=='synthetic'],'gaps':data.gaps(),'jobs':dict(jobs=[])}
     for ticker in prices.ticker.unique():
@@ -72,4 +73,5 @@ def export_dashboard(root,destination):
     for name,payload in payloads.items():
         write_json(destination/'data'/(name+'.json'),redact(payload,credentials.secret_values()))
     (destination/'.twquant-snapshot').write_text('synthetic-only\n')
-    return dict(mode='snapshot',destination=str(destination),files=len(payloads)+5,forecasts=len(forecasts))
+    return dict(mode='snapshot',destination=str(destination),files=sum(path.is_file() for path in destination.rglob('*')),
+                forecasts=len(forecasts))

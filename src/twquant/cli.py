@@ -238,6 +238,8 @@ def parser():
     c.add_argument("--csv", type=Path, required=True)
     web = subs.add_parser("serve", help="啟動本機研究工作台與固定任務操作")
     web.add_argument("--port", type=int, default=8000)
+    web.add_argument('--opening-study', type=Path, help='本機 08:59 歷史模型研究目錄')
+    web.add_argument('--opening-capture', type=Path, help='本機的私人試撮收件及期末評估目錄')
     export_web=subs.add_parser('export-web',help='匯出僅含合成研究資料的安全靜態網頁')
     export_web.add_argument('--out',type=Path,required=True)
     return p
@@ -626,7 +628,14 @@ def execute(args):
         workspaces={'demo':Path('artifacts/demo'),'real':Path('artifacts/real')}
         if root.resolve() not in {p.resolve() for p in workspaces.values()}:
             workspaces['current']=root
-        uvicorn.run(create_app(root,workspaces=workspaces,enable_actions=True), host="127.0.0.1", port=args.port)
+        opening_study = args.opening_study
+        if opening_study is None:
+            candidates = [path for path in root.parent.glob('opening-gap-*')
+                          if (path / 'report.json').is_file() and (path / 'predictions.parquet').is_file()]
+            opening_study = max(candidates, key=lambda path: (path / 'report.json').stat().st_mtime_ns, default=None)
+        capture = args.opening_capture or root.parent / 'opening-capture'
+        uvicorn.run(create_app(root,workspaces=workspaces,enable_actions=True,
+                               opening_study=opening_study,opening_capture=capture), host="127.0.0.1", port=args.port)
         return None
 
 

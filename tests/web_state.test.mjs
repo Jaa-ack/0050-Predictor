@@ -82,3 +82,19 @@ test('transfer table keeps development and reserved metrics separate for the sel
   assert.equal(state.transferRows(report,5,'holdout').length,0);
   assert.deepEqual(state.transferRows({},1,'holdout'),[]);
 });
+
+test('opening filters keep explicit misses distinct from unresolved outcomes', async () => {
+  const { openingRows } = await import('../src/twquant/static/opening-state.js');
+  const rows = [{ticker:'2330', correct: true}, {ticker:'2454', correct: false}, {ticker:'2317', correct:null}];
+  assert.deepEqual(openingRows(rows, '聯發', 'all').map(row => row.ticker), ['2454']);
+  assert.deepEqual(openingRows(rows, '', 'miss').map(row => row.ticker), ['2454']);
+  assert.deepEqual(openingRows(rows, '', 'pending').map(row => row.ticker), ['2317']);
+});
+
+test('transfer instruments can be inspected without adding them to constituent results', async () => {
+  const { openingRows } = await import('../src/twquant/static/opening-state.js');
+  const rows = [{ticker:'2330', constituent:true, transfer:false},
+    {ticker:'1216', constituent:true, transfer:true}, {ticker:'0050', constituent:false, transfer:true}];
+  assert.deepEqual(openingRows(rows, '', 'all').map(row => row.ticker), ['2330','1216']);
+  assert.deepEqual(openingRows(rows, '', 'transfer').map(row => row.ticker), ['1216','0050']);
+});

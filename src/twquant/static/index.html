@@ -2,49 +2,89 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#142923">
-  <meta name="description" content="0050 多因子研究工作台：歷史回測、股價預測、資料來源與逐日校準。">
-  <title>0050 Research · 多因子研究工作台</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101a2e">
+  <meta name="description" content="0050 Predict 開盤方向研究、驗證結果與逐筆因子">
+  <title>開盤方向 | 0050 Predict</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./assets/app.css">
-  <script type="module" src="./assets/app.js"></script>
+  <link rel="stylesheet" href="./assets/opening.css">
+  <script type="module" src="./assets/opening.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#main">跳至主要內容</a>
-  <div class="app-shell">
-    <aside class="sidebar" aria-label="主要導覽">
-      <a class="brand" href="#overview" aria-label="0050 Research 首頁">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-        <span><strong>0050<span class="brand-dot">.</span></strong><small>RESEARCH WORKSPACE</small></span>
-      </a>
-      <div class="sidebar-caption">研究工作台 <span>WORKSPACE</span></div>
-      <nav class="nav" id="navigation">
-        <a href="#overview" data-page="overview"><span data-icon="overview"></span>研究總覽<span class="nav-arrow">↗</span></a>
-        <a href="#forecasts" data-page="forecasts"><span data-icon="forecast"></span>個股預測</a>
-        <a href="#backtests" data-page="backtests"><span data-icon="chart"></span>歷史回測</a>
-        <a href="#sources" data-page="sources"><span data-icon="database"></span>資料來源<span class="nav-count" id="source-count">—</span></a>
-        <a href="#workflows" data-page="workflows"><span data-icon="workflow"></span>工作流程</a>
-        <a href="#gaps" data-page="gaps"><span data-icon="check"></span>待完成項目</a>
-      </nav>
-      <div class="sidebar-method"><span class="eyebrow">RESEARCH PROCESS</span><div class="process-line"><i></i><span>歷史資料驗證</span></div><div class="process-line"><i></i><span>樣本外回測</span></div><div class="process-line"><i></i><span>逐日預測與校準</span></div><a href="https://github.com/Jaa-ack/0050-Predictor/blob/main/docs/METHODOLOGY.md" target="_blank" rel="noopener noreferrer">了解研究方法 <span>↗</span></a></div>
-      <div class="sidebar-bottom"><div class="connection"><span class="status-dot"></span><span id="connection-label">連線中</span></div><div class="sidebar-version">v0.2.0 <span>Asia / Taipei</span></div></div>
-    </aside>
-    <div class="workspace">
-      <header class="topbar">
-        <div class="breadcrumb"><span class="breadcrumb-home" data-icon="grid"></span><span>工作台</span><span class="slash">/</span><strong id="breadcrumb-title">研究總覽</strong></div>
-        <div class="topbar-actions"><span class="local-clock" id="local-clock">Asia / Taipei</span><span class="topbar-divider"></span><label class="workspace-picker"><span class="status-dot"></span><select id="workspace-select" aria-label="選擇資料工作區"><option value="demo">示範工作區</option></select></label><a class="icon-button github-link" id="github-link" href="https://github.com/Jaa-ack/0050-Predictor" target="_blank" rel="noopener noreferrer" aria-label="開啟 GitHub 專案"><span data-icon="github"></span></a></div>
-      </header>
-      <main id="main" tabindex="-1">
-        <div class="page-heading"><div><div class="eyebrow">TAIWAN EQUITY · MULTI-FACTOR RESEARCH</div><h1 id="page-title">研究總覽</h1><p id="page-subtitle">從資料驗證到預測校準，讓每一次研究都有依據。</p></div><div class="heading-actions"><span class="updated-label" id="updated-label">正在載入研究結果</span><button class="button button-secondary" id="refresh-button"><span data-icon="refresh"></span><span>重新整理</span></button></div></div>
-        <div id="environment-banner" class="environment-banner" role="status"><span class="banner-icon" data-icon="flask"></span><div><strong>正在連接研究工作區</strong><span>讀取回測、預測與資料來源狀態…</span></div></div>
-        <div id="error-banner" class="error-banner" role="alert" hidden></div>
-        <div id="page-content" aria-live="polite"><div class="loading-state"><span class="spinner"></span>正在載入研究資料</div></div>
-        <footer class="footer"><span>0050 Research <span class="footer-dot">·</span> 多因子預測與估值研究</span><span>歷史結果不代表未來表現 <span class="footer-dot">·</span> 僅供研究與影子驗證</span></footer>
-      </main>
+  <a class="skip" href="#main">跳至主要內容</a>
+  <aside class="rail" aria-label="工作台導覽">
+    <a class="brand" href="#overview">
+      <span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span><strong>0050 Predict</strong><small>台股研究工作台</small></span>
+    </a>
+    <nav class="nav">
+      <a class="nav-link active" href="#overview"><i class="nav-icon overview-icon" aria-hidden="true"></i>總覽</a>
+      <a class="nav-link" href="#predictions"><i class="nav-icon list-icon" aria-hidden="true"></i>逐筆預測</a>
+      <a class="nav-link" href="#architecture"><i class="nav-icon flow-icon" aria-hidden="true"></i>系統架構</a>
+    </nav>
+    <div class="rail-bottom">
+      <a class="nav-link classic-link" href="./legacy.html"><i class="nav-icon archive-icon" aria-hidden="true"></i>日線研究</a>
+      <span id="rail-status">正在連接</span>
     </div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar">
+      <div class="breadcrumb"><span>研究工作台</span><span aria-hidden="true">/</span><strong>開盤方向</strong></div>
+      <div class="header-actions"><span class="time-zone">臺北時間 UTC+8</span><span class="mode-pill" id="mode">連線中</span></div>
+    </header>
+    <main id="main">
+      <section id="overview" class="overview" aria-labelledby="title">
+        <div class="heading">
+          <div>
+            <h1 id="title">開盤方向</h1>
+            <p>每日 <strong>08:59</strong> 預測正式開盤是否高於前收</p>
+          </div>
+          <div class="heading-actions">
+            <div class="segment" aria-label="驗證範圍">
+              <button type="button" data-view="history" aria-pressed="true">歷史驗證</button>
+              <button type="button" data-view="week" aria-pressed="false">試撮週</button>
+            </div>
+            <button class="secondary" type="button" id="refresh">重新整理</button>
+          </div>
+        </div>
+        <p id="alert" class="alert" role="status" hidden></p>
+        <div id="metrics" class="metrics" aria-label="核心指標" aria-live="polite"></div>
+        <div class="dashboard">
+          <section class="panel trend" aria-labelledby="trend-title">
+            <header class="panel-heading">
+              <div><h2 id="trend-title">逐日準確率</h2><p id="trend-subtitle"></p></div>
+              <span id="trend-legend" class="chart-legend"></span>
+            </header>
+            <div id="trend"></div>
+          </section>
+          <section class="panel architecture" id="architecture" aria-labelledby="architecture-title">
+            <header class="panel-heading">
+              <div><h2 id="architecture-title">系統架構</h2></div>
+            </header>
+            <ol id="pipeline" class="pipeline"></ol>
+          </section>
+        </div>
+      </section>
+      <section class="panel predictions" id="predictions" aria-labelledby="predictions-title">
+        <header class="panel-heading prediction-heading">
+          <div><h2 id="predictions-title">逐筆預測</h2><p id="prediction-context"></p></div>
+          <div class="table-controls">
+            <label><span class="visually-hidden">交易日</span><select id="decision-day" aria-label="交易日"></select></label>
+            <label><span class="visually-hidden">代號或公司</span><input id="query" type="search" placeholder="搜尋代號或公司" autocomplete="off"></label>
+            <label><span class="visually-hidden">篩選結果</span><select id="result-filter" aria-label="篩選結果"><option value="all">成分股結果</option><option value="hit">命中</option><option value="miss">未命中</option><option value="pending">缺答案</option><option value="transfer" id="transfer-option">延伸標的</option></select></label>
+          </div>
+        </header>
+        <div class="table-frame">
+          <table>
+            <thead><tr><th scope="col">標的</th><th scope="col">預測</th><th scope="col">高於前收機率</th><th scope="col" class="actual-col">正式開盤</th><th scope="col" class="result-col">判定</th><th scope="col"><span class="visually-hidden">影響因素</span></th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <div id="table-empty" class="empty" hidden></div>
+        <div class="table-bottom"><span id="row-count" aria-live="polite"></span><div class="pagination"><button id="previous" type="button">上一頁</button><span id="page-number"></span><button id="next" type="button">下一頁</button></div></div>
+      </section>
+      <footer class="footer"><span>0050 Predict</span><span>固定十檔訓練 · 完整成分股驗證</span></footer>
+    </main>
   </div>
-  <dialog id="stock-dialog" aria-labelledby="stock-dialog-title"><div class="dialog-top"><span class="eyebrow">STOCK RESEARCH</span><button class="icon-button" id="close-dialog" aria-label="關閉個股詳情">×</button></div><div id="stock-dialog-content"></div></dialog>
-  <div class="toast" id="toast" role="status" hidden></div>
 </body>
 </html>

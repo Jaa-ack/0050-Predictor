@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — 2026-11-20 — Opening research dashboard and forecast attribution
+
+- Made the opening-direction task the main workbench. Added daily and weakest-five scores, source-to-validation flow, a separate capture-week view, and searchable results with expandable per-prediction factors. Kept the existing daily research workflow on its own page.
+- Persisted ordered source contributions and observed inputs alongside every historical prediction. Added exact probability decomposition and source/receipt times to the scheduled weekly evaluation, plus a strict pre-cutoff auction-event export for later multi-source training.
+- Replayed the long historical comparison with explanations. Retained the same 4,428/6,300 final constituent hits. The hosted snapshot generates its own fictional opening results and the local page reads private study and capture outputs.
+
 ## Unreleased — 2026-11-20 — Bounded VM opening-auction capture
 
 - Stopped the legacy 10:00 VM pilot and scheduled read-only trial-auction acquisition for November 23–27. Preserve opening observations in private per-day SQLite archives with distinct exchange and receipt clocks, plus separately identified end-of-session recovery.

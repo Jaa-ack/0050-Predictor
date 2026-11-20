@@ -186,6 +186,24 @@ class OpeningGapModel:
         p = self.estimator.predict_proba(features)[:, 1]
         return np.where(features.notna().any(axis=1), p, self.prior)
 
+    def explain(self, panel):
+        """Attribute a probability to the source groups in their declared order."""
+        observations = panel.reindex(columns=self.columns)
+        visible = pd.DataFrame(np.nan, index=panel.index, columns=self.columns)
+        previous = np.full(len(panel), self.prior)
+        contributions = {'factor_base': previous}
+        for group, members in GROUPS.items():
+            columns = [name for name in members if name in self.columns]
+            if not columns:
+                continue
+            visible[columns] = observations[columns]
+            current = self.predict(visible)
+            contributions[f'impact_{group}'] = current - previous
+            previous = current
+        if not np.allclose(previous, self.predict(panel), atol=1e-12, rtol=0):
+            raise ValueError('Opening factor groups must account for every model input')
+        return pd.concat([observations, pd.DataFrame(contributions, index=panel.index)], axis=1)
+
 
 def _candidate_models(train):
     y = train.actual_return.gt(0).astype(int)
@@ -307,6 +325,7 @@ def validate_opening_gap(panel, constituents, *, membership_as_of, evidence_kind
                          calibration[name]['accuracy'], -calibration[name]['brier']))
             version = f'{TASK}:{test_dates[0].date()}:{chosen}'
             selected = _predictions(candidates[chosen], test, version)
+            selected = pd.concat([selected, candidates[chosen].explain(test)], axis=1)
             selected['phase'] = phase
             for name, model in candidates.items():
                 selected[f'control_{name}'] = model.predict(test)
@@ -377,6 +396,7 @@ def run_opening_gap(frame_path, calendar_path, membership_path, output, *, event
                     score_threshold=.5, selection='Fixed-ten calibration worst-five, then accuracy, then Brier',
                     final_dates=126, calibration_dates=126, min_train_dates=504, max_folds=8, fold_dates=252,
                     training_symbols=TRAINING_TICKERS, transfer_symbols=DEFAULT_EVALUATION_TICKERS,
+                    factor_method='ordered_source_probability_deltas',
                     feature_source='08:30 retrospective inputs and optional same-session observed numeric events',
                     source_groups=GROUPS)
     _write_json(output / 'protocol.json', protocol)

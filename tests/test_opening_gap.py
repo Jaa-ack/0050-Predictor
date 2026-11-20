@@ -84,3 +84,15 @@ def test_unavailable_control_never_earns_credit_for_a_flat_open():
     predictions = pd.DataFrame(dict(ticker=['2330', '2330'], actual_return=[0., 0.],
                                     probability_up=[float('nan'), .25]))
     assert opening_gap._metrics(predictions, ['2330'])['accuracy'] == .5
+
+
+def test_probability_contributions_reconstruct_the_issued_score():
+    model = opening_gap.OpeningGapModel('overnight_sign', .60, (
+        'f_ext_taifex_tx_night_return', 'f_ext_fmp_spy_window_return'))
+    rows = pd.DataFrame({'f_ext_taifex_tx_night_return': [.10, float('nan'), float('nan')],
+                         'f_ext_fmp_spy_window_return': [-.01, -.01, float('nan')]})
+    impacts = model.explain(rows)
+    pd.testing.assert_series_equal(impacts.factor_base + impacts.filter(like='impact_').sum(axis=1),
+                                   pd.Series(model.predict(rows)), check_names=False)
+    assert impacts.impact_night.tolist() == [.50, 0., 0.]
+    assert impacts.impact_us.tolist() == [-.35, -.35, 0.]

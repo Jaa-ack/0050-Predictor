@@ -57,3 +57,41 @@ def test_units_bound_every_phase_to_the_authorized_week():
     assert '2026-11-23..27 08:28..59:00 Asia/Taipei' in units['twquant-opening-collect.timer']
     assert '2026-11-27 14:10:00 Asia/Taipei' in units['twquant-opening-evaluate.timer']
     assert 'User=twquant-pilot' in units['twquant-opening-collect.service']
+
+
+def test_week_preserves_factor_values_and_actual_receipt_for_validation(tmp_path):
+    from math import isclose
+    symbols = (*TRAINING_TICKERS, '1216')
+    for i, day in enumerate(COLLECTION_DAYS):
+        with Archive(tmp_path, day) as store:
+            for j, ticker in enumerate(symbols):
+                price = 102 if (i + j) % 2 else 98
+                store.aggregate(record(day, ticker, price, 40), session_us(day, time(8, 58, 41)))
+                store.quote(dict(date=day.isoformat(), symbol=ticker, previousClose=100, openPrice=price,
+                                 openTime=session_us(day, time(9))), session_us(day, time(13, 40)), 'rest')
+    result = evaluate_week(tmp_path, symbols)
+    row = next(item for item in result['validation_rows'] if item['ticker'] == '1216')
+    assert row['trial_received_us'] == session_us(COLLECTION_DAYS[-1], time(8, 58, 41))
+    assert row['trial_exchange_us'] == session_us(COLLECTION_DAYS[-1], time(8, 58, 40))
+    assert isclose(row['factor_base'] + sum(item['impact'] for item in row['factors']), row['probability_up'])
+    assert next(item for item in row['factors'] if item['key'] == 'trial_gap')['value'] == 98 / 100 - 1
+
+
+def test_auction_event_export_keeps_original_clocks_and_omits_recovery(tmp_path):
+    import csv
+    from twquant.opening_capture import export_auction_events
+
+    day = COLLECTION_DAYS[0]
+    with Archive(tmp_path, day) as store:
+        timely = record(day, '2330', 101, 40)
+        store.aggregate(timely, session_us(day, time(8, 58, 41)))
+        store.trial('2330', record(day, '2330', 99, 52)['lastTrial'],
+                    session_us(day, time(13, 40)), 'rest')
+    output = tmp_path / 'events.csv'
+    export_auction_events(tmp_path, ('2330',), output)
+    with output.open() as stream:
+        rows = {row['feature']: row for row in csv.DictReader(stream)}
+    assert rows['auction_indicative_price']['value'] == '101.0'
+    assert rows['auction_indicative_price']['published_at'] == '2026-11-23T08:58:40+08:00'
+    assert rows['auction_indicative_price']['available_at'] == '2026-11-23T08:58:41+08:00'
+    assert rows['auction_imbalance']['evidence_kind'] == 'historical'

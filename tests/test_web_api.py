@@ -51,3 +51,38 @@ def test_local_jobs_require_nonce_and_same_origin_and_never_expose_provider_keys
             bad=await c.post('/api/jobs',json={'action':'shell','workspace':'demo'},headers=headers)
             assert bad.status_code==422
     asyncio.run(check())
+
+
+def test_opening_routes_use_only_the_configured_archives(tmp_path):
+    import json
+    import pandas as pd
+    study = tmp_path / 'opening'
+    study.mkdir()
+    (study / 'report.json').write_text(json.dumps({
+        'task': '0859_open_above_previous_session_close', 'evidence_kind': 'historical',
+        'final': {'constituents': {'evaluation_tickers': ['2330'], 'overall_accuracy': 1, 'expected_predictions': 1}},
+        'folds': [{'model': 'context_tree', 'model_version': 'f1',
+                   'candidate_features': {'context_tree': ['f_return_1']}}],
+    }))
+    prediction = dict(date=pd.Timestamp('2026-11-05'), ticker='2330', phase='final',
+                       probability_up=.8, actual_return=.01, factor_base=.5, impact_price=.3,
+                       f_return_1=.02, model_version='f1', private_payload='private-data-marker')
+    pd.DataFrame([prediction, {**prediction, 'ticker': '0050'}]).to_parquet(
+        study / 'predictions.parquet', index=False)
+    async def check():
+        app = create_app(tmp_path, opening_study=study)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://localhost') as c:
+            summary = (await c.get('/api/opening')).json()
+            assert summary['history']['days'][0]['date'] == '2026-11-05'
+            assert summary['history']['days'][0]['expected'] == 1
+            result = await c.get('/api/opening/predictions?view=history&date=2026-11-05')
+            assert result.status_code == 200
+            row = result.json()['rows'][0]
+            assert row['groups'][0]['features'][0] == {'key': 'f_return_1', 'value': .02}
+            assert row['groups'][0]['impact'] == .3
+            transfer = result.json()['rows'][1]
+            assert transfer['ticker'] == '0050' and transfer['transfer'] and not transfer['constituent']
+            assert 'private-data-marker' not in result.text
+            assert (await c.get('/api/opening/predictions?view=../')).status_code == 422
+            assert (await c.get('/legacy.html')).status_code == 200
+    asyncio.run(check())

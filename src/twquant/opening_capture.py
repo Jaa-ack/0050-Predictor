@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from contextlib import contextmanager
+import csv
 from datetime import date, datetime, time
 import fcntl
 import hashlib
@@ -162,7 +163,7 @@ class Archive:
                    AND previous_close IS NOT NULL AND received_us<? ORDER BY received_us DESC LIMIT 1""",
                 (symbol, cutoff)).fetchone()
             trial = self.conn.execute(
-                """SELECT price, size, book FROM trials WHERE symbol=? AND source='websocket'
+                """SELECT price, size, book, exchange_us, received_us FROM trials WHERE symbol=? AND source='websocket'
                    AND price IS NOT NULL AND exchange_us>=? AND exchange_us<=received_us AND received_us<?
                    ORDER BY exchange_us DESC, serial DESC, received_us LIMIT 1""",
                 (symbol, window, cutoff)).fetchone()
@@ -173,9 +174,11 @@ class Archive:
                 (symbol, label_before if label_before is not None else 2**63 - 1)).fetchone()
             counts = dict(self.conn.execute('SELECT source, count(*) FROM trials WHERE symbol=? GROUP BY source', (symbol,)))
             row = dict(ticker=symbol, trial_gap=None, log_matched_size=None, book_imbalance=None,
+                       trial_price=None, trial_exchange_us=None, trial_received_us=None,
                        actual_up=(outcome[1] > outcome[0]) if outcome else None, trial_receipts=counts)
             if trial is not None and reference is not None:
                 row['trial_gap'] = trial[0] / reference[0] - 1
+                row['trial_price'], row['trial_exchange_us'], row['trial_received_us'] = trial[0], trial[3], trial[4]
                 if trial[1] is not None:
                     row['log_matched_size'] = math.log1p(trial[1])
                 book = json.loads(trial[2])
@@ -364,6 +367,24 @@ def _summarize(rows, predictions):
                 recall=recall)
 
 
+def _explain_logit(row, model, features, median, center, scale):
+    def probability(logit):
+        return 1 / (1 + math.exp(-max(-709, min(709, logit))))
+
+    logit = float(model.intercept_[0])
+    base = previous = probability(logit)
+    factors = []
+    for i, name in enumerate(features):
+        observed = row[name]
+        value = median[i] if observed is None else observed
+        logit += float(model.coef_[0][i] * (value - center[i]) / scale[i])
+        current = probability(logit)
+        factors.append(dict(key=name, value=observed, impact=current - previous,
+                            imputed=observed is None))
+        previous = current
+    return dict(factor_base=base, probability_up=previous, factors=factors)
+
+
 def evaluate_week(root, symbols):
     """Freeze a four-session training cut and score the final date with the complete denominator."""
     import numpy as np
@@ -389,8 +410,12 @@ def evaluate_week(root, symbols):
                        and row['trial_gap'] is not None for row in days[day]) for day in previous)
     holdout = days[COLLECTION_DAYS[-1]]
     classes = [row['actual_up'] for row in train]
-    prior_up = classes.count(True) * 2 > len(classes)
+    prior = classes.count(True) / len(classes) if classes else 0.
+    prior_up = prior > .5
     predictions = [prior_up] * len(holdout)
+    explanations = [dict(factor_base=prior, probability_up=prior, factors=[],
+                         fallback_reason='trial_missing' if row['trial_gap'] is None else 'model_unavailable')
+                    for row in holdout]
     model_record = None
     if fit_days >= 2 and len(set(classes)) == 2:
         features = [name for name in FEATURES if any(row[name] is not None for row in train)]
@@ -404,9 +429,8 @@ def evaluate_week(root, symbols):
             model = LogisticRegression(C=.1, random_state=42).fit((x - center) / scale, classes)
         for i, row in enumerate(holdout):
             if row['trial_gap'] is not None:
-                values = np.array([row[name] for name in features], dtype=float)
-                values = np.where(np.isnan(values), median, values)
-                predictions[i] = bool(model.predict(((values - center) / scale).reshape(1, -1))[0])
+                explanations[i] = _explain_logit(row, model, features, median, center, scale)
+                predictions[i] = explanations[i]['probability_up'] > .5
         model_record = dict(features=features, median=median.tolist(), center=center.tolist(), scale=scale.tolist(),
                             coefficients=model.coef_[0].tolist(), intercept=float(model.intercept_[0]))
     observed = {day.isoformat(): dict(
@@ -424,8 +448,34 @@ def evaluate_week(root, symbols):
                 validation_fixed_not_up=_summarize(holdout, [False] * len(holdout)),
                 validation_fixed_up=_summarize(holdout, [True] * len(holdout)), collection=observed,
                 validation_rows=[dict(ticker=row['ticker'], actual_up=row['actual_up'], predicted_up=prediction,
-                                      trial_available=row['trial_gap'] is not None)
-                                 for row, prediction in zip(holdout, predictions, strict=True)])
+                                      trial_available=row['trial_gap'] is not None,
+                                      trial_exchange_us=row.get('trial_exchange_us'),
+                                      trial_received_us=row.get('trial_received_us'), **explanation)
+                                 for row, prediction, explanation in zip(holdout, predictions, explanations, strict=True)])
+
+
+def export_auction_events(root, symbols, output):
+    """Export actual pre-cutoff auction observations for the longer feature study."""
+    fields = ('session_date', 'ticker', 'feature', 'value', 'published_at', 'available_at', 'evidence_kind')
+    with output.open('x', newline='', encoding='utf-8') as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        for day in COLLECTION_DAYS:
+            archive = Archive(root, day, readonly=True)
+            if not archive.path.exists():
+                continue
+            with archive as store:
+                for row in store.panel(symbols):
+                    if row['trial_received_us'] is None:
+                        continue
+                    for key, feature in [('trial_price', 'auction_indicative_price'),
+                                         ('book_imbalance', 'auction_imbalance')]:
+                        if row[key] is None:
+                            continue
+                        writer.writerow(dict(session_date=day, ticker=row['ticker'], feature=feature,
+                                             value=row[key], evidence_kind='historical',
+                                             published_at=datetime.fromtimestamp(row['trial_exchange_us'] / 1e6, TZ).isoformat(),
+                                             available_at=datetime.fromtimestamp(row['trial_received_us'] / 1e6, TZ).isoformat()))
 
 
 def unit_files():
@@ -472,8 +522,9 @@ def _lock(path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['collect', 'recover', 'evaluate', 'units'])
+    parser.add_argument('mode', choices=['collect', 'recover', 'evaluate', 'export-events', 'units'])
     parser.add_argument('--root', type=Path)
+    parser.add_argument('--output', type=Path)
     args = parser.parse_args(argv)
     if args.mode == 'units':
         print(_encoded(unit_files()))
@@ -499,6 +550,11 @@ def main(argv=None):
         with _lock(root / 'opening.lock') as locked:
             if not locked:
                 return 1
+            if args.mode == 'export-events':
+                if args.output is None:
+                    parser.error('Export requires --output')
+                export_auction_events(root, symbols, args.output)
+                return 0
             if args.mode == 'evaluate':
                 output = root / 'evaluation.json'
                 if not output.exists():

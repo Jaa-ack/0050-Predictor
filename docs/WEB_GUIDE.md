@@ -1,5 +1,18 @@
 # 網頁操作與版本更新
 
+## 開盤方向工作台
+首頁顯示 08:59 開盤方向驗證、完整成分股與最弱五檔。切換「試撮週」可查看 11/23–27 的收件覆蓋與期末訓練。選擇圖上的日期或交易日選單，搜尋標的並按「影響因素」，可在該筆結果下展開各組模型機率變化與數值。日線研究入口保留原工作台。
+
+```bash
+.venv/bin/python -m twquant --root artifacts/fixed-ten serve \
+  --opening-study artifacts/opening-gap-20261120-v3 \
+  --opening-capture artifacts/opening-capture
+```
+
+`--opening-study` 讀取歷史研究的 `report.json` 與 `predictions.parquet`。省略時會選取工作區同層最新封存的 `opening-gap-*` 研究。`--opening-capture` 指向本機私有目錄，放入 VM 期末的 `evaluation.json` 即可檢視試撮週結果。查閱收件期進度可加入同一份 `symbols.json` 與每日一致性 SQLite 副本。實際資料留在私有環境，線上網站由合成資料展示同一介面。
+
+## 日線與其他研究
+
 目前主要研究已擴充為固定十檔訓練、五標的延伸測試；最新工作目錄與指令見[固定十檔協定](FIXED_TEN_PROTOCOL.md)。下列既有`live-research`流程及舊結果保留作版本對照。
 
 真實長期研究及每日操作見[DAILY_RESEARCH.md](DAILY_RESEARCH.md)。啟動時指定`--root artifacts/live-research`並選「目前研究環境」可查看本次本機成果；不要將線上合成預覽當作這份真實研究。

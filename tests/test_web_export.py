@@ -37,6 +37,11 @@ def test_export_contains_only_synthetic_data_and_never_live_configuration(tmp_pa
     assert not list(output.rglob('*.joblib'))
     assert (output/'data'/'prices-2330.json').is_file()
     assert json.loads((output/'data'/'jobs.json').read_text())['jobs']==[]
+    opening=json.loads((output/'data'/'opening.json').read_text())
+    assert opening['history']['evidence']==opening['week']['evidence']=='synthetic'
+    assert all(sum(row['constituent'] for row in rows)==50 for view in opening['rows'].values() for rows in view.values())
+    assert all(sum(row['transfer'] for row in rows)==5 for rows in opening['rows']['history'].values())
+    assert (output/'legacy.html').is_file()
 
 
 def test_export_rejects_real_prices_even_if_report_is_mislabeled(tmp_path):
