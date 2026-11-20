@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — 2026-11-20 — Bounded VM opening-auction capture
+
+- Stopped the legacy 10:00 VM pilot and scheduled read-only trial-auction acquisition for November 23–27. Preserve opening observations in private per-day SQLite archives with distinct exchange and receipt clocks, plus separately identified end-of-session recovery.
+- Fit the fixed ten on the first four sessions and score the complete constituent grid on November 27. The closing job checks each available archive, keeps missing inputs and answers in the output, and writes a private result without publishing live forecasts.
+
 ## Unreleased — 2026-11-20 — Fixed preopen direction study
 
 - Added an 08:59 opening-gap task with a fixed prior-close reference, strict event and receipt cutoffs, a full missing-aware constituent grid, maturity-purged training, and calibration on the immutable ten. Compare overnight, price and volume, multi-source linear and tree models. Score all five transfer instruments with the same selected model.
