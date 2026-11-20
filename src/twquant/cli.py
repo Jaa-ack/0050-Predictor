@@ -125,6 +125,12 @@ def parser():
     study.add_argument('--mode', choices=['postclose', 'preopen'], default='postclose')
     study.add_argument('--holdout-dates', type=int, default=126)
     study.add_argument('--out', type=Path, help='必須是尚未存在的獨立實驗目錄')
+    opening = subs.add_parser('opening-gap', help='驗證08:59預測正式開盤是否高於前收的固定任務')
+    opening.add_argument('--frame', type=Path, required=True, help='08:30盤前歷史特徵Parquet')
+    opening.add_argument('--calendar', type=Path, required=True, help='歷史交易日CSV')
+    opening.add_argument('--membership', type=Path, required=True, help='成分股名單快照JSON')
+    opening.add_argument('--events', type=Path, help='附首次可用時間的試撮、新聞或早盤因子CSV')
+    opening.add_argument('--out', type=Path, required=True, help='尚未建立的本機實驗目錄')
     direction = subs.add_parser('direction-search', help='巢狀時間比較方向模型，檢查固定十檔全部252種五檔組合；不開封保留期')
     direction.add_argument('--config', type=Path)
     direction.add_argument('--reference-run', type=Path,
@@ -309,6 +315,14 @@ def execute(args):
             else:
                 raise ValueError('Screen output must use .json or .csv')
         return dict(total=len(results), passed=sum(r['passed'] for r in results), results=results)
+    if args.command == 'opening-gap':
+        from .opening_gap import run_opening_gap
+        report = run_opening_gap(args.frame, args.calendar, args.membership, args.out, event_path=args.events)
+        return dict(task=report['task'], report=str(args.out / 'report.json'),
+                    evidence_kind=report['evidence_kind'],
+                    development=report['development']['complete_denominator'],
+                    final=report['final']['complete_denominator'],
+                    real_world_target_verified=report['real_world_target_verified'])
     if args.command == 'skill-study':
         from .skill_integration import compare_skill_modules
         from .skill_risk import RiskLimits
@@ -620,7 +634,7 @@ def main(argv=None):
     args = parser().parse_args(argv)
     credentials=None
     try:
-        if args.command not in {'direction-feasibility','direction-queue-study','direction-queue-ceiling','direction-first-change-study','direction-queue-first-study','direction-trade-first-study','direction-matching-study'} and not (args.command=='secrets' and args.secret_command=='init'):
+        if args.command not in {'opening-gap','direction-feasibility','direction-queue-study','direction-queue-ceiling','direction-first-change-study','direction-queue-first-study','direction-trade-first-study','direction-matching-study'} and not (args.command=='secrets' and args.secret_command=='init'):
             credentials=load_dotenv()
         result = execute(args)
         if result is not None:

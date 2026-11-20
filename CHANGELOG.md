@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — 2026-11-20 — Fixed preopen direction study
+
+- Added an 08:59 opening-gap task with a fixed prior-close reference, strict event and receipt cutoffs, a full missing-aware constituent grid, maturity-purged training, and calibration on the immutable ten. Compare overnight, price and volume, multi-source linear and tree models. Score all five transfer instruments with the same selected model.
+- Trained and verified eight retrospective folds and a final 126-session check. The selected model hit 4,428 of 6,300 constituent forecasts, with 57.30% for the weakest five. Public TAIFEX tick replay scored 76.11% overall across 19 overlapping sessions and 42.11% for the weakest five. Documented the independent live evidence and the trial-auction, news and morning data still needed for the 75% goal.
+- Verified that the existing read-only Fugle account returned trial-auction samples before the exchange cutoff and opening prices for all 50 constituents in the November 20 same-day replay. The trial direction hit 47/50 and the constant not-up baseline hit 49/50. Original receipt times still require live capture.
+
 ## Unreleased — 2026-11-20 — Daily scoring and private paper-forecast results
 
 - Assessed the five completed live sessions with full coverage penalties. The frozen rules scored 30/250 at 60 seconds and 36/250 at 300 seconds. November 20 sealed all 50 constituents about 0.53 seconds after the decision and scored 25/50 and 29/50. All 15 fallbacks had an empty side in the last causal book. Source freshness and shared-host stability still failed the operational gate.

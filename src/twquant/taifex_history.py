@@ -37,6 +37,39 @@ def _number(value, *, volume=False):
     return result if volume or result > 0 else np.nan
 
 
+def opening_tx_median(content: bytes, session: pd.Timestamp):
+    """Replay the nearest monthly TX in the 08:58 minute, with a one-second buffer."""
+    fields = ['成交日期', '商品代號', '到期月份(週別)', '成交時間', '成交價格']
+    day = session.strftime('%Y%m%d')
+    if len(content) > 30_000_000:
+        raise ValueError('TAIFEX tick archive exceeds size bound')
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            members = archive.infolist()
+            if len(members) != 1 or members[0].flag_bits & 1 or members[0].file_size > 200_000_000:
+                raise ValueError('TAIFEX ticks require one bounded unencrypted CSV')
+            with archive.open(members[0]) as file:
+                ticks = pd.read_csv(file, encoding='cp950', usecols=fields, dtype=str)
+    except (zipfile.BadZipFile, RuntimeError, NotImplementedError):
+        raise ValueError('Invalid TAIFEX tick archive') from None
+    date, contract, expiry, clock, price = (ticks[field].str.strip() for field in fields)
+    morning = (
+        date.eq(day) & contract.eq('TX') & expiry.str.fullmatch(r'[0-9]{6}', na=False)
+        & expiry.ge(day[:6]) & clock.str.fullmatch(r'\d{6}', na=False)
+        & clock.between('084500', '085858')
+    )
+    if not morning.any():
+        return None
+    nearest = expiry[morning].min()
+    minute = morning & expiry.eq(nearest) & clock.ge('085800')
+    prices = pd.to_numeric(price[minute], errors='raise')
+    if not len(prices):
+        return None
+    if not np.isfinite(prices).all() or prices.le(0).any():
+        raise ValueError('Invalid TAIFEX morning trade price')
+    return nearest, float(prices.median()), len(prices)
+
+
 def parse_taifex_history(content: bytes) -> pd.DataFrame:
     """Normalize one CSV or single-member ZIP, retaining only monthly TX/TE/TF.
 
