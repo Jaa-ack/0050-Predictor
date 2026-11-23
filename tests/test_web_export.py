@@ -39,6 +39,12 @@ def test_export_contains_only_synthetic_data_and_never_live_configuration(tmp_pa
     assert json.loads((output/'data'/'jobs.json').read_text())['jobs']==[]
     opening=json.loads((output/'data'/'opening.json').read_text())
     assert opening['history']['evidence']==opening['week']['evidence']=='synthetic'
+    assert opening['history']['historical_inputs']['other']==[
+        'f_flow_foreign_imbalance', 'f_flow_foreign_mean5', 'f_flow_trust_imbalance',
+        'f_margin_finance_utilization', 'f_margin_short_utilization', 'f_ext_fred_VIXCLS',
+        'f_ext_fred_DEXTAUS', 'f_ext_fred_DGS10']
+    assert 'other' not in opening['history']['diagnostics']
+    assert 'historical_inputs' not in opening['week']
     assert all(sum(row['constituent'] for row in rows)==50 for view in opening['rows'].values() for rows in view.values())
     assert all(sum(row['transfer'] for row in rows)==5 for rows in opening['rows']['history'].values())
     assert not (output/'legacy.html').exists()

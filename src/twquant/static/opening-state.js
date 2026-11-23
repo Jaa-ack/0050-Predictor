@@ -42,7 +42,7 @@ const inputs = {
   f_flow_foreign_imbalance:['外資買賣超比','percent'], f_flow_foreign_mean5:['外資 5 日平均','percent'],
   f_flow_trust_imbalance:['投信買賣超比','percent'], f_margin_finance_utilization:['融資使用率','percent'],
   f_margin_short_utilization:['融券使用率','percent'], f_ext_fred_VIXCLS:['VIX 波動指數','number'],
-  f_ext_fred_DEXTAUS:['美元兌臺幣','number'], f_ext_fred_DGS10:['美債 10 年殖利率','rate'],
+  f_ext_fred_DEXTAUS:['美元兌臺幣（日頻）','number'], f_ext_fred_DGS10:['美債 10 年殖利率','rate'],
   f_open_auction_gap:['試撮相對前收','percent'], f_open_auction_imbalance:['試撮委買賣不平衡','percent'],
   f_open_auction_rvol:['相對試撮量','ratio'], f_open_official_count:['官方公告數','number'],
   f_open_media_count:['媒體事件數','number'], f_open_media_sentiment:['媒體情緒分數','number'],

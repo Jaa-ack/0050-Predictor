@@ -4,6 +4,7 @@
 
 - Trace inputs, decision cutoffs, shared models and outcomes in an interactive graph. Expose factor-level correlations, sample counts, average probability impact and its relative share. Display fitted standardized coefficients when supplied by the trial study.
 - Move daily forecasts, holdout and transfer evaluation, source status and workflow actions into the unified workbench. Retire the separate page in both the local app and hosted snapshot.
+- Show the eight historical positioning and macroeconomic inputs in the hosted flow without exporting measured data. Display the actual session count for the active validation view.
 - The first VM opening session collected 12,113 trial observations, with valid pre-cutoff inputs and official openings for all 50 stocks. The collector exited successfully and SQLite integrity passed at the morning check.
 
 ## Unreleased — 2026-11-20 — Opening research dashboard and forecast attribution

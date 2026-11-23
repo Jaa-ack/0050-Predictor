@@ -281,6 +281,7 @@ def synthetic_opening():
     return dict(task=TASK, target=TARGET,
                 history=dict(evidence='synthetic', status='ready', sessions=len(days), **_summary(all_history),
                              worst_five=sum(ranked[:5]) / 5, sources={group: 1. for group, *_ in specs},
+                             historical_inputs={'other': GROUPS['other']},
                              diagnostics=diagnostics(all_history, {group: [key] for group,key,_ in specs}),
                              days=[dict(date=day, **_summary(rows)) for day, rows in constituent_rows.items()]),
                 week=dict(evidence='synthetic', status='ready', date=week_day, training_rows=40, fitted=True,

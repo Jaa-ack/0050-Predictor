@@ -35,6 +35,8 @@ function modelNodes(data, view) {
   const week = view === 'week';
   const captured = data.week.days.filter(day => finite(day.inputs)).length;
   const ready = data[view].status === 'ready';
+  const sessions = data.history.sessions;
+  const historyRange = finite(sessions) ? `${integer(sessions)} 個${data.history.evidence === 'synthetic' ? '示範' : '歷史'}交易日` : '—';
   return {
     snapshot:{label:'08:30 快照', detail:'上一交易日歷史價量與盤前跨市場資料', badge:'決策前', fields:[
       ['輸入','價量、美股、夜盤與籌碼'], ['檢查','只使用當時已可得的資料']]},
@@ -47,7 +49,7 @@ function modelNodes(data, view) {
     result:{label:'高於前收？', detail:'08:59 判斷當日正式開盤是否高於上一交易日收盤',
       badge:'二元', fields:[['高於','正式開盤價 > 前收'], ['未高於','平盤或低於前收']]},
     audit:{label:'全成分驗證', detail:'同一模型覆蓋全部 50 檔，保留缺答並報告最弱五檔',
-      badge:ready ? '可查' : '等待', fields:[['驗證範圍',week ? '11/27 完整 50 檔' : '最後 126 個歷史交易日'],
+      badge:ready ? '可查' : '等待', fields:[['驗證範圍',week ? '11/27 完整 50 檔' : historyRange],
         ['目標',percent(data.target,0)], ['整體準確率',percent(data[view].accuracy,2)]]}
   };
 }
@@ -71,6 +73,14 @@ function inspect(id) {
     return;
   }
   const measured = data?.features || [];
+  const historical = state.historicalInputs[id];
+  if (historical?.length && !measured.length) {
+    const names = historical.map(key => safe(factorInfo(key)[0])).join('、');
+    panel.innerHTML = `<div class="flow-caption">真實歷史模型已使用</div><h3>${safe(active.label)}</h3>
+      <dl class="flow-facts"><div><dt>採用因子</dt><dd>${names}</dd></div></dl>
+      <p class="flow-note">此處是合成示範。實測覆蓋率、相關性和模型影響可在本機歷史驗證查看。</p>`;
+    return;
+  }
   const weights = measured.some(item => finite(item.coefficient));
   panel.innerHTML = `<div class="flow-caption">資料來源</div><h3>${safe(groupNames[id] || active.label)}</h3><p>${safe(active.detail)}</p>
     <div class="flow-metrics">
@@ -154,7 +164,8 @@ export function renderFlow(data, view) {
       coverage:observed.reduce((sum,day)=>sum+day.inputs,0)/observed.reduce((sum,day)=>sum+day.expected,0)
     };
   }
-  state = { data, view, stats, nodes:modelNodes(data,view) };
+  const historicalInputs = data[view].historical_inputs || {};
+  state = { data, view, stats, historicalInputs, nodes:modelNodes(data,view) };
   if (view === 'week' && !state.stats[selection]) selection = 'auction';
   $('flow-layer').innerHTML = stages.map(([title, ids]) =>
     `<div class="flow-column"><div class="flow-layer-name">${title}</div><div class="flow-nodes">
