@@ -47,9 +47,11 @@ def export_dashboard(root,destination):
     destination.mkdir(parents=True,exist_ok=True)
     public_assets=destination/'assets'
     public_assets.mkdir(exist_ok=True)
-    for page in ('index.html','legacy.html'):
-        shutil.copyfile(assets/page,destination/page)
-    for name in ('app.css','app.js','state.js','opening.css','opening.js','opening-state.js'):
+    # Older marked exports can contain the retired second front end.
+    for relative in ('legacy.html','assets/app.css','assets/app.js'):
+        (destination/relative).unlink(missing_ok=True)
+    shutil.copyfile(assets/'index.html',destination/'index.html')
+    for name in ('state.js','opening.css','opening.js','opening-state.js','flow.js','flow-state.js','daily.js'):
         shutil.copyfile(assets/name,public_assets/name)
     generated=datetime.now(timezone.utc).isoformat()
     config=dict(mode='snapshot',github_url=GITHUB_URL,capabilities=dict(actions=False),default_workspace='demo',

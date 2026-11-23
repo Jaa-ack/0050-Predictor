@@ -222,3 +222,85 @@ tbody tr.observation:hover { background: #f9fbff; }
   .table-bottom { padding-inline: 8px; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* System flow uses an elevated dark surface, with readable details beside the nodes. */
+:root { --flow-bg:#0f172a; --flow-card:#162238; --flow-stroke:#34425e; --flow-ink:#f3f7ff; --flow-muted:#aebfda; }
+#research { scroll-margin-top: 18px; }
+.dashboard { display: block; }
+.network { background: var(--flow-bg); color: var(--flow-ink); border-color: #243451; margin-bottom: 16px; overflow: hidden; }
+.network .panel-heading { padding: 17px 19px 10px; align-items: center; }
+.network .panel-heading h2 { font-size: 1.28rem; }
+.network .panel-heading p { color: var(--flow-muted); }
+.flow-key { color: #adc9fb; font-size: .82rem; border: 1px solid #3b527d; border-radius: 6px; padding: 5px 8px; }
+.flow-layout { display: grid; grid-template-columns: minmax(0,1fr) minmax(273px, .44fr); gap: 13px; padding: 0 15px 15px; }
+.flow-board { position: relative; isolation: isolate; min-width: 0; min-height: 355px; border-radius: 8px; overflow: hidden;
+  border: 1px solid #283a58; background-color: #101b30;
+  background-image: radial-gradient(#7187b24a 1px, transparent 1px), radial-gradient(ellipse at 58% 54%,#1b2d51 0%,transparent 65%);
+  background-size: 16px 16px,100% 100%; }
+#flow-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#flow-layer { display: grid; grid-template-columns: 1.16fr 1fr .9fr .91fr; gap: clamp(9px,2.7vw,45px); padding: 12px 10px;
+  position: relative; align-items: stretch; min-height: 355px; }
+.flow-column { display: flex; flex-direction: column; min-width: 0; }
+.flow-layer-name { color: var(--flow-muted); font-size: .79rem; text-align: center; letter-spacing: .045em; white-space: nowrap; }
+.flow-nodes { display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 7px; padding-top: 9px; min-width: 0; }
+.flow-column:not(:first-child) .flow-nodes { gap: 32px; }
+.flow-node { position: relative; display: flex; justify-content: space-between; align-items: center; gap: 4px; padding: 6px 7px;
+  min-height: 34px; width: 100%; min-width: 0; color: var(--flow-ink); text-align: left; font-size: .82rem; font-weight: 670;
+  background: var(--flow-card); border-radius: 6px; border: 1px solid #455a81; transition: border-color .16s,background-color .16s; }
+.flow-node span { overflow-wrap: anywhere; }
+.flow-node small { color: #c4d4f7; font: 600 .72rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.flow-node:hover, .flow-node[aria-pressed="true"] { border-color: #93cafa; background: #253f64; }
+.flow-node[aria-pressed="true"] { box-shadow: 0 0 12px #5ebad328; }
+.flow-node:focus-visible { outline: 2px solid #d0ecff; outline-offset: 2px; }
+.flow-inspector { color: var(--flow-ink); min-width: 0; border: 1px solid #324568; border-radius: 8px; padding: 13px 13px 10px;
+  background: #17243b; }
+.flow-caption { color: #a8caeb; font-size: .8rem; font-weight: 650; }
+.flow-inspector h3 { font-size: 1.16rem; margin: 1px 0 4px; }
+.flow-inspector p { font-size: .84rem; color: var(--flow-muted); }
+.flow-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 4px; margin: 12px 0 8px; }
+.flow-metrics > div { border-top: 1px solid #405374; padding-top: 5px; white-space: nowrap; }
+.flow-metrics span { display: block; color: #b9cce7; font-size: .76rem; }
+.flow-metrics strong { display: block; margin-top: 4px; font-size: .9rem; color: #e6f5ff; font-variant-numeric: tabular-nums; }
+.flow-factors { overflow-y: auto; max-height: 170px; margin-top: 9px; }
+.flow-factors th, .flow-factors td { font-size: .77rem; background: transparent; color: var(--flow-ink);
+  padding: 5px 5px; white-space: normal; border-color: #344666; }
+.flow-factors th { color: #b9cce7; }
+.flow-factors td:not(:first-child) { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.flow-facts { margin: 10px 0 0; }
+.flow-facts div { border-top: 1px solid #405374; padding: 7px 0; }
+.flow-facts dt { color: #b9cce7; font-size: .79rem; }
+.flow-facts dd { margin: 2px 0 0; font-size: .84rem; }
+.flow-inspector .flow-note { margin-top: 9px; font-size: .77rem; }
+.prediction-key { display: flex; flex-wrap: wrap; gap: 5px 17px; color: var(--muted); font-size: .84rem; padding: 0 18px 12px; }
+.prediction-key b { margin-right: 3px; color: var(--ink); }
+.daily-panel { margin-top: 16px; padding-bottom: 10px; }
+.daily-switch { margin: 0 18px 12px; }
+.daily-summary { display: grid; grid-template-columns: repeat(auto-fit,minmax(110px,1fr)); gap: 9px; padding: 9px 18px; }
+.daily-summary > span { display: flex; flex-direction: column; border-radius: 6px; background: #eef2f9; padding: 6px 9px; font-variant-numeric: tabular-nums; }
+.daily-summary small { color: var(--muted); }
+.daily-factors { display: grid; grid-template-columns: repeat(auto-fit,minmax(145px,1fr)); gap: 6px; margin: 6px 0 0; }
+.daily-factors div { display: flex; justify-content: space-between; gap: 6px; background: #fff; padding: 5px; border: 1px solid var(--line); border-radius: 5px; }
+.daily-factors dd { margin: 0; }
+.daily-source-list, .daily-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 18px; }
+.daily-source-list span { background: #eef2f9; padding: 5px 8px; border-radius: 6px; font-size: .86rem; }
+.daily-source-list small { color: var(--muted); margin-left: 6px; }
+.daily-message, .daily-subtitle, .daily-gaps { margin: 8px 18px; }
+.daily-gaps summary { cursor: pointer; }
+.job-list { margin: 8px 18px; padding: 0; list-style: none; }
+.job-list li { display: flex; justify-content: space-between; padding: 5px; border-top: 1px solid var(--line); }
+#daily-equity { width: 100%; height: auto; max-height: 205px; }
+@media (max-width: 960px) {
+  .flow-layout { grid-template-columns: minmax(0,1fr); }
+  .flow-factors { max-height: 145px; }
+}
+@media (max-width: 590px) {
+  .flow-layout { padding-inline: 8px; gap: 8px; }
+  #flow-layer { grid-template-columns:1.11fr 1fr .86fr .92fr; gap: 7px; padding-inline: 4px; }
+  .flow-node { min-height: 44px; flex-wrap: wrap; justify-content: center; text-align: center; line-height: 1.2; font-size: .77rem; }
+  .flow-layer-name { font-size: .71rem; }
+  .flow-node small { font-size: .68rem; }
+  .flow-key { font-size: .78rem; }
+  .prediction-key { padding-inline: 12px; row-gap: 3px; }
+  .daily-panel th, .daily-panel td { white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) { .flow-node { transition: none; } }

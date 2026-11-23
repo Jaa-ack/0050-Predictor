@@ -84,5 +84,22 @@ def test_opening_routes_use_only_the_configured_archives(tmp_path):
             assert transfer['ticker'] == '0050' and transfer['transfer'] and not transfer['constituent']
             assert 'private-data-marker' not in result.text
             assert (await c.get('/api/opening/predictions?view=../')).status_code == 422
-            assert (await c.get('/legacy.html')).status_code == 200
+            assert (await c.get('/legacy.html')).status_code == 404
+            assert summary['history']['diagnostics']['price']['features'][0]['key'] == 'f_return_1'
+            assert summary['history']['diagnostics']['price']['impact_share'] == 1
     asyncio.run(check())
+
+
+def test_opening_diagnostics_keeps_correlation_separate_from_impact():
+    import pandas as pd
+    from pytest import approx
+    from twquant.opening_web import _diagnostics
+
+    frame = pd.DataFrame(dict(actual_up=[0., 0., 1., 1., None], rising=[0., 0., 1., 1., 5.],
+                              falling=[1., 1., 0., 0., 5.], impact_price=[.3] * 5,
+                              impact_night=[-.1] * 5))
+    result = _diagnostics(frame, {'price':['rising'], 'night':['falling']})
+    assert result['price']['features'][0]['correlation'] == approx(1)
+    assert result['night']['features'][0]['correlation'] == approx(-1)
+    assert result['price']['features'][0]['samples'] == 4
+    assert result['price']['impact_share'] == approx(.75)

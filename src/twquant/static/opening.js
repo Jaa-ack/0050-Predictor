@@ -1,5 +1,7 @@
 import { finite, integer, percent } from './state.js';
 import { factorInfo, groupNames, openingRows, stockName } from './opening-state.js';
+import { renderFlow } from './flow.js';
+import { prepareDaily } from './daily.js';
 
 const $ = id => document.getElementById(id);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({
@@ -66,22 +68,7 @@ function renderOverview() {
       metric('即時試撮覆蓋', countDisplay, caption),
     ].join('');
   }
-  const isHistorical = app.view === 'history';
-  const simulated = app.config.mode === 'snapshot';
-  const steps = [
-    ['▤','盤前資料','價量、美股與 ADR、期貨夜盤、籌碼',
-      history.status === 'ready' ? (simulated ? '合成示範' : '歷史就緒') : '待載入', history.status === 'ready'],
-    ['◷','08:59 截止','試撮價量與五檔 · 交易所、收件雙時鐘',
-      week.status === 'ready' ? '已收件驗證' : captured.length ? '收件中' : '等 11/23', captured.length > 0],
-    ['⊞','固定十檔模型',isHistorical ? '時序校準 · 線性與提升樹' : '前四日 · 試撮邏輯斯模型',
-      isHistorical ? history.status === 'ready' ? '已訓練' : '等待資料'
-        : week.fitted ? '已訓練' : week.status === 'ready' ? '比例回退' : '等 11/27',
-      isHistorical ? history.status === 'ready' : week.fitted === true],
-    ['✓','完整成分股驗證',isHistorical ? '逐日評分 · 缺答保留' : '最後一日 · 試撮與固定方向基準',
-      active.status === 'ready' ? '已驗證' : '待驗證', active.status === 'ready'],
-  ];
-  $('pipeline').innerHTML = steps.map(([icon, title, detail, label, ready]) =>
-    `<li><span class="pipeline-icon" aria-hidden="true">${icon}</span><div><strong>${title}</strong><small>${detail}</small></div><span class="phase ${ready ? 'ready' : ''}">${label}</span></li>`).join('');
+  renderFlow(app.data, app.view);
   renderTrend();
   $('decision-day').innerHTML = active.days.length ? [...active.days].reverse().map(day =>
     `<option value="${escape(day.date)}"${day.date === app.day ? ' selected' : ''}>${escape(day.date)}</option>`).join('')
@@ -245,6 +232,7 @@ async function refresh() {
   $('alert').hidden = true;
   try {
     app.config = await load('./app-config.json');
+    prepareDaily(app.config);
     app.data = await load(app.config.mode === 'snapshot' ? './data/opening.json' : './api/opening');
     await select(app.view, app.day);
   } catch {

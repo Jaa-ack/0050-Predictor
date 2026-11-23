@@ -54,9 +54,8 @@ def create_app(root:Path,workspaces=None,enable_actions=False,job_manager=None,*
         result.headers['X-Content-Type-Options']='nosniff'
         result.headers['X-Frame-Options']='DENY'
         result.headers['Referrer-Policy']='no-referrer'
-        if request.url.path in {'/', '/legacy.html'}:
-            page = 'index.html' if request.url.path == '/' else 'legacy.html'
-            inline=re.findall(r'<script>([\s\S]*?)</script>',(assets/page).read_text())
+        if request.url.path == '/':
+            inline=re.findall(r'<script>([\s\S]*?)</script>',(assets/'index.html').read_text())
             hashes=' '.join("'sha256-"+base64.b64encode(hashlib.sha256(s.encode()).digest()).decode()+"'" for s in inline)
             result.headers['Content-Security-Policy']=(f"default-src 'self'; script-src 'self' {hashes}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
         return result
@@ -68,10 +67,6 @@ def create_app(root:Path,workspaces=None,enable_actions=False,job_manager=None,*
     @app.get('/')
     def index():
         return FileResponse(assets/'index.html')
-
-    @app.get('/legacy.html')
-    def legacy():
-        return FileResponse(assets/'legacy.html')
 
     @app.get('/api/opening')
     def opening_summary():

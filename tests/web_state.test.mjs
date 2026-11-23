@@ -98,3 +98,11 @@ test('transfer instruments can be inspected without adding them to constituent r
   assert.deepEqual(openingRows(rows, '', 'all').map(row => row.ticker), ['2330','1216']);
   assert.deepEqual(openingRows(rows, '', 'transfer').map(row => row.ticker), ['1216','0050']);
 });
+
+test('the architecture highlights only the chosen source path', async () => {
+  const { tracedEdges } = await import('../src/twquant/static/flow-state.js');
+  const edges = [{from:'price',to:'snapshot'}, {from:'volume',to:'snapshot'}, {from:'snapshot',to:'model'},
+    {from:'auction',to:'cutoff'}, {from:'cutoff',to:'model'}, {from:'model',to:'result'}];
+  assert.deepEqual(tracedEdges(edges,'price').map(e=>e.from), ['price','snapshot','model']);
+  assert.deepEqual(tracedEdges(edges,'cutoff').map(e=>e.from), ['auction','cutoff','model']);
+});

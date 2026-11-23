@@ -42,15 +42,58 @@ def _day_frame(frame, tickers):
                             & frame.actual_return.gt(0).eq(frame.probability_up.ge(.5)))
 
 
+def _diagnostics(frame, groups, *, coefficients=None):
+    """Describe observed inputs and fitted model behavior on the displayed sample."""
+    result = {}
+    coefficients = coefficients or {}
+    target = frame['actual_up']
+    known = target.notna()
+    for group, keys in groups.items():
+        columns = [key for key in keys if key in frame]
+        features = []
+        for key in columns:
+            series = pd.to_numeric(frame[key], errors='coerce')
+            pair = known & series.notna()
+            values = series[pair]
+            outcomes = target[pair]
+            matched = len(values)
+            r = float(values.corr(outcomes.astype(float))) if matched >= 3 and values.nunique() > 1 and outcomes.nunique() > 1 else None
+            features.append(dict(key=key, samples=matched, correlation=r, coefficient=coefficients.get(key)))
+        counterpart = frame.get(f'impact_{group}')
+        impact = _number(float(counterpart.abs().mean())) if counterpart is not None else None
+        result[group] = dict(features=features, impact=impact,
+                             coverage=float(frame[columns].notna().any(axis=1).mean()) if columns and len(frame) else None)
+    denominator = sum(info['impact'] or 0. for info in result.values())
+    for info in result.values():
+        info['impact_share'] = info['impact'] / denominator if info['impact'] is not None and denominator else None
+    return result
+
+
 @lru_cache(maxsize=4)
-def _history_days(path, version, tickers):
-    frame = _day_frame(pd.read_parquet(path, columns=['date', 'ticker', 'phase', 'actual_return',
-                                                      'probability_up']), tickers)
-    return [
+def _history_check(path, version, tickers):
+    columns = ['date', 'ticker', 'phase', 'actual_return', 'probability_up']
+    known = set(parquet.ParquetFile(path).schema_arrow.names)
+    inputs = [key for group, group_cols in GROUPS.items() for key in (f'impact_{group}', *group_cols) if key in known]
+    frame = _day_frame(pd.read_parquet(path, columns=columns + inputs, filters=[('phase', '=', 'final')]), tickers)
+    days = [
         dict(date=day, accuracy=float(rows.hit.mean()), expected=len(rows), hits=int(rows.hit.sum()),
              known=int(rows.actual_return.notna().sum()))
         for day, rows in frame.groupby('day')
     ]
+    frame['actual_up'] = frame.actual_return.gt(0).astype(float).where(frame.actual_return.notna())
+    return days, _diagnostics(frame, GROUPS)
+
+
+def _week_diagnostics(report):
+    model = report.get('model') or {}
+    rows = []
+    features = model.get('features', [])
+    coefficients = dict(zip(features, model.get('coefficients', []), strict=True)) if features else {}
+    for row in report.get('validation_rows', []):
+        factors = row.get('factors') or []
+        rows.append(dict(actual_up=row.get('actual_up'), **{factor['key']: factor['value'] for factor in factors},
+                         impact_auction=sum(factor['impact'] for factor in factors)))
+    return _diagnostics(pd.DataFrame(rows), {'auction': features}, coefficients=coefficients) if rows else {}
 
 
 def _week_row(row):
@@ -94,11 +137,12 @@ class OpeningWorkspace:
         history = dict(evidence=report.get('evidence_kind'), status='ready' if path else 'unavailable', days=[])
         if path:
             final = report['final']['constituents']
+            days, diagnostics = _history_check(path, path.stat().st_mtime_ns, tuple(final['evaluation_tickers']))
             history.update(accuracy=_number(final.get('overall_accuracy')), worst_five=_number(final.get('worst_five_accuracy')),
                            expected=final.get('expected_predictions'), sessions=final.get('test_dates'),
                            sources={key: _number(value) for key, value in report.get('source_coverage', {}).get('constituents', {}).items()
                                     if key in GROUPS},
-                           days=_history_days(path, path.stat().st_mtime_ns, tuple(final['evaluation_tickers'])))
+                           days=days, diagnostics=diagnostics)
         planned = self._capture_days(week)
         score = week.get('validation', {})
         evaluation_day = week.get('validation_date')
@@ -109,16 +153,23 @@ class OpeningWorkspace:
                               accuracy=_number(score.get('accuracy')), expected=score.get('expected'),
                               known=score.get('expected', 0) - score.get('unknown_answers', 0) if week else None,
                               training_rows=week.get('train_rows'), fitted=week.get('model') is not None if week else None,
+                              diagnostics=_week_diagnostics(week),
                               trial_rule=_number(trial_rule.get('accuracy')),
                               always_not_up=_number(week.get('validation_fixed_not_up', {}).get('accuracy'))))
 
     def _capture_days(self, week):
         saved = week.get('collection', {})
+        status = _json(self.capture / 'capture-status.json') if self.capture else {}
+        observed = status.get('days', {}) if status.get('evidence') == 'vm_observed' else {}
         symbols = tuple(_json(self.capture / 'symbols.json')) if self.capture else ()
         days = []
         for day in COLLECTION_DAYS:
             iso = day.isoformat()
             count = saved.get(iso, {}).get('timed_trial_inputs')
+            if count is None:
+                observed_count = observed.get(iso, {}).get('timed_trial_inputs')
+                if type(observed_count) is int and 0 <= observed_count <= (len(symbols) or 50):
+                    count = observed_count
             if count is None and self.capture and symbols:
                 archive = Archive(self.capture, day, readonly=True)
                 if archive.path.is_file():
@@ -141,7 +192,7 @@ class OpeningWorkspace:
         if not path:
             return dict(date=None, rows=[])
         tickers = tuple(report['final']['constituents']['evaluation_tickers'])
-        dates = _history_days(path, path.stat().st_mtime_ns, tickers)
+        dates, _ = _history_check(path, path.stat().st_mtime_ns, tickers)
         target = day.isoformat() if day else dates[-1]['date'] if dates else None
         if not target or not any(item['date'] == target for item in dates):
             return dict(date=target, rows=[])
@@ -221,12 +272,20 @@ def synthetic_opening():
     week_day, week_rows = next(iter(weekly.items()))
     rule = sum((row['groups'][0]['features'][0]['value'] > 0) == row['actual_up'] for row in week_rows) / len(week_rows)
     not_up = sum(not row['actual_up'] for row in week_rows) / len(week_rows)
+    def diagnostics(rows, groups):
+        values = [dict(actual_up=row['actual_up'],
+                       **{f"impact_{group['group']}": group['impact'] for group in row['groups']},
+                       **{item['key']: item['value'] for group in row['groups'] for item in group['features']})
+                  for row in rows]
+        return _diagnostics(pd.DataFrame(values), groups)
     return dict(task=TASK, target=TARGET,
                 history=dict(evidence='synthetic', status='ready', sessions=len(days), **_summary(all_history),
                              worst_five=sum(ranked[:5]) / 5, sources={group: 1. for group, *_ in specs},
+                             diagnostics=diagnostics(all_history, {group: [key] for group,key,_ in specs}),
                              days=[dict(date=day, **_summary(rows)) for day, rows in constituent_rows.items()]),
                 week=dict(evidence='synthetic', status='ready', date=week_day, training_rows=40, fitted=True,
                           **_summary(week_rows), trial_rule=rule, always_not_up=not_up,
+                          diagnostics=diagnostics(week_rows, {'auction': ['trial_gap']}),
                           days=[dict(date=day.isoformat(), inputs=count, expected=50)
                                 for day, count in zip(COLLECTION_DAYS, [44, 48, 47, 50, 50], strict=True)]),
                 rows=dict(history=history_rows, week=weekly))

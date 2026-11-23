@@ -20,10 +20,10 @@
     <nav class="nav">
       <a class="nav-link active" href="#overview"><i class="nav-icon overview-icon" aria-hidden="true"></i>總覽</a>
       <a class="nav-link" href="#predictions"><i class="nav-icon list-icon" aria-hidden="true"></i>逐筆預測</a>
+      <a class="nav-link" href="#research"><i class="nav-icon archive-icon" aria-hidden="true"></i>日線研究</a>
       <a class="nav-link" href="#architecture"><i class="nav-icon flow-icon" aria-hidden="true"></i>系統架構</a>
     </nav>
     <div class="rail-bottom">
-      <a class="nav-link classic-link" href="./legacy.html"><i class="nav-icon archive-icon" aria-hidden="true"></i>日線研究</a>
       <span id="rail-status">正在連接</span>
     </div>
   </aside>
@@ -49,6 +49,16 @@
         </div>
         <p id="alert" class="alert" role="status" hidden></p>
         <div id="metrics" class="metrics" aria-label="核心指標" aria-live="polite"></div>
+        <section class="panel network" id="architecture" aria-labelledby="architecture-title">
+          <header class="panel-heading">
+            <div><h2 id="architecture-title">系統運作圖</h2><p>選取節點或連線查看資料與權重</p></div>
+            <span class="flow-key">資料線寬 · 影響比重</span>
+          </header>
+          <div class="flow-layout">
+            <div class="flow-board" id="flow-board"><canvas id="flow-canvas" aria-hidden="true"></canvas><div id="flow-layer"></div></div>
+            <div class="flow-inspector" id="flow-inspector" aria-live="polite"></div>
+          </div>
+        </section>
         <div class="dashboard">
           <section class="panel trend" aria-labelledby="trend-title">
             <header class="panel-heading">
@@ -57,23 +67,18 @@
             </header>
             <div id="trend"></div>
           </section>
-          <section class="panel architecture" id="architecture" aria-labelledby="architecture-title">
-            <header class="panel-heading">
-              <div><h2 id="architecture-title">系統架構</h2></div>
-            </header>
-            <ol id="pipeline" class="pipeline"></ol>
-          </section>
         </div>
       </section>
       <section class="panel predictions" id="predictions" aria-labelledby="predictions-title">
         <header class="panel-heading prediction-heading">
-          <div><h2 id="predictions-title">逐筆預測</h2><p id="prediction-context"></p></div>
+          <div><h2 id="predictions-title">逐筆開盤預測</h2><p id="prediction-context"></p></div>
           <div class="table-controls">
             <label><span class="visually-hidden">交易日</span><select id="decision-day" aria-label="交易日"></select></label>
             <label><span class="visually-hidden">代號或公司</span><input id="query" type="search" placeholder="搜尋代號或公司" autocomplete="off"></label>
             <label><span class="visually-hidden">篩選結果</span><select id="result-filter" aria-label="篩選結果"><option value="all">成分股結果</option><option value="hit">命中</option><option value="miss">未命中</option><option value="pending">缺答案</option><option value="transfer" id="transfer-option">延伸標的</option></select></label>
           </div>
         </header>
+        <div class="prediction-key"><span><b>比較基準</b> 上一交易日收盤</span><span><b>未高於</b> 平盤或開低</span><span><b>機率</b> 開高的模型分數</span><span><b>缺答案</b> 計入評分分母</span></div>
         <div class="table-frame">
           <table>
             <thead><tr><th scope="col">標的</th><th scope="col">預測</th><th scope="col">高於前收機率</th><th scope="col" class="actual-col">正式開盤</th><th scope="col" class="result-col">判定</th><th scope="col"><span class="visually-hidden">影響因素</span></th></tr></thead>
@@ -82,6 +87,22 @@
         </div>
         <div id="table-empty" class="empty" hidden></div>
         <div class="table-bottom"><span id="row-count" aria-live="polite"></span><div class="pagination"><button id="previous" type="button">上一頁</button><span id="page-number"></span><button id="next" type="button">下一頁</button></div></div>
+      </section>
+      <section class="panel daily-panel" id="research" aria-labelledby="research-title">
+        <header class="panel-heading prediction-heading">
+          <div><h2 id="research-title">日線研究</h2><p>未來收盤相對基準日收盤</p></div>
+          <div class="table-controls">
+            <label><span class="visually-hidden">日線工作區</span><select id="daily-workspace" aria-label="日線工作區"></select></label>
+            <label><span class="visually-hidden">日線區間</span><select id="daily-horizon" aria-label="日線區間">
+              <option value="1">1 交易日</option><option value="5">5 交易日</option><option value="20">20 交易日</option></select></label>
+          </div>
+        </header>
+        <div class="segment daily-switch" aria-label="日線頁籤">
+          <button type="button" data-daily-view="forecasts" aria-pressed="true">日線預測</button>
+          <button type="button" data-daily-view="backtests" aria-pressed="false">回測與基準</button>
+          <button type="button" data-daily-view="sources" aria-pressed="false">資料與操作</button>
+        </div>
+        <div id="daily-content" aria-live="polite"><p class="empty">等待日線研究資料</p></div>
       </section>
       <footer class="footer"><span>0050 Predict</span><span>固定十檔訓練 · 完整成分股驗證</span></footer>
     </main>
