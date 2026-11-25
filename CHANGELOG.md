@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — 2026-11-25 — Opening model comparison design
+
+- Define an auction-price anchor and opening-price correction candidate. Pin the existing auction classifier and predefine the November 27 holdout comparison against the auction direction rule and a fixed-ten median correction prototype.
+
 ## Unreleased — 2026-11-23 — Interactive system flow
 
 - Trace inputs, decision cutoffs, shared models and outcomes in an interactive graph. Expose factor-level correlations, sample counts, average probability impact and its relative share. Display fitted standardized coefficients when supplied by the trial study.
