@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — 2026-11-26 — Multi-source opening study and clearer comparisons
+
+- Compare learned source weights with a multivariate linear classifier and gradient boosting on the same historical opening holdout. Admit receipt-timed regional equity, company action, earnings surprise and guidance events.
+- Show directional denominators and separate multi-session weakest-stock metrics in the workbench. Use coherent, clearly synthetic examples and display historical source scores and weights in the private workspace.
+
 ## Unreleased — 2026-11-26 — Opening model training and paired workbench
 
 - Fit the fixed-ten auction-close correction on mature prior sessions and compare the preserved auction classifier, direct trial direction and correction on each full holdout grid. Schedule the November 27 offline comparison separately from the frozen report.

@@ -12,6 +12,7 @@ const time = new Intl.DateTimeFormat('zh-TW', { timeZone:'Asia/Taipei', hourCycl
   hour:'2-digit', minute:'2-digit', second:'2-digit', fractionalSecondDigits:3 });
 const fixed = ['2330','2454','2317','2308','3711','1303','2383','2881','2891','3037'];
 const modelNames = { auction_logistic:'原試撮模型', auction_repair:'試撮＋修正' };
+const compared = { original:'原試撮模型', trial:'直接試撮', repair:'試撮＋修正' };
 const fallbackText = { trial_missing:'截止前試撮缺報 · 使用訓練期比例',
   model_unavailable:'訓練樣本不足 · 使用訓練期比例', trial_missing_not_up:'截止前試撮缺報 · 預測未高於',
   repair_unavailable_trial:'修正樣本不足 · 採用試撮方向' };
@@ -25,9 +26,10 @@ async function load(url) {
 }
 
 function evidence() {
-  const kind = app.data?.[app.view]?.evidence;
+  const active = app.data?.[app.view];
+  const kind = active?.evidence;
   if (app.config?.mode === 'snapshot' || kind === 'synthetic') return '合成示範';
-  return kind ? '實際收件重播' : '等待試撮';
+  return kind && (active.date === app.day || app.data.comparisons?.[app.day]) ? '實際收件重播' : '待驗證';
 }
 
 function metric(title, value, detail) {
@@ -35,24 +37,61 @@ function metric(title, value, detail) {
 }
 
 function renderComparison(pair) {
-  $('comparison-date').textContent = app.day ? `${app.day} · ${evidence()}` : '等待驗證';
+  const classes = pair?.classes;
+  const counts = classes ? ` · 開高 ${integer(classes.up)} 檔／未開高 ${integer(classes.not_up)} 檔` +
+    (classes.unknown ? `／缺答案 ${integer(classes.unknown)} 檔` : '') : '';
+  $('comparison-date').textContent = app.day ? `${app.day} · ${evidence()}${counts}` : '等待驗證';
   if (!pair) {
-    $('comparison').innerHTML = '<p class="empty">等待這一天的同樣本比較</p>';
+    $('comparison').innerHTML = '<p class="empty">此日尚無配對驗證結果。</p>';
     return;
   }
   const entries = [
-    ['原試撮模型', pair.original, pair.original_paired, app.view === 'week'],
-    ['直接試撮', pair.trial, null, false],
-    ['試撮＋修正', pair.repair, pair.repair_paired, app.view === 'repair']
+    [compared.original, pair.original, pair.original_paired, app.view === 'week'],
+    [compared.trial, pair.trial, null, false],
+    [compared.repair, pair.repair, pair.repair_paired, app.view === 'repair']
   ];
   $('comparison').innerHTML = `<table><thead><tr><th scope="col">方案</th>
-    <th scope="col">命中數</th><th scope="col">準確率</th><th scope="col">最弱五檔</th>
-    <th scope="col">上漲召回</th><th scope="col">未上漲召回</th><th scope="col">相對試撮 救回／新增錯誤</th>
+    <th scope="col">命中數</th><th scope="col">準確率</th>
+    <th scope="col">開高命中率</th><th scope="col">未開高命中率</th><th scope="col">相對直接試撮 救回／改錯</th>
     </tr></thead><tbody>${entries.map(([label, score, diff, active]) => `
     <tr class="${active ? 'active-model' : ''}"><th scope="row">${label}</th>
     <td>${integer(score.correct)}／${integer(score.expected)}</td><td><strong>${percent(score.accuracy,1)}</strong></td>
-    <td>${percent(score.worst_five,1)}</td><td>${percent(score.recall?.up,1)}</td><td>${percent(score.recall?.not_up,1)}</td>
-    <td>${diff ? `${integer(diff.rescued)}／${integer(diff.added_errors)}` : '基準'}</td></tr>`).join('')}</tbody></table>`;
+    <td>${percent(score.recall?.up,1)}</td><td>${percent(score.recall?.not_up,1)}</td>
+    <td>${diff ? `${integer(diff.rescued)}／${integer(diff.added_errors)}` : '基準'}</td></tr>`).join('')}</tbody></table>
+    <p class="comparison-note">各方向命中率以實際該方向為分母。未開高含平盤，缺答案計錯。</p>`;
+}
+
+function renderPairedWindow(window) {
+  const worst = window?.worst_five || {};
+  if (!Object.keys(worst).length) {
+    $('paired-window').innerHTML = '<h3>跨日最弱五檔</h3><p>累積至少兩個配對驗證日後顯示。</p>';
+    return;
+  }
+  $('paired-window').innerHTML = `<h3>跨日最弱五檔</h3>
+    <p>${escape(window.dates[0])} 至 ${escape(window.dates.at(-1))} · ${integer(window.sessions)} 個配對日
+    · 各方案命中率最低五檔的平均</p>
+    <dl>${Object.entries(compared).map(([key, label]) => `<div><dt>${label}</dt><dd>${percent(worst[key],1)}</dd></div>`).join('')}</dl>`;
+}
+
+function renderSourceStudy(history) {
+  const models = Object.entries(history?.models || {});
+  $('source-study').hidden = history?.evidence !== 'historical' || models.length === 0;
+  if ($('source-study').hidden) return;
+  const names = { context:'多來源線性', context_tree:'多來源提升樹', source_fusion:'分來源加權' };
+  const range = history.days;
+  const weights = Object.entries(history.source_weights || {}).filter(([, value]) => finite(value));
+  $('source-study-range').textContent = `${range[0]?.date || '—'} 至 ${range.at(-1)?.date || '—'} · ${integer(history.sessions)} 日留出重播`;
+  $('source-study-scores').innerHTML = `<table><thead><tr><th scope="col">方案</th>
+    <th scope="col">預測數</th><th scope="col">整體準確率</th><th scope="col">跨日最弱五檔</th>
+    <th scope="col">最低單檔</th></tr></thead><tbody>${models.map(([key, row]) => `
+    <tr><th scope="row">${names[key] || escape(key)}</th><td>${integer(row.expected)}</td>
+    <td>${percent(row.accuracy,2)}</td><td>${percent(row.worst_five_accuracy,2)}</td>
+    <td>${percent(row.minimum_stock_accuracy,2)}</td></tr>`).join('')}</tbody></table>
+    <p class="comparison-note">以歷史價量、海外市場、夜盤及籌碼等來源驗證 08:59 開盤方向。</p>
+    ${weights.length ? `<details class="study-weights"><summary>分來源加權係數</summary>
+      <p class="comparison-note">合併層對各來源模型分數的係數，單位為對數勝算。</p>
+      <dl>${weights.map(([key, value]) => `<div><dt>${escape(groupNames[key] || key)}</dt><dd>${value.toFixed(3)}</dd></div>`).join('')}</dl>
+    </details>` : ''}`;
 }
 
 function renderOverview() {
@@ -60,6 +99,7 @@ function renderOverview() {
   const active = app.data[app.view];
   const pair = app.data.comparisons?.[app.day];
   const isRepair = app.view === 'repair';
+  const synthetic = app.config.mode === 'snapshot' || active.evidence === 'synthetic';
   const selectedScore = isRepair ? pair?.repair : pair?.original;
   const selectedRows = isRepair ? pair?.repair_training_rows : pair?.original_training_rows;
   const fallback = active.date === app.day;
@@ -81,16 +121,17 @@ function renderOverview() {
   const correction = pair?.correction ?? (fallback ? active.correction : null);
   $('signal-column').textContent = isRepair ? '修正後價差' : '高於前收分數';
   $('metrics').innerHTML = [
-    metric(isRepair ? '修正模型準確率' : '原模型準確率', percent(accuracy, 1),
-      finite(accuracy) ? `${app.day} · 單日留出` : '等待該日驗證'),
-    metric('試撮方向基準', percent(pair?.trial?.accuracy ?? (fallback ? active.trial_rule : null), 1),
-      `完整 50 檔 · 研究目標 ${percent(target, 0)}`),
-    metric('固定十檔訓練', finite(trainRows) ? `${integer(trainRows)} 筆` : '—',
+    synthetic ? metric('示範配方', isRepair ? '試撮＋修正' : '試撮分類',
+      isRepair && finite(correction) ? `修正 ${basisPoints(correction)}` : '預設係數') :
+      metric('固定十檔訓練', finite(trainRows) ? `${integer(trainRows)} 筆` : '—',
       isRepair && finite(correction) ? `共同修正 ${basisPoints(correction)}` : '留出日以前的成熟樣本'),
-    metric('即時試撮覆蓋', countDisplay, caption),
+    metric('截止前試撮覆蓋', countDisplay, caption),
+    metric('同日配對驗證', `${integer(app.data.paired_window?.sessions ?? 0)} 日`, `研究目標 ${percent(target,0)}`),
   ].join('');
   renderComparison(pair);
-  renderFlow({ view:app.view, day:app.day, accuracy, diagnostics, trainRows, correction,
+  renderPairedWindow(app.data.paired_window);
+  renderSourceStudy(app.data.history);
+  renderFlow({ view:app.view, day:app.day, accuracy, diagnostics, trainRows, correction, synthetic,
     fitted:isRepair ? (pair || fallback ? finite(correction) : null) :
       pair?.original_fitted ?? (fallback ? active.fitted : null),
     captured:captured.length, days:week.days.length });
@@ -106,7 +147,6 @@ function renderTrend() {
   const selectedIndex = days.findIndex(item => item.date === app.day);
   const end = selectedIndex < 0 ? days.length : Math.max(12, selectedIndex + 1);
   const series = days.slice(Math.max(0, end - 12), end);
-  $('trend-title').textContent = '逐日試撮覆蓋';
   $('trend-subtitle').textContent = series.length ?
     `${series[0].date} – ${series.at(-1).date}` : '等待研究快照';
   $('trend-legend').textContent = '截止前有效筆數';

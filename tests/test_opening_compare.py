@@ -89,6 +89,8 @@ def test_workspace_exposes_two_models_and_shared_trial_baseline(tmp_path):
     summary = workspace.summary()
     assert summary['week']['date'] == days[-1].isoformat()
     assert summary['repair']['date'] == days[-1].isoformat()
+    assert summary['paired_window']['sessions'] == 1
+    assert summary['paired_window']['worst_five'] == {}
     score = summary['comparisons'][days[-1].isoformat()]
     assert score['trial']['correct'] == 0
     assert score['repair']['correct'] == 1
@@ -152,3 +154,16 @@ def test_recovery_falls_back_with_the_existing_pilot_calendar(tmp_path, monkeypa
     monkeypatch.setattr(opening_compare, '_supplement', fallback)
     assert opening_compare.main(['recover', '--root', str(tmp_path)]) == 0
     assert attempted == [(tmp_path, COLLECTION_DAYS)]
+
+
+def test_weakest_five_rank_stocks_across_paired_days_and_charge_unknown():
+    from twquant.opening_web import _paired_window
+
+    tickers = ('2330', '2454', '2317', '2308', '3711', '1303')
+    reports = {}
+    for day, missed in (('2026-11-25', '2330'), ('2026-11-26', '2454')):
+        rows = [dict(ticker=ticker, actual_up=None if ticker == '1303' else True,
+                     trial_up=True, predicted_up=True) for ticker in tickers]
+        original = [dict(row, predicted_up=row['ticker'] != missed) for row in rows]
+        reports[day] = dict(original=dict(validation_rows=original), repair=dict(rows=rows))
+    assert _paired_window(reports)['worst_five'] == {'original': .6, 'trial': .8, 'repair': .8}

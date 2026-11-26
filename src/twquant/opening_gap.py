@@ -48,11 +48,16 @@ EVENT_FIELDS = {
     'media_sentiment': 'f_open_media_sentiment',
     'tx_morning_return': 'f_open_tx_morning',
     'usdtwd_morning_return': 'f_open_usdtwd_morning',
+    'regional_equity_return': 'f_open_regional_equity_return',
+    'company_action_gap': 'f_open_company_action_gap',
+    'earnings_surprise': 'f_open_earnings_surprise',
+    'guidance_revision': 'f_open_guidance_revision',
 }
 AUCTION = tuple(value for key, value in EVENT_FIELDS.items() if key.startswith('auction_'))
 NEWS = tuple(EVENT_FIELDS[key] for key in ('official_event_count', 'media_event_count', 'media_sentiment'))
-MORNING = tuple(EVENT_FIELDS[key] for key in ('tx_morning_return', 'usdtwd_morning_return'))
-OPTIONAL_GROUPS = dict(auction=AUCTION, news=NEWS, morning=MORNING)
+MORNING = tuple(EVENT_FIELDS[key] for key in ('tx_morning_return', 'usdtwd_morning_return', 'regional_equity_return'))
+COMPANY = tuple(EVENT_FIELDS[key] for key in ('company_action_gap', 'earnings_surprise', 'guidance_revision'))
+OPTIONAL_GROUPS = dict(auction=AUCTION, news=NEWS, morning=MORNING, company=COMPANY)
 GROUPS = {**BASE_GROUPS, **OPTIONAL_GROUPS}
 OVERNIGHT_SIGNAL = (NIGHT[0], US[0], US[1])
 
@@ -205,7 +210,65 @@ class OpeningGapModel:
         return pd.concat([observations, pd.DataFrame(contributions, index=panel.index)], axis=1)
 
 
-def _candidate_models(train):
+def _linear_estimator():
+    return make_pipeline(SimpleImputer(strategy='median', add_indicator=True), StandardScaler(),
+                         LogisticRegression(C=.1, max_iter=500))
+
+
+@dataclass
+class SourceFusionEstimator:
+    experts: tuple
+    stacker: object
+
+    def _inputs(self, panel):
+        probabilities, coverage = [], []
+        for _, columns, model, prior in self.experts:
+            frame = panel.loc[:, list(columns)]
+            observed = frame.notna().any(axis=1).to_numpy()
+            probability = model.predict_proba(frame)[:, 1]
+            probabilities.append(np.where(observed, probability, prior))
+            coverage.append(observed)
+        return np.column_stack((*probabilities, *coverage))
+
+    def predict_proba(self, panel):
+        return self.stacker.predict_proba(self._inputs(panel))
+
+    def source_weights(self):
+        count = len(self.experts)
+        return {group: dict(probability=float(self.stacker.coef_[0, index]),
+                            present=float(self.stacker.coef_[0, index + count]))
+                for index, (group, *_) in enumerate(self.experts)}
+
+
+def _fit_source_fusion(train, prior, optional):
+    dates = pd.Index(train.date.unique()).sort_values()
+    if len(dates) < 4:
+        return None
+    split = dates[int(.75 * len(dates))]
+    later = train.loc[train.date.ge(split)]
+    first_decision = later.decision_ts.min()
+    earlier = train.loc[train.date.lt(split) & train.label_available_at.lt(first_decision)]
+    early_y = earlier.actual_return.gt(0).astype(int)
+    late_y = later.actual_return.gt(0).astype(int)
+    if early_y.nunique() < 2 or late_y.nunique() < 2:
+        return None
+    experts = []
+    for group, names in GROUPS.items():
+        columns = tuple(c for c in names if c in earlier and earlier[c].notna().any() and later[c].notna().any()
+                        and (group not in OPTIONAL_GROUPS or
+                             (c in optional and earlier.loc[earlier[c].notna(), 'date'].nunique() >= MIN_OPTIONAL_DATES)))
+        if columns:
+            learner = _linear_estimator().fit(earlier[list(columns)], early_y)
+            experts.append((group, columns, learner, float(early_y.mean())))
+    if len(experts) < 2:
+        return None
+    estimator = SourceFusionEstimator(tuple(experts), LogisticRegression(C=1., max_iter=500))
+    columns = tuple(key for _, members, *_ in experts for key in members)
+    estimator.stacker.fit(estimator._inputs(later[list(columns)]), late_y)
+    return OpeningGapModel('source_fusion', prior, columns, estimator)
+
+
+def _candidate_models(train, *, source_fusion=False):
     y = train.actual_return.gt(0).astype(int)
     prior = float(y.mean())
     models = {'prior': OpeningGapModel('prior', prior, ())}
@@ -232,10 +295,13 @@ def _candidate_models(train):
             estimator = HistGradientBoostingClassifier(max_iter=125, max_leaf_nodes=15, min_samples_leaf=100,
                                                         l2_regularization=3, early_stopping=False, random_state=42)
         else:
-            estimator = make_pipeline(SimpleImputer(strategy='median', add_indicator=True), StandardScaler(),
-                                      LogisticRegression(C=.1, max_iter=500))
+            estimator = _linear_estimator()
         estimator.fit(train[list(features)], y)
         models[name] = OpeningGapModel(name, prior, features, estimator)
+    if source_fusion:
+        fusion = _fit_source_fusion(train, prior, optional)
+        if fusion is not None:
+            models[fusion.name] = fusion
     return models
 
 
@@ -283,7 +349,8 @@ class OpeningGapResult:
 
 
 def validate_opening_gap(panel, constituents, *, membership_as_of, evidence_kind='unknown', fold_dates=252,
-                         calibration_dates=126, final_dates=126, min_train_dates=504, max_folds=8):
+                         calibration_dates=126, final_dates=126, min_train_dates=504, max_folds=8,
+                         source_fusion=False):
     """Fit and select on the fixed ten, then independently score each complete test block."""
     constituents = constituent_universe(constituents)
     if evidence_kind not in {'historical', 'synthetic', 'unknown'}:
@@ -318,7 +385,7 @@ def validate_opening_gap(panel, constituents, *, membership_as_of, evidence_kind
             if not cal.actual_return.notna().any():
                 raise ValueError('No mature fixed-ten calibration answers')
             test = panel.loc[panel.date.isin(test_dates)]
-            candidates = _candidate_models(train)
+            candidates = _candidate_models(train, source_fusion=source_fusion)
             calibration = {name: _metrics(_predictions(model, cal, name), TRAINING_TICKERS)
                            for name, model in candidates.items() if not name.startswith('without_')}
             chosen = max(calibration, key=lambda name: (calibration[name]['worst_five_accuracy'],
@@ -338,6 +405,8 @@ def validate_opening_gap(panel, constituents, *, membership_as_of, evidence_kind
                               test_decision_start=test_start.isoformat(), test_end=test_dates[-1].date().isoformat(),
                               test_dates=len(test_dates), calibration=calibration,
                               candidate_features={name: model.columns for name, model in candidates.items()}))
+            if 'source_fusion' in candidates:
+                folds[-1]['source_fusion_weights'] = candidates['source_fusion'].estimator.source_weights()
             models[version] = candidates[chosen]
     predictions = pd.concat(scored, ignore_index=True)
     report = dict(task=TASK, cutoff_local='08:59:00 Asia/Taipei', target_accuracy=TARGET,
@@ -363,7 +432,7 @@ def validate_opening_gap(panel, constituents, *, membership_as_of, evidence_kind
     return OpeningGapResult(report, predictions, models)
 
 
-def run_opening_gap(frame_path, calendar_path, membership_path, output, *, event_path=None):
+def run_opening_gap(frame_path, calendar_path, membership_path, output, *, event_path=None, source_fusion=False):
     """Run a sealed local research experiment from explicit, fingerprinted source files."""
     from .direction_audit import load_membership_snapshot
     from .workflows import data_kind
@@ -395,6 +464,7 @@ def run_opening_gap(frame_path, calendar_path, membership_path, output, *, event
                     runner_sha256=_sha(__file__), membership_as_of=membership['as_of'],
                     score_threshold=.5, selection='Fixed-ten calibration worst-five, then accuracy, then Brier',
                     final_dates=126, calibration_dates=126, min_train_dates=504, max_folds=8, fold_dates=252,
+                    source_fusion=source_fusion,
                     training_symbols=TRAINING_TICKERS, transfer_symbols=DEFAULT_EVALUATION_TICKERS,
                     factor_method='ordered_source_probability_deltas',
                     feature_source='08:30 retrospective inputs and optional same-session observed numeric events',
@@ -402,7 +472,7 @@ def run_opening_gap(frame_path, calendar_path, membership_path, output, *, event
     _write_json(output / 'protocol.json', protocol)
     panel = build_opening_gap_panel(frame, dates, symbols, events=events)
     result = validate_opening_gap(panel, membership['tickers'], membership_as_of=membership['as_of'],
-                                  evidence_kind=evidence_kind)
+                                  evidence_kind=evidence_kind, source_fusion=source_fusion)
     if {name: _sha(path) for name, path in paths.items()} != digests or _sha(__file__) != protocol['runner_sha256']:
         raise RuntimeError('Opening research inputs changed during execution')
     result.predictions.to_parquet(output / 'predictions.parquet', index=False)

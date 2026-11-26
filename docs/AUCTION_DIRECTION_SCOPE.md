@@ -87,8 +87,24 @@ LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant opening-gap \
   --start 2026-10-07 --end 2026-11-05
 ```
 
-可選 `--events` CSV 欄位為 `session_date,ticker,feature,value,published_at,available_at`，時鐘須含時區。接受 `auction_indicative_price`、`auction_imbalance`、`auction_matched_volume_ratio`、`official_event_count`、`media_event_count`、`media_sentiment`、`tx_morning_return`、`usdtwd_morning_return`。試撮限截止前 30 秒內的來源事件，期貨與匯率限 08:45 起。實際可用時間必須早於 08:59，事件沿當日與標的對應。只有早盤市場序列可使用 `*` 全域代號。
+可選 `--events` CSV 欄位為 `session_date,ticker,feature,value,published_at,available_at`，時鐘須含時區。接受 `auction_indicative_price`、`auction_imbalance`、`auction_matched_volume_ratio`、`official_event_count`、`media_event_count`、`media_sentiment`、`tx_morning_return`、`usdtwd_morning_return`、`regional_equity_return`、`company_action_gap`、`earnings_surprise`、`guidance_revision`。試撮限截止前 30 秒內的來源事件，早盤市場序列限 08:45 起。實際可用時間必須早於 08:59，事件沿當日與標的對應。只有早盤市場序列可使用 `*` 全域代號。
 
 匯入事件時，以 `evidence_kind` 宣告 `historical`、`synthetic` 或 `unknown`。缺宣告時保留未知，任何合成來源會讓整組實驗標示為合成。
 
 現有官方新聞匯出只有兩個收件日期，且本輪缺乏連續來源覆蓋。即使個別文章有發布時間，仍需歷史首次可見時間、修訂版本和缺報標記。下一批資料以 50 檔 08:58:30–08:59 的試撮價、量、價差和雙時鐘優先，其次是 08:45–08:59 TX 及匯率，再接正式公告與有授權的繁中新聞。公告聚合應區分可確認的零篇與收件缺口。
+
+## 多來源權重與因子優先順序
+
+`opening-gap --source-fusion` 將同一折訓練期的前 75% 交易日用於估計各來源的方向分數，用後 25% 學習加權及缺報指示。來源子模型只使用在後段起始決策前已成熟的答案。外層沿用獨立的固定十檔校準期與完整成分股留出期。分來源加權與完整線性、提升樹及移除單組來源的模型在相同日期比較。
+
+以 2026-05-05 至 11-05 的既有 126 日歷史切割重跑，線性、分來源加權、提升樹的整體命中率分別為 71.00%、70.87%、70.29%，最弱五檔分別為 54.29%、54.44%、57.30%。提升樹依固定十檔校準規則入選。夜盤上漲且 SPY 上漲時 47 日中 70.89% 的標的開高。兩者均未上漲時 44 日中 29.34% 開高。這些是既有歷史期的描述統計。該矩陣只有歷史價量、美股、夜盤、籌碼與總經的覆蓋。
+
+| 因子 | 要驗證的條件與方向 |
+|---|---|
+| 個股價量、同儕、五檔與試撮 | 同向且試撮價差穩定時檢查延續性。接近昨收、尾段翻向、委託簿偏薄時檢查反轉及資料缺口。 |
+| 美股／ADR、區域股市、早盤與夜盤期貨 | 按個股產業曝險測試同向與衝突情境。分開核對本地交易日、契約與來源可用時刻。 |
+| 產業、籌碼、匯率與總經 | 依產業對利率、原物料、匯率的曝險測試交互作用。籌碼與成交量同時保留延續和反轉候選。 |
+| 財報、法說會與重大訊息 | 對照當時已知預期及展望，分開衡量財報驚喜、上修與下修。以日別明確的公司行動參考價處理原始開盤價的機械變動。 [公開資訊觀測站](https://mops.twse.com.tw/) [除權息參考價](https://wwwc.twse.com.tw/zh/announcement/ex-right/twt49u.html) |
+| 新聞 | 依事件與公司去重，從官方公告、新事件及獨立媒體報導分別建特徵，保留首次到達和修訂時間。 |
+
+先採一組加入與移除的同日比較，再測可解釋的交互作用。依全覆蓋、方向優勢、最低單檔及整體準確率決定保留哪些來源。將新取得的現行快照保存真實收件時間，後續只在可驗證的時間範圍加入訓練。

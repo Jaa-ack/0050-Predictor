@@ -27,7 +27,7 @@ export function openingRows(rows, query, result) {
 
 export const groupNames = {
   price:'台股價格', volume:'成交量', us:'美股與 ADR', night:'期貨夜盤', other:'籌碼與總經',
-  auction:'盤前試撮', news:'公告與新聞', morning:'早盤期貨與匯率'
+  auction:'盤前試撮', news:'公告與新聞', morning:'早盤跨市場', company:'公司事件'
 };
 
 const inputs = {
@@ -47,6 +47,9 @@ const inputs = {
   f_open_auction_rvol:['相對試撮量','ratio'], f_open_official_count:['官方公告數','number'],
   f_open_media_count:['媒體事件數','number'], f_open_media_sentiment:['媒體情緒分數','number'],
   f_open_tx_morning:['臺指期早盤報酬','percent'], f_open_usdtwd_morning:['美元兌臺幣早盤變動','percent'],
+  f_open_regional_equity_return:['區域市場早盤報酬','percent'],
+  f_open_company_action_gap:['公司行動參考價差','percent'],
+  f_open_earnings_surprise:['財報相對預期差異','number'], f_open_guidance_revision:['展望修正','number'],
   trial_gap:['試撮相對前收','percent'], log_matched_size:['試撮成交量','log-size'],
   book_imbalance:['試撮五檔不平衡','percent']
 };

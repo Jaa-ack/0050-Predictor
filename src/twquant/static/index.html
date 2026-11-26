@@ -29,7 +29,6 @@
   </aside>
   <div class="workspace">
     <header class="topbar">
-      <div class="breadcrumb"><span>研究工作台</span><span aria-hidden="true">/</span><strong>開盤方向</strong></div>
       <div class="header-actions"><span class="time-zone">臺北時間 UTC+8</span><span class="mode-pill" id="mode">連線中</span></div>
     </header>
     <main id="main">
@@ -51,7 +50,12 @@
         <div id="metrics" class="metrics" aria-label="核心指標" aria-live="polite"></div>
         <section class="panel comparison" aria-labelledby="comparison-title">
           <header class="panel-heading"><div><h2 id="comparison-title">同日模型比較</h2><p id="comparison-date"></p></div></header>
-          <div id="comparison" class="table-frame" role="region" aria-labelledby="comparison-title" tabindex="0"></div>
+          <div id="comparison" class="table-frame" role="region" aria-label="配對驗證分數" tabindex="0"></div>
+          <div id="paired-window" class="paired-window"></div>
+        </section>
+        <section class="panel comparison" id="source-study" aria-labelledby="source-study-title" hidden>
+          <header class="panel-heading"><div><h2 id="source-study-title">多來源歷史驗證</h2><p id="source-study-range"></p></div></header>
+          <div class="table-frame" id="source-study-scores" role="region" aria-label="歷史留出分數" tabindex="0"></div>
         </section>
         <section class="panel network" id="architecture" aria-labelledby="architecture-title">
           <header class="panel-heading">
@@ -66,7 +70,7 @@
         <div class="dashboard">
           <section class="panel trend" aria-labelledby="trend-title">
             <header class="panel-heading">
-              <div><h2 id="trend-title">逐日準確率</h2><p id="trend-subtitle"></p></div>
+              <div><h2 id="trend-title">逐日試撮覆蓋</h2><p id="trend-subtitle"></p></div>
               <span id="trend-legend" class="chart-legend"></span>
             </header>
             <div id="trend"></div>

@@ -25,9 +25,9 @@ function modelNodes(data) {
       ['試撮窗口','08:58:30 至 08:59 前'], ['已收件',`${data.captured} / ${data.days} 日`]]},
     model:{label:repair ? '中位數修正' : '邏輯斯迴歸',
       detail:repair ? '試撮價差加固定十檔的共同修正' : '用同一組試撮因子預測 50 檔',
-      badge:fitted === false ? '回退' : fitted ? '已擬合' : '等待', fields:[
+      badge:data.synthetic ? '示範配方' : fitted === false ? '回退' : fitted ? '已擬合' : '等待', fields:[
         ['訓練範圍','2330、2454、2317、2308、3711、1303、2383、2881、2891、3037'],
-        ['成熟訓練樣本',train],
+        ...(data.synthetic ? [] : [['成熟訓練樣本',train]]),
         [repair ? '共同修正' : '上漲門檻', repair ? finite(data.correction) ?
           `${signed(data.correction * 10000, 1)} bp` : '沿用試撮方向' : '分數大於 50%']]},
     result:{label:'高於前收？', detail:'08:59 判斷當日正式開盤是否高於上一交易日收盤',

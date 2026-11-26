@@ -131,6 +131,35 @@ def _repair_row(row):
                 fallback=row.get('fallback_reason'), model='auction_repair')
 
 
+def _class_counts(rows):
+    return dict(up=sum(row['actual_up'] is True for row in rows),
+                not_up=sum(row['actual_up'] is False for row in rows),
+                unknown=sum(row['actual_up'] is None for row in rows))
+
+
+def _paired_window(reports):
+    dates = sorted(reports)
+    window = dict(dates=dates, sessions=len(dates), worst_five={})
+    if len(dates) < 2:
+        return window
+    totals = {}
+    for day in dates:
+        report = reports[day]
+        original = {row['ticker']: row['predicted_up'] for row in report['original']['validation_rows']}
+        rows = {row['ticker']: row for row in report['repair']['rows']}
+        if not rows or original.keys() != rows.keys() or (totals and totals.keys() != rows.keys()):
+            return window
+        for ticker, row in rows.items():
+            label = row['actual_up']
+            hits = totals.setdefault(ticker, [0, 0, 0])
+            for i, guess in enumerate((original[ticker], row['trial_up'], row['predicted_up'])):
+                hits[i] += label is not None and guess == label
+    n = min(5, len(totals))
+    window['worst_five'] = {method: sum(sorted(hits[i] for hits in totals.values())[:n]) / (n * len(dates))
+                            for i, method in enumerate(('original', 'trial', 'repair'))}
+    return window
+
+
 class OpeningWorkspace:
     """Expose numeric projections only from server-configured, private directories."""
 
@@ -185,6 +214,17 @@ class OpeningWorkspace:
                            sources={key: _number(value) for key, value in report.get('source_coverage', {}).get('constituents', {}).items()
                                     if key in GROUPS},
                            days=days, diagnostics=diagnostics)
+            controls = report['final'].get('controls', {})
+            history['models'] = {}
+            for name in ('context', 'context_tree', 'source_fusion'):
+                if name in controls:
+                    model = controls[name]['constituents']
+                    history['models'][name] = {key: _number(model.get(key))
+                                               for key in ('accuracy', 'worst_five_accuracy', 'minimum_stock_accuracy', 'expected')}
+            fold = next((item for item in reversed(report.get('folds', [])) if item.get('phase') == 'final'), {})
+            history['source_weights'] = {group: _number(values.get('probability'))
+                                         for group, values in fold.get('source_fusion_weights', {}).items()
+                                         if group in GROUPS}
         planned = self._capture_days(week)
         score = week.get('validation', {})
         evaluation_day = week.get('validation_date')
@@ -196,6 +236,7 @@ class OpeningWorkspace:
         for day, result in comparisons.items():
             variant = result['repair']
             paired[day] = dict(original=result['original_score'], repair=variant['score'], trial=result['trial_score'],
+                               classes=_class_counts(variant['rows']),
                                original_paired=result['original_paired'], repair_paired=variant['paired'],
                                original_diagnostics=_week_diagnostics(result['original']),
                                repair_diagnostics=_repair_diagnostics(variant['rows']),
@@ -216,7 +257,7 @@ class OpeningWorkspace:
                                 expected=repair_score.get('expected'), training_rows=repair.get('train_rows'),
                                 correction=_number(repair.get('correction')),
                                 diagnostics=_repair_diagnostics(repair.get('rows', []))),
-                    comparisons=paired)
+                    comparisons=paired, paired_window=_paired_window(comparisons))
 
     def _capture_days(self, week):
         saved = week.get('collection', {})
@@ -310,7 +351,6 @@ def synthetic_opening():
     specs = [('price', 'f_return_1', .04), ('volume', 'f_rvol_20', .06),
              ('us', 'f_ext_fmp_tsm_window_return', .08), ('night', 'f_ext_taifex_tx_night_return', .13),
              ('auction', 'trial_gap', .16)]
-    auction_specs = [*specs[-1:], ('auction', 'log_matched_size', .05), ('auction', 'book_imbalance', .07)]
 
     def generate(factors, *, transfers=False):
         base = .51
@@ -336,31 +376,9 @@ def synthetic_opening():
             if (end - timedelta(days=i)).weekday() < 5]
     history_rows = {day: generate(specs, transfers=True) for day in days}
     constituent_rows = {day: [row for row in rows if row['constituent']] for day, rows in history_rows.items()}
-    weekly = {COLLECTION_DAYS[-1].isoformat(): generate(auction_specs)}
     all_history = [row for rows in constituent_rows.values() for row in rows]
     ranked = sorted(sum(row['correct'] for row in all_history if row['ticker'] == ticker) / len(days)
                     for ticker in symbols)
-    week_day, week_rows = next(iter(weekly.items()))
-    correction = -.001
-    repaired = []
-    baseline = []
-    auction_factors = []
-    for row in week_rows:
-        trial_gap = row['groups'][0]['features'][0]['value']
-        base = dict(ticker=row['ticker'], actual_up=row['actual_up'], trial_up=trial_gap > 0,
-                    trial_gap=trial_gap, correction=correction, adjusted_gap=trial_gap + correction,
-                    predicted_up=trial_gap + correction > 0)
-        repaired.append(dict(_repair_row(base), constituent=True, transfer=False))
-        baseline.append(dict(row, predicted_up=base['trial_up'], correct=base['trial_up'] == row['actual_up']))
-        factors = [dict(group['features'][0], impact=group['impact']) for group in row['groups']]
-        row.update(groups=[dict(group='auction', impact=sum(group['impact'] for group in row['groups']),
-                                features=factors)], model='auction_logistic')
-        auction_factors.append(dict(actual_up=row['actual_up'], factors=factors))
-    keys = [key for _, key, _ in auction_specs]
-    auction_stats = _week_diagnostics(dict(validation_rows=auction_factors,
-                                          model=dict(features=keys, coefficients=[.4, .1, .2])))
-    repair_stats = _repair_diagnostics(repaired)
-
     def score(sample):
         counts = _summary(sample)
         recall = {}
@@ -371,15 +389,59 @@ def synthetic_opening():
                     worst_five=max(0, counts['hits'] - (len(sample) - 5)) / 5,
                     unknown_answers=0, recall=recall)
 
-    def paired(sample):
+    def paired(sample, baseline):
         return dict(rescued=sum(row['correct'] and not old['correct'] for row, old in zip(sample, baseline, strict=True)),
                     added_errors=sum(old['correct'] and not row['correct'] for row, old in zip(sample, baseline, strict=True)))
 
-    days_covered = [dict(date=day.isoformat(), inputs=50, expected=50) for day in COLLECTION_DAYS]
-    comparison = dict(original=score(week_rows), repair=score(repaired), trial=score(baseline),
-                      original_paired=paired(week_rows), repair_paired=paired(repaired),
-                      original_diagnostics=auction_stats, repair_diagnostics=repair_stats,
-                      original_training_rows=40, original_fitted=True, repair_training_rows=40, correction=correction)
+    def auction_day():
+        def probability(logit):
+            return 1 / (1 + math.exp(-logit))
+
+        original, baseline, repaired, diagnostic = [], [], [], []
+        correction = -.0018
+        keys = ('trial_gap', 'log_matched_size', 'book_imbalance')
+        weights = (.90, .12, .35)
+        for ticker in symbols:
+            gap = rng.uniform(-.013, .015)
+            size = rng.uniform(4, 6)
+            imbalance = rng.uniform(-.85, .85)
+            actual = gap + correction + .0012 * imbalance + rng.gauss(0, .0035) > 0
+            logit = -.10
+            starting = p = probability(logit)
+            factors = []
+            for key, value, centered, weight in zip(keys, (gap, size, imbalance),
+                                                    (gap / .012, size - 5, imbalance / .5), weights, strict=True):
+                logit += weight * centered
+                updated = probability(logit)
+                factors.append(dict(key=key, value=value, impact=updated - p))
+                p = updated
+            record = dict(ticker=ticker, actual_up=actual, constituent=True, transfer=False)
+            original.append(dict(record, predicted_up=p > .5, probability=p, correct=(p > .5) == actual,
+                                 factor_base=starting, model='auction_logistic',
+                                 groups=[dict(group='auction', features=factors, impact=p - starting)]))
+            baseline.append(dict(record, predicted_up=gap > 0, correct=(gap > 0) == actual))
+            row = dict(record, trial_up=gap > 0, trial_gap=gap, correction=correction,
+                       adjusted_gap=gap + correction, predicted_up=gap + correction > 0)
+            repaired.append(dict(_repair_row(row), constituent=True, transfer=False))
+            diagnostic.append(dict(actual_up=actual, factors=factors))
+        stats = _week_diagnostics(dict(validation_rows=diagnostic, model=dict(features=keys, coefficients=weights)))
+        comparison = dict(original=score(original), repair=score(repaired), trial=score(baseline),
+                          classes=_class_counts(repaired), original_paired=paired(original, baseline),
+                          repair_paired=paired(repaired, baseline), original_diagnostics=stats,
+                          repair_diagnostics=_repair_diagnostics(repaired), original_training_rows=None,
+                          original_fitted=True, repair_training_rows=None, correction=correction)
+        return original, repaired, comparison
+
+    demo_days = tuple(date(2026, 11, day).isoformat() for day in range(9, 14))
+    days_covered = [dict(date=day, inputs=50, expected=50) for day in demo_days]
+    captures = {day: auction_day() for day in demo_days[-3:]}
+    weekly = {day: result[0] for day, result in captures.items()}
+    repairs = {day: result[1] for day, result in captures.items()}
+    comparisons = {day: result[2] for day, result in captures.items()}
+    window = _paired_window({day: dict(original=dict(validation_rows=weekly[day]),
+                                       repair=dict(rows=repairs[day])) for day in captures})
+    week_day = demo_days[-1]
+    week_rows, repaired, comparison = captures[week_day]
     def diagnostics(rows, groups):
         values = [dict(actual_up=row['actual_up'],
                        **{f"impact_{group['group']}": group['impact'] for group in row['groups']},
@@ -392,11 +454,12 @@ def synthetic_opening():
                              historical_inputs={'other': GROUPS['other']},
                              diagnostics=diagnostics(all_history, {group: [key] for group,key,_ in specs}),
                              days=[dict(date=day, **_summary(rows)) for day, rows in constituent_rows.items()]),
-                week=dict(evidence='synthetic', status='ready', date=week_day, training_rows=40, fitted=True,
+                week=dict(evidence='synthetic', status='ready', date=week_day, training_rows=None, fitted=True,
                           **_summary(week_rows), trial_rule=comparison['trial']['accuracy'],
                           always_not_up=sum(not row['actual_up'] for row in week_rows) / len(week_rows),
-                          diagnostics=auction_stats, days=days_covered),
-                repair=dict(evidence='synthetic', status='ready', date=week_day, training_rows=40,
-                            **_summary(repaired), diagnostics=repair_stats, days=days_covered),
-                comparisons={week_day: comparison},
-                rows=dict(history=history_rows, week=weekly, repair={week_day: repaired}))
+                          diagnostics=comparison['original_diagnostics'], days=days_covered),
+                repair=dict(evidence='synthetic', status='ready', date=week_day, training_rows=None,
+                            **_summary(repaired), diagnostics=comparison['repair_diagnostics'],
+                            correction=comparison['correction'], days=days_covered),
+                comparisons=comparisons, paired_window=window,
+                rows=dict(history=history_rows, week=weekly, repair=repairs))

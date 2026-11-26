@@ -96,3 +96,37 @@ def test_probability_contributions_reconstruct_the_issued_score():
                                    pd.Series(model.predict(rows)), check_names=False)
     assert impacts.impact_night.tolist() == [.50, 0., 0.]
     assert impacts.impact_us.tolist() == [-.35, -.35, 0.]
+
+
+def test_source_fusion_uses_earlier_mature_labels_for_its_source_models():
+    days = pd.bdate_range('2023-01-02', periods=114)
+    symbols = (*TRAINING_TICKERS, '1216', '2002', '2412', '0050', 'IX0001')
+    panel = opening_gap.build_opening_gap_panel(history(days, symbols), days, symbols)
+    rows = panel.loc[panel.ticker.isin(TRAINING_TICKERS)].copy()
+    split = days[1:][int(.75 * len(days[1:]))]
+    late = rows.date.lt(split) & rows.date.ge(days[5]) & rows.ticker.eq('2330')
+    rows.loc[late, 'label_available_at'] = rows.loc[rows.date.eq(split), 'decision_ts'].min()
+    original = opening_gap._candidate_models(rows, source_fusion=True)['source_fusion']
+    rows.loc[late, 'actual_return'] = -.5
+    altered = opening_gap._candidate_models(rows, source_fusion=True)['source_fusion']
+    labels = tuple(group for group, *_ in original.estimator.experts)
+    assert labels == ('price', 'volume', 'night')
+    pd.testing.assert_series_equal(pd.Series(original.predict(panel)), pd.Series(altered.predict(panel)))
+    assert len(set(original.estimator.stacker.coef_[0, :len(labels)])) > 1
+    impacts = original.explain(panel)
+    pd.testing.assert_series_equal(impacts.factor_base + impacts.filter(like='impact_').sum(axis=1),
+                                   pd.Series(original.predict(panel)), check_names=False)
+
+
+def test_company_and_regional_inputs_require_predecision_availability():
+    days = pd.bdate_range('2024-01-08', periods=4)
+    frame = history(days, ['2330'])
+    events = pd.DataFrame([
+        (days[1], '2330', 'company_action_gap', -.02, '2024-01-08T18:00:00+08:00', '2024-01-08T18:01:00+08:00'),
+        (days[1], '2330', 'earnings_surprise', .2, '2024-01-09T08:58:00+08:00', '2024-01-09T08:59:01+08:00'),
+        (days[1], '*', 'regional_equity_return', .01, '2024-01-09T08:55:00+08:00', '2024-01-09T08:56:00+08:00'),
+    ], columns=['session_date', 'ticker', 'feature', 'value', 'published_at', 'available_at'])
+    row = opening_gap.build_opening_gap_panel(frame, days, ['2330'], events=events).iloc[0]
+    assert row.f_open_company_action_gap == -.02
+    assert pd.isna(row.f_open_earnings_surprise)
+    assert row.f_open_regional_equity_return == .01
