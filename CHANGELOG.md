@@ -3,6 +3,7 @@
 ## Unreleased — 2026-11-27 — Opening factor and receipt replay audits
 
 - Add same-grid factor additions and removals, a market-beta/night-futures interaction, and a fixed-ten calibration rule that prioritizes coverage and the minimum stock threshold. Report direction-specific recall, weakest stocks, paired errors and per-session source coverage.
+- Freeze an executable direct-trial baseline, the 50-member list and the 126-session candidate calendar before November 30. The frozen estimator reproduced all 200 earlier trial directions and reads only predecision inputs.
 - Cross-check the four November 23–26 auction captures against official raw TWSE daily opens and prior closes. The direct rule scored 191/200 on replay. Distinguish receipt replay from prospective issuance in the workbench.
 
 ## Unreleased — 2026-11-26 — Multi-source opening study and clearer comparisons
