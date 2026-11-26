@@ -13,7 +13,7 @@ import pyarrow.parquet as parquet
 
 from .opening_capture import Archive, COLLECTION_DAYS
 from .opening_compare import EVIDENCE as COMPARISON_EVIDENCE
-from .opening_gap import GROUPS, TASK, TARGET
+from .opening_gap import EXPLANATION_GROUPS, GROUPS, TASK, TARGET
 from .universe import DEFAULT_EVALUATION_TICKERS, TRAINING_TICKERS
 
 
@@ -75,7 +75,7 @@ def _diagnostics(frame, groups, *, coefficients=None):
 def _history_check(path, version, tickers):
     columns = ['date', 'ticker', 'phase', 'actual_return', 'probability_up']
     known = set(parquet.ParquetFile(path).schema_arrow.names)
-    inputs = [key for group, group_cols in GROUPS.items() for key in (f'impact_{group}', *group_cols) if key in known]
+    inputs = [key for group, group_cols in EXPLANATION_GROUPS.items() for key in (f'impact_{group}', *group_cols) if key in known]
     frame = _day_frame(pd.read_parquet(path, columns=columns + inputs, filters=[('phase', '=', 'final')]), tickers)
     days = [
         dict(date=day, accuracy=float(rows.hit.mean()), expected=len(rows), hits=int(rows.hit.sum()),
@@ -83,7 +83,7 @@ def _history_check(path, version, tickers):
         for day, rows in frame.groupby('day')
     ]
     frame['actual_up'] = frame.actual_return.gt(0).astype(float).where(frame.actual_return.notna())
-    return days, _diagnostics(frame, GROUPS)
+    return days, _diagnostics(frame, EXPLANATION_GROUPS)
 
 
 def _week_diagnostics(report):
@@ -307,7 +307,7 @@ class OpeningWorkspace:
         if not target or not any(item['date'] == target for item in dates):
             return dict(date=target, rows=[])
         known = ['date', 'ticker', 'phase', 'actual_return', 'probability_up', 'model_version', 'factor_base',
-                 *[f'impact_{group}' for group in GROUPS], *[name for names in GROUPS.values() for name in names]]
+                 *[f'impact_{group}' for group in EXPLANATION_GROUPS], *[name for names in EXPLANATION_GROUPS.values() for name in names]]
         available = set(parquet.ParquetFile(path).schema_arrow.names)
         data = pd.read_parquet(path, columns=[col for col in known if col in available],
                                filters=[('date', '=', pd.Timestamp(target)), ('phase', '=', 'final')])
@@ -326,7 +326,7 @@ class OpeningWorkspace:
                 dict(group=group, impact=_number(record.get(f'impact_{group}')),
                      features=[dict(key=feature, value=_number(record.get(feature)))
                                for feature in features if feature in columns])
-                for group, features in GROUPS.items()
+                for group, features in EXPLANATION_GROUPS.items()
                 if base is not None and any(feature in columns for feature in features)
             ]
             ticker = record['ticker']

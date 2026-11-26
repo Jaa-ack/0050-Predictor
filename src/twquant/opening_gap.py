@@ -59,6 +59,8 @@ MORNING = tuple(EVENT_FIELDS[key] for key in ('tx_morning_return', 'usdtwd_morni
 COMPANY = tuple(EVENT_FIELDS[key] for key in ('company_action_gap', 'earnings_surprise', 'guidance_revision'))
 OPTIONAL_GROUPS = dict(auction=AUCTION, news=NEWS, morning=MORNING, company=COMPANY)
 GROUPS = {**BASE_GROUPS, **OPTIONAL_GROUPS}
+INTERACTION = 'f_open_beta_tx_night'
+EXPLANATION_GROUPS = {**GROUPS, 'interaction': (INTERACTION,)}
 OVERNIGHT_SIGNAL = (NIGHT[0], US[0], US[1])
 
 
@@ -169,6 +171,7 @@ def build_opening_gap_panel(frame, calendar, symbols, *, events=None):
             age = prior.get(f'{column}_age_days')
             eligible = eligible & (age.between(0, .25) if age is not None else False)
         panel[column] = _finite(prior[column]).where(eligible)
+    panel[INTERACTION] = _finite(panel['f_beta_60'] * panel[NIGHT[0]])
     _add_events(panel, events)
     return panel.loc[panel.date.gt(days[0])].reset_index(drop=True)
 
@@ -197,7 +200,7 @@ class OpeningGapModel:
         visible = pd.DataFrame(np.nan, index=panel.index, columns=self.columns)
         previous = np.full(len(panel), self.prior)
         contributions = {'factor_base': previous}
-        for group, members in GROUPS.items():
+        for group, members in EXPLANATION_GROUPS.items():
             columns = [name for name in members if name in self.columns]
             if not columns:
                 continue
@@ -268,7 +271,7 @@ def _fit_source_fusion(train, prior, optional):
     return OpeningGapModel('source_fusion', prior, columns, estimator)
 
 
-def _candidate_models(train, *, source_fusion=False):
+def _candidate_models(train, *, source_fusion=False, factor_study=False):
     y = train.actual_return.gt(0).astype(int)
     prior = float(y.mean())
     models = {'prior': OpeningGapModel('prior', prior, ())}
@@ -287,6 +290,14 @@ def _candidate_models(train, *, source_fusion=False):
     linear = dict(price_volume=price_volume, overnight=overnight, context=context)
     linear.update({f'without_{group}': tuple(c for c in context if c not in columns)
                    for group, columns in GROUPS.items() if group != 'price' and set(context) & set(columns) & available})
+    if factor_study:
+        for group, members in GROUPS.items():
+            included = tuple(c for c in context if c in members and c in available)
+            if included:
+                linear[f'only_{group}'] = included
+                linear[f'without_{group}'] = tuple(c for c in context if c not in members)
+        if INTERACTION in available:
+            linear['context_beta_tx'] = context + (INTERACTION,)
     for name, columns in {**linear, 'context_tree': context}.items():
         features = tuple(c for c in columns if c in available)
         if not features:
@@ -319,13 +330,31 @@ def _metrics(predictions, symbols):
     valid = predictions.probability_up.between(0, 1)
     known = predictions.actual_return.notna()
     correct = known & valid & up.eq(predictions.probability_up.ge(.5))
-    scores = correct.groupby(predictions.ticker).mean().reindex(symbols).sort_values()
+    scores = correct.groupby(predictions.ticker).mean().reindex(sorted(symbols)).sort_values(kind='stable')
     brier = (predictions.loc[known & valid, 'probability_up'] - up[known & valid]) ** 2
-    return dict(expected=len(predictions), known=int(known.sum()), answered=int(valid.sum()),
+    return dict(expected=len(predictions), correct=int(correct.sum()), coverage=float(valid.mean()),
+                weakest_stocks=list(scores.index[:5]),
+                recall={name: float(correct[group].mean()) if group.any() else None
+                        for name, group in [('up', known & up), ('not_up', known & ~up)]},
+                class_counts=dict(up=int((known & up).sum()), not_up=int((known & ~up).sum())),
+                known=int(known.sum()), answered=int(valid.sum()),
                 accuracy=float(correct.mean()), fraction_flat=float((known & predictions.actual_return.eq(0)).mean()),
                 always_up_accuracy=float((known & up).mean()), always_not_up_accuracy=float((known & ~up).mean()),
                 minimum_stock_accuracy=float(scores.iloc[0]), worst_five_accuracy=float(scores.iloc[:5].mean()),
                 brier=float(brier.mean()) if len(brier) else None)
+
+
+def _factor_rank(score):
+    minimum = score['minimum_stock_accuracy']
+    return (score['answered'] == score['expected'], min(minimum, TARGET), score['accuracy'], -score['brier'])
+
+
+def _paired_hits(rows, baseline):
+    actual = rows.actual_return
+    def hits(probability):
+        return actual.notna() & probability.between(0, 1) & probability.ge(.5).eq(actual.gt(0))
+    model, reference = hits(rows.probability_up), hits(baseline)
+    return dict(rescued=int((model & ~reference).sum()), added_errors=int((reference & ~model).sum()))
 
 
 def _scope(predictions, constituents, membership_as_of, evidence_kind):
@@ -350,7 +379,7 @@ class OpeningGapResult:
 
 def validate_opening_gap(panel, constituents, *, membership_as_of, evidence_kind='unknown', fold_dates=252,
                          calibration_dates=126, final_dates=126, min_train_dates=504, max_folds=8,
-                         source_fusion=False):
+                         source_fusion=False, factor_study=False):
     """Fit and select on the fixed ten, then independently score each complete test block."""
     constituents = constituent_universe(constituents)
     if evidence_kind not in {'historical', 'synthetic', 'unknown'}:
@@ -385,17 +414,23 @@ def validate_opening_gap(panel, constituents, *, membership_as_of, evidence_kind
             if not cal.actual_return.notna().any():
                 raise ValueError('No mature fixed-ten calibration answers')
             test = panel.loc[panel.date.isin(test_dates)]
-            candidates = _candidate_models(train, source_fusion=source_fusion)
+            candidates = _candidate_models(train, source_fusion=source_fusion or factor_study, factor_study=factor_study)
             calibration = {name: _metrics(_predictions(model, cal, name), TRAINING_TICKERS)
-                           for name, model in candidates.items() if not name.startswith('without_')}
-            chosen = max(calibration, key=lambda name: (calibration[name]['worst_five_accuracy'],
-                         calibration[name]['accuracy'], -calibration[name]['brier']))
+                           for name, model in candidates.items() if factor_study or not name.startswith('without_')}
+            if factor_study:
+                chosen = max(calibration, key=lambda name: _factor_rank(calibration[name]))
+            else:
+                chosen = max(calibration, key=lambda name: (calibration[name]['worst_five_accuracy'],
+                             calibration[name]['accuracy'], -calibration[name]['brier']))
             version = f'{TASK}:{test_dates[0].date()}:{chosen}'
             selected = _predictions(candidates[chosen], test, version)
             selected = pd.concat([selected, candidates[chosen].explain(test)], axis=1)
             selected['phase'] = phase
             for name, model in candidates.items():
                 selected[f'control_{name}'] = model.predict(test)
+            if factor_study:
+                selected['trial_observed'] = test[AUCTION[0]].notna()
+                selected['direct_trial'] = test[AUCTION[0]].gt(0).astype(float)
             scored.append(selected)
             folds.append(dict(phase=phase, model=chosen, model_version=version,
                               train_rows=len(train), train_dates=int(train.date.nunique()),
@@ -428,11 +463,27 @@ def validate_opening_gap(panel, constituents, *, membership_as_of, evidence_kind
                 summary['controls'][col.removeprefix('control_')] = {
                     'constituents': _metrics(control.loc[control.ticker.isin(constituents)], constituents),
                     'fixed_ten': _metrics(control.loc[control.ticker.isin(TRAINING_TICKERS)], TRAINING_TICKERS)}
+        if factor_study:
+            rows = part.loc[part.ticker.isin(constituents)]
+            baselines = {key: rows[f'control_{key}'] for key in ('prior', 'context', 'overnight_sign')
+                         if f'control_{key}' in rows}
+            if rows.trial_observed.any():
+                baselines['direct_trial'] = rows.direct_trial
+                summary['direct_trial'] = _metrics(rows.assign(probability_up=rows.direct_trial), constituents)
+            policies = {'selected': rows.probability_up, **{name: rows[f'control_{name}']
+                        for name in summary['controls']}}
+            summary['paired'] = {key: {ref: _paired_hits(rows.assign(probability_up=values), baseline)
+                                      for ref, baseline in baselines.items()} for key, values in policies.items()}
+            block = panel.loc[panel.ticker.isin(constituents) & panel.date.isin(rows.date)]
+            summary['source_observed_by_session'] = {
+                group: {d.date().isoformat(): int(n) for d, n in
+                        block[list(columns)].notna().any(axis=1).groupby(block.date).sum().items()}
+                for group, columns in GROUPS.items()}
         report[phase] = summary
     return OpeningGapResult(report, predictions, models)
 
 
-def run_opening_gap(frame_path, calendar_path, membership_path, output, *, event_path=None, source_fusion=False):
+def run_opening_gap(frame_path, calendar_path, membership_path, output, *, event_path=None, source_fusion=False, factor_study=False):
     """Run a sealed local research experiment from explicit, fingerprinted source files."""
     from .direction_audit import load_membership_snapshot
     from .workflows import data_kind
@@ -462,9 +513,10 @@ def run_opening_gap(frame_path, calendar_path, membership_path, output, *, event
                     tie='not_above', missing_answer='wrong', cutoff='08:59:00 Asia/Taipei', hashes=digests,
                     evidence_kind=evidence_kind,
                     runner_sha256=_sha(__file__), membership_as_of=membership['as_of'],
-                    score_threshold=.5, selection='Fixed-ten calibration worst-five, then accuracy, then Brier',
+                    score_threshold=.5, selection=('Fixed-ten coverage, minimum stock capped at 75%, accuracy, then Brier'
+                                                   if factor_study else 'Fixed-ten calibration worst-five, then accuracy, then Brier'),
                     final_dates=126, calibration_dates=126, min_train_dates=504, max_folds=8, fold_dates=252,
-                    source_fusion=source_fusion,
+                    source_fusion=source_fusion or factor_study, factor_study=factor_study,
                     training_symbols=TRAINING_TICKERS, transfer_symbols=DEFAULT_EVALUATION_TICKERS,
                     factor_method='ordered_source_probability_deltas',
                     feature_source='08:30 retrospective inputs and optional same-session observed numeric events',
@@ -472,7 +524,7 @@ def run_opening_gap(frame_path, calendar_path, membership_path, output, *, event
     _write_json(output / 'protocol.json', protocol)
     panel = build_opening_gap_panel(frame, dates, symbols, events=events)
     result = validate_opening_gap(panel, membership['tickers'], membership_as_of=membership['as_of'],
-                                  evidence_kind=evidence_kind, source_fusion=source_fusion)
+                                  evidence_kind=evidence_kind, source_fusion=source_fusion, factor_study=factor_study)
     if {name: _sha(path) for name, path in paths.items()} != digests or _sha(__file__) != protocol['runner_sha256']:
         raise RuntimeError('Opening research inputs changed during execution')
     result.predictions.to_parquet(output / 'predictions.parquet', index=False)

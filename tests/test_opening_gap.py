@@ -130,3 +130,41 @@ def test_company_and_regional_inputs_require_predecision_availability():
     assert row.f_open_company_action_gap == -.02
     assert pd.isna(row.f_open_earnings_surprise)
     assert row.f_open_regional_equity_return == .01
+
+
+def test_factor_round_ranks_calibration_by_coverage_and_stock_floor():
+    def score(minimum, overall, answered=100):
+        return dict(expected=100, answered=answered, minimum_stock_accuracy=minimum,
+                    accuracy=overall, brier=.2)
+    def rank(*args):
+        return opening_gap._factor_rank(score(*args))
+    assert rank(.75, .81) > rank(.74, .95)
+    assert rank(.75, .82) > rank(.80, .81)
+    assert rank(.70, .80) > rank(.60, .90)
+    assert rank(.75, .81) > rank(.80, .90, 99)
+
+
+def test_paired_factor_scores_keep_missing_rows_and_directional_denominators():
+    rows = pd.DataFrame(dict(ticker=['A', 'B', 'A', 'B'], actual_return=[0., .1, -.1, float('nan')],
+                             probability_up=[.49, float('nan'), .9, .1]))
+    score = opening_gap._metrics(rows, ['A', 'B'])
+    assert score['coverage'] == .75
+    assert score['recall'] == dict(up=0., not_up=.5)
+    assert score['weakest_stocks'] == ['B', 'A']
+    assert opening_gap._paired_hits(rows, pd.Series([.8, .8, .2, .1])) == dict(rescued=1, added_errors=2)
+
+
+def test_factor_round_adds_and_removes_groups_and_a_market_beta_interaction():
+    days = pd.bdate_range('2023-01-02', periods=114)
+    frame = history(days, TRAINING_TICKERS)
+    frame['f_beta_60'] = 1.5
+    panel = opening_gap.build_opening_gap_panel(frame, days, TRAINING_TICKERS)
+    models = opening_gap._candidate_models(panel, source_fusion=True, factor_study=True)
+    assert set(models['only_night'].columns) == {'f_ext_taifex_tx_night_return'}
+    assert 'f_return_1' not in models['without_price'].columns
+    interaction = 'f_open_beta_tx_night'
+    assert interaction not in models['context'].columns
+    assert interaction in models['context_beta_tx'].columns
+    assert abs(panel.iloc[0][interaction] - .015) < 1e-12
+    impacts = models['context_beta_tx'].explain(panel)
+    assert 'impact_interaction' in impacts

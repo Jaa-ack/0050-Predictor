@@ -131,6 +131,7 @@ def parser():
     opening.add_argument('--membership', type=Path, required=True, help='成分股名單快照JSON')
     opening.add_argument('--events', type=Path, help='附首次可用時間的試撮、新聞或早盤因子CSV')
     opening.add_argument('--source-fusion', action='store_true', help='一併比較按時序學習來源權重的模型')
+    opening.add_argument('--factor-study', action='store_true', help='同日格加入與移除來源，依逐檔門檻校準')
     opening.add_argument('--out', type=Path, required=True, help='尚未建立的本機實驗目錄')
     direction = subs.add_parser('direction-search', help='巢狀時間比較方向模型，檢查固定十檔全部252種五檔組合；不開封保留期')
     direction.add_argument('--config', type=Path)
@@ -321,7 +322,7 @@ def execute(args):
     if args.command == 'opening-gap':
         from .opening_gap import run_opening_gap
         report = run_opening_gap(args.frame, args.calendar, args.membership, args.out, event_path=args.events,
-                                 source_fusion=args.source_fusion)
+                                 source_fusion=args.source_fusion, factor_study=args.factor_study)
         return dict(task=report['task'], report=str(args.out / 'report.json'),
                     evidence_kind=report['evidence_kind'],
                     development=report['development']['complete_denominator'],

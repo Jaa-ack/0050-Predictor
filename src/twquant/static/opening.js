@@ -1,5 +1,5 @@
 import { finite, integer, percent } from './state.js';
-import { factorInfo, groupNames, openingRows, stockName } from './opening-state.js';
+import { factorInfo, groupNames, openingEvidence, openingRows, stockName } from './opening-state.js';
 import { renderFlow } from './flow.js';
 import { prepareDaily } from './daily.js';
 
@@ -28,8 +28,7 @@ async function load(url) {
 function evidence() {
   const active = app.data?.[app.view];
   const kind = active?.evidence;
-  if (app.config?.mode === 'snapshot' || kind === 'synthetic') return '合成示範';
-  return kind && (active.date === app.day || app.data.comparisons?.[app.day]) ? '實際收件重播' : '待驗證';
+  return openingEvidence(app.config?.mode, kind, active?.date === app.day || !!app.data.comparisons?.[app.day]);
 }
 
 function metric(title, value, detail) {

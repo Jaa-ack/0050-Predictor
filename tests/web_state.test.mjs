@@ -106,3 +106,12 @@ test('the architecture highlights only the chosen source path', async () => {
   assert.deepEqual(tracedEdges(edges,'price').map(e=>e.from), ['price','snapshot','model']);
   assert.deepEqual(tracedEdges(edges,'cutoff').map(e=>e.from), ['auction','cutoff','model']);
 });
+
+test('opening evidence counts no replay or synthetic days toward prospective issuance', async () => {
+  const { openingEvidence } = await import('../src/twquant/static/opening-state.js');
+  assert.match(openingEvidence('snapshot', 'chronological_auction_comparison', true), /合成示範/);
+  assert.match(openingEvidence('local', 'chronological_auction_comparison', true), /收件重播.*實際發報 0／126 日/);
+  assert.match(openingEvidence('local', 'synthetic', true), /合成示範/);
+  assert.match(openingEvidence('local', 'unknown', true), /待驗證/);
+  assert.match(openingEvidence('local', 'chronological_auction_comparison', false), /待驗證/);
+});

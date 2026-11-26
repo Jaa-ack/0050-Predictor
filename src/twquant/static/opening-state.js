@@ -66,3 +66,9 @@ export function factorInfo(key) {
   }
   return [key,'number'];
 }
+
+export function openingEvidence(mode, kind, hasDay) {
+  if (mode === 'snapshot' || kind === 'synthetic') return '合成示範';
+  const replay = ['short_chronological_capture_replay', 'chronological_auction_comparison'].includes(kind);
+  return hasDay && replay ? '實際收件重播 · 本組可計入實際發報 0／126 日' : '待驗證';
+}
