@@ -22,6 +22,8 @@
 
 VM 的 `opening_compare.py` 支援在明列交易日的私人 `approved-sessions.json` 上延伸採集與盤後補件。日曆採遞增、無重複的 ISO 交易日期，應以核實交易所日曆和已授權範圍準備。用 `units --root /opt/twquant-opening/runtime --sessions /opt/twquant-opening/runtime/approved-sessions.json` 產生有明確結束日期的採集與補件單元。後續離線比較用 `compare --root /opt/twquant-opening/runtime --sessions /opt/twquant-opening/runtime/approved-sessions.json --holdout YYYY-MM-DD`，每個留出日仍只用較早成熟的固定十檔資料。
 
+盤後試撮降冪分頁若未觸及收件時段，`recover` 會在原補件窗口內針對缺件改用升冪分頁，核對日期、股票與時序，再保存到原 SQLite。補件保留原收件時間規則，回填資料的收件時鐘反映實際補件時間。 [富邦成交明細的排序參數](https://www.fbs.com.tw/TradeAPI/docs/market-data/http-api/intraday/trades/)
+
 ## 舊盤中試驗紀錄
 
 **截至 11/20，正式實際評分為 60 秒 30/250（12.0%）、300 秒 36/250（14.4%），最弱五檔兩期限皆為 0/25。切換前的五日紙上試驗尚未通過正式使用驗收。** 11/16、11/17 晚報，11/18 無正式預測，11/19 兩期限分別為 5/50、7/50，11/20 為 25/50、29/50。評分保留每個交易日和全部 50 檔。

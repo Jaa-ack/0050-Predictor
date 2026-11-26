@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from statistics import median
 from tempfile import NamedTemporaryFile
+import time
 
 if __package__:
     from . import opening_capture as capture
@@ -54,14 +55,14 @@ def _sample(root, day, symbols, *, label_before=None):
     return rows
 
 
-def _original(root, symbols, days):
+def _capture_for(days):
     # The VM's week evaluator keeps its original source and calendar. A replay on
     # an earlier date uses an isolated instance of that same recipe.
     spec = importlib.util.spec_from_file_location('frozen_opening_replay', capture.__file__)
     replay = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(replay)
     replay.COLLECTION_DAYS = days
-    return replay.evaluate_week(root, symbols)
+    return replay
 
 
 def _paired(rows, predictions, trial):
@@ -91,7 +92,7 @@ def compare(root, symbols, days, *, original=None):
     train_rows = [error for day in errors for error in day]
     correction = median(train_rows) if train_rows else None
     rows = _sample(root, days[-1], symbols)
-    original = original if original is not None else _original(root, symbols, days)
+    original = original if original is not None else _capture_for(days).evaluate_week(root, symbols)
     old = original['validation_rows']
     if (original.get('task') != TASK or original.get('validation_date') != days[-1].isoformat()
             or [(r['ticker'], r['actual_up']) for r in old] != [(r['ticker'], r['actual_up']) for r in rows]):
@@ -150,6 +151,73 @@ def future_units(days):
     return units
 
 
+def _ascending_trials(store, ticker, request):
+    end = capture.session_us(store.day, capture.COLLECT_END)
+    previous = 0
+    for offset in range(0, 2_000, 500):
+        response, receipt = request(symbol=ticker, isTrial=True, limit=500, offset=offset, sort='asc')
+        rows = response.get('data')
+        if (response.get('date') != store.day.isoformat() or response.get('symbol') != ticker
+                or not isinstance(rows, list)):
+            raise ValueError('invalid_opening_trial_page')
+        stamps = [capture._timestamp(row.get('time')) for row in rows]
+        if any(stamp is None for stamp in stamps) or stamps != sorted(stamps) or (stamps and stamps[0] < previous):
+            raise ValueError('opening_trial_page_out_of_order')
+        for row, stamp in zip(rows, stamps, strict=True):
+            if stamp >= end:
+                break
+            store.trial(ticker, row, receipt, 'rest')
+        store.conn.commit()
+        if len(rows) < 500 or stamps[-1] >= end:
+            return
+        previous = stamps[-1]
+    raise ValueError('opening_trial_window_incomplete')
+
+
+def _symbols(root):
+    symbols = tuple(json.loads((root / 'symbols.json').read_text()))
+    if (len(symbols) != 50 or len(set(symbols)) != 50 or not set(TRAINING_TICKERS) <= set(symbols)
+            or not all(isinstance(ticker, str) and len(ticker) == 4 and ticker.isascii()
+                       and ticker.isdecimal() for ticker in symbols)):
+        raise ValueError('invalid_fixed_constituent_set')
+    return symbols
+
+
+def _supplement(root, calendar):
+    from twquant.live_market import market_sdk
+
+    now = capture._now()
+    if now.date() not in calendar or not capture.RECOVER_START <= now.time() < capture.RECOVER_END:
+        raise ValueError('opening_supplement_outside_window')
+    symbols = _symbols(root)
+    archive = capture.Archive(root, now.date())
+    with capture._lock(root / 'opening.lock') as locked:
+        if not locked or not archive.path.is_file():
+            return 1
+        with archive as store:
+            pending = [ticker for ticker in symbols
+                       if store.done('trial_rest_failed', ticker) and not store.done('trial_rest_complete', ticker)]
+            if pending:
+                endpoint = market_sdk().marketdata.rest_client.stock.intraday
+
+                def request(**parameters):
+                    time.sleep(1.05)
+                    if capture._now().time() >= capture.RECOVER_END:
+                        raise TimeoutError('recovery_window_closed')
+                    response = endpoint.trades(**parameters)
+                    return response, capture.received_us()
+
+                for ticker in pending:
+                    try:
+                        _ascending_trials(store, ticker, request)
+                        store.status('trial_rest_complete', ticker, value='ascending')
+                    except Exception:
+                        store.status('trial_rest_ascending_failed', ticker)
+            complete = all(store.done(stage, ticker) for stage in ('open_rest_complete', 'trial_rest_complete')
+                           for ticker in symbols)
+    return 0 if complete else 1
+
+
 def _save(path, report):
     # Publish a private replay only after serialization succeeds.
     with NamedTemporaryFile(mode='w', dir=path.parent, encoding='utf-8', delete=False) as file:
@@ -165,7 +233,7 @@ def _save(path, report):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=('compare', 'collect', 'recover', 'units'))
+    parser.add_argument('mode', choices=('compare', 'collect', 'recover', 'units', 'supplement'))
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--holdout', type=date.fromisoformat)
     parser.add_argument('--sessions', type=Path)
@@ -174,17 +242,22 @@ def main(argv=None):
         parser.error('An absolute private root is required')
     os.umask(0o077)
     try:
+        if args.mode == 'supplement':
+            return _supplement(args.root, capture.COLLECTION_DAYS)
         if args.mode != 'compare':
-            if args.sessions is None or not args.sessions.is_absolute():
-                parser.error('An absolute approved session calendar is required')
-            days = read_future_sessions(args.sessions)
+            days = capture.COLLECTION_DAYS
+            if args.sessions is not None:
+                if not args.sessions.is_absolute():
+                    parser.error('An absolute approved session calendar is required')
+                days = read_future_sessions(args.sessions)
             if args.mode == 'units':
                 if args.root != Path(capture.INSTALL) / 'runtime' or args.sessions != args.root / FUTURE_SESSIONS:
                     raise ValueError('opening_units_require_vm_paths')
                 print(json.dumps(future_units(days)))
                 return 0
-            capture.COLLECTION_DAYS = days
-            return capture.main([args.mode, '--root', str(args.root)])
+            runner = capture if days == capture.COLLECTION_DAYS else _capture_for(days)
+            status = runner.main([args.mode, '--root', str(args.root)])
+            return _supplement(args.root, days) if args.mode == 'recover' and status else status
         now = capture._now()
         holdout = args.holdout or capture.COLLECTION_DAYS[-1]
         calendar = capture.COLLECTION_DAYS
@@ -196,11 +269,7 @@ def main(argv=None):
                 or (holdout == now.date() and now.time() < capture.COLLECT_END)):
             raise ValueError('opening_comparison_not_ready')
         days = tuple(day for day in calendar if day <= holdout)
-        symbols = tuple(json.loads((args.root / 'symbols.json').read_text()))
-        if (len(symbols) != 50 or len(set(symbols)) != 50 or not set(TRAINING_TICKERS) <= set(symbols)
-                or not all(isinstance(ticker, str) and len(ticker) == 4 and ticker.isascii()
-                           and ticker.isdecimal() for ticker in symbols)):
-            raise ValueError('invalid_fixed_constituent_set')
+        symbols = _symbols(args.root)
         with capture._lock(args.root / 'opening.lock') as locked:
             if not locked:
                 return 1

@@ -119,3 +119,36 @@ def test_final_comparison_reads_official_report_and_preserves_it(tmp_path, monke
     assert report['original'] == json.loads(original)
     assert report['repair']['train_rows'] == 40
     assert report['repair']['score']['expected'] == 50
+
+
+def test_ascending_supplement_stops_at_window_end_and_keeps_late_receipt(tmp_path):
+    day = COLLECTION_DAYS[0]
+    ticker = TRAINING_TICKERS[0]
+    event = session_us(day, time(8, 58, 45))
+    receipt = session_us(day, time(13, 41))
+    calls = []
+
+    def request(**parameters):
+        calls.append(parameters)
+        rows = [dict(time=event, price=101, serial=1)]
+        rows += [dict(time=session_us(day, time(9, 10)) + i, price=101, serial=i + 2) for i in range(499)]
+        return dict(date=day.isoformat(), symbol=ticker, data=rows), receipt
+
+    with Archive(tmp_path, day) as store:
+        opening_compare._ascending_trials(store, ticker, request)
+        assert calls == [dict(symbol=ticker, isTrial=True, limit=500, offset=0, sort='asc')]
+        assert store.conn.execute("SELECT source,exchange_us,received_us FROM trials").fetchall() == [('rest', event, receipt)]
+        assert store.panel((ticker,))[0]['trial_gap'] is None
+
+
+def test_recovery_falls_back_with_the_existing_pilot_calendar(tmp_path, monkeypatch):
+    attempted = []
+    monkeypatch.setattr(opening_compare.capture, 'main', lambda argv: 1)
+
+    def fallback(root, days):
+        attempted.append((root, days))
+        return 0
+
+    monkeypatch.setattr(opening_compare, '_supplement', fallback)
+    assert opening_compare.main(['recover', '--root', str(tmp_path)]) == 0
+    assert attempted == [(tmp_path, COLLECTION_DAYS)]
