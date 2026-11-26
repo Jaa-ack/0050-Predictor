@@ -73,7 +73,7 @@ def create_app(root:Path,workspaces=None,enable_actions=False,job_manager=None,*
         return response(opening.summary())
 
     @app.get('/api/opening/predictions')
-    def opening_predictions(view:Literal['history','week']='history',date:calendar_date|None=None):
+    def opening_predictions(view:Literal['history','week','repair']='history',date:calendar_date|None=None):
         return response(opening.predictions(view,date))
 
     @app.get('/app-config.json')

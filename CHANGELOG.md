@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — 2026-11-26 — Opening model training and paired workbench
+
+- Fit the fixed-ten auction-close correction on mature prior sessions and compare the preserved auction classifier, direct trial direction and correction on each full holdout grid. Schedule the November 27 offline comparison separately from the frozen report.
+- Support bounded continuation of VM collection through an explicit trading-session calendar. Present separate interactive graphs for the original and correction models, with only fitted inputs, paired results and per-stock explanations. The hosted preview retains synthetic evidence.
+
 ## Unreleased — 2026-11-25 — Opening model comparison design
 
 - Define an auction-price anchor and opening-price correction candidate. Pin the existing auction classifier and predefine the November 27 holdout comparison against the auction direction rule and a fixed-ten median correction prototype.

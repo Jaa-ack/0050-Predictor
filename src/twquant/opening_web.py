@@ -5,12 +5,14 @@ import json
 import math
 from pathlib import Path
 import random
+import re
 import sqlite3
 
 import pandas as pd
 import pyarrow.parquet as parquet
 
 from .opening_capture import Archive, COLLECTION_DAYS
+from .opening_compare import EVIDENCE as COMPARISON_EVIDENCE
 from .opening_gap import GROUPS, TASK, TARGET
 from .universe import DEFAULT_EVALUATION_TICKERS, TRAINING_TICKERS
 
@@ -92,8 +94,18 @@ def _week_diagnostics(report):
     for row in report.get('validation_rows', []):
         factors = row.get('factors') or []
         rows.append(dict(actual_up=row.get('actual_up'), **{factor['key']: factor['value'] for factor in factors},
+                         **{f"impact_{factor['key']}": factor['impact'] for factor in factors},
                          impact_auction=sum(factor['impact'] for factor in factors)))
-    return _diagnostics(pd.DataFrame(rows), {'auction': features}, coefficients=coefficients) if rows else {}
+    if not rows:
+        return {}
+    frame = pd.DataFrame(rows)
+    return {**_diagnostics(frame, {'auction': features}, coefficients=coefficients),
+            **_diagnostics(frame, {key: [key] for key in features}, coefficients=coefficients)}
+
+
+def _repair_diagnostics(rows):
+    frame = pd.DataFrame([dict(actual_up=row['actual_up'], trial_gap=row['trial_gap']) for row in rows])
+    return _diagnostics(frame, {'trial_gap': ['trial_gap']}) if len(frame) else {}
 
 
 def _week_row(row):
@@ -107,6 +119,16 @@ def _week_row(row):
                     impact=sum(item['impact'] or 0. for item in factors))] if factors else [],
                 fallback=row.get('fallback_reason'), exchange_us=row.get('trial_exchange_us'),
                 receipt_us=row.get('trial_received_us'), model='auction_logistic')
+
+
+def _repair_row(row):
+    actual, prediction = row['actual_up'], row['predicted_up']
+    return dict(ticker=str(row['ticker']), actual_up=actual, predicted_up=prediction,
+                probability=None, correct=prediction == actual if actual is not None else None,
+                trial_up=row['trial_up'], trial_gap=_number(row['trial_gap']),
+                correction=_number(row['correction']), adjusted_gap=_number(row['adjusted_gap']),
+                exchange_us=row.get('trial_exchange_us'), receipt_us=row.get('trial_received_us'),
+                fallback=row.get('fallback_reason'), model='auction_repair')
 
 
 class OpeningWorkspace:
@@ -131,9 +153,29 @@ class OpeningWorkspace:
             return {}
         return report
 
+    def _comparisons(self):
+        if self.capture is None:
+            return {}
+        reports = {}
+        for path in sorted(self.capture.glob('comparison-*.json')):
+            match = re.fullmatch(r'comparison-(\d{4}-\d{2}-\d{2})\.json', path.name)
+            if not match:
+                continue
+            iso = match[1]
+            report = _json(path)
+            if (report.get('task') == TASK and report.get('evidence_kind') == COMPARISON_EVIDENCE
+                    and report.get('validation_date') == iso):
+                reports[iso] = report
+        return reports
+
+    def _latest_week(self, comparison):
+        return max(self._week(), comparison.get('original', {}), key=lambda report: report.get('validation_date', ''))
+
     def summary(self):
         report, path = self._history()
-        week = self._week()
+        comparisons = self._comparisons()
+        latest = next(reversed(comparisons.values()), {})
+        week = self._latest_week(latest)
         history = dict(evidence=report.get('evidence_kind'), status='ready' if path else 'unavailable', days=[])
         if path:
             final = report['final']['constituents']
@@ -147,15 +189,34 @@ class OpeningWorkspace:
         score = week.get('validation', {})
         evaluation_day = week.get('validation_date')
         trial_rule = week.get('validation_trial_rule', {})
+        repair = latest.get('repair', {})
+        repair_score = repair.get('score', {})
+        status = 'collecting' if any(day['inputs'] is not None for day in planned) else 'scheduled'
+        paired = {}
+        for day, result in comparisons.items():
+            variant = result['repair']
+            paired[day] = dict(original=result['original_score'], repair=variant['score'], trial=result['trial_score'],
+                               original_paired=result['original_paired'], repair_paired=variant['paired'],
+                               original_diagnostics=_week_diagnostics(result['original']),
+                               repair_diagnostics=_repair_diagnostics(variant['rows']),
+                               original_training_rows=result['original']['train_rows'],
+                               original_fitted=result['original']['model'] is not None,
+                               repair_training_rows=variant['train_rows'], correction=variant['correction'])
         return dict(task=TASK, target=TARGET, history=history,
                     week=dict(evidence=week.get('evidence_kind'), days=planned, date=evaluation_day,
-                              status='ready' if week else 'collecting' if any(day['inputs'] is not None for day in planned) else 'scheduled',
+                              status='ready' if week else status,
                               accuracy=_number(score.get('accuracy')), expected=score.get('expected'),
                               known=score.get('expected', 0) - score.get('unknown_answers', 0) if week else None,
                               training_rows=week.get('train_rows'), fitted=week.get('model') is not None if week else None,
                               diagnostics=_week_diagnostics(week),
                               trial_rule=_number(trial_rule.get('accuracy')),
-                              always_not_up=_number(week.get('validation_fixed_not_up', {}).get('accuracy'))))
+                              always_not_up=_number(week.get('validation_fixed_not_up', {}).get('accuracy'))),
+                    repair=dict(evidence=latest.get('evidence_kind'), days=planned, date=latest.get('validation_date'),
+                                status='ready' if latest else status, accuracy=_number(repair_score.get('accuracy')),
+                                expected=repair_score.get('expected'), training_rows=repair.get('train_rows'),
+                                correction=_number(repair.get('correction')),
+                                diagnostics=_repair_diagnostics(repair.get('rows', []))),
+                    comparisons=paired)
 
     def _capture_days(self, week):
         saved = week.get('collection', {})
@@ -163,8 +224,8 @@ class OpeningWorkspace:
         observed = status.get('days', {}) if status.get('evidence') == 'vm_observed' else {}
         symbols = tuple(_json(self.capture / 'symbols.json')) if self.capture else ()
         days = []
-        for day in COLLECTION_DAYS:
-            iso = day.isoformat()
+        for iso in sorted({*(day.isoformat() for day in COLLECTION_DAYS), *saved}):
+            day = date.fromisoformat(iso)
             count = saved.get(iso, {}).get('timed_trial_inputs')
             if count is None:
                 observed_count = observed.get(iso, {}).get('timed_trial_inputs')
@@ -183,8 +244,16 @@ class OpeningWorkspace:
         return days
 
     def predictions(self, view, day):
-        if view == 'week':
-            report = self._week()
+        if view in ('week', 'repair'):
+            comparisons = self._comparisons()
+            selected = comparisons.get(day.isoformat(), {}) if day else next(reversed(comparisons.values()), {})
+            if view == 'repair':
+                reported = day.isoformat() if day else selected.get('validation_date')
+                rows = selected.get('repair', {}).get('rows', [])
+                return dict(date=reported, rows=[_repair_row(row) for row in rows])
+            report = selected.get('original', {}) if day else self._latest_week(selected)
+            if not report:
+                report = self._week()
             reported = report.get('validation_date')
             rows = report.get('validation_rows', []) if not day or day.isoformat() == reported else []
             return dict(date=reported if not day else day.isoformat(), rows=[_week_row(row) for row in rows])
@@ -241,6 +310,7 @@ def synthetic_opening():
     specs = [('price', 'f_return_1', .04), ('volume', 'f_rvol_20', .06),
              ('us', 'f_ext_fmp_tsm_window_return', .08), ('night', 'f_ext_taifex_tx_night_return', .13),
              ('auction', 'trial_gap', .16)]
+    auction_specs = [*specs[-1:], ('auction', 'log_matched_size', .05), ('auction', 'book_imbalance', .07)]
 
     def generate(factors, *, transfers=False):
         base = .51
@@ -249,7 +319,8 @@ def synthetic_opening():
         for ticker in displayed:
             value = rng.uniform(-1, 1)
             groups = [dict(group=group, impact=round(weight * (value * .56 + rng.uniform(-.44, .44)), 4),
-                           features=[dict(key=key, value=round(value * .029, 4) if group != 'volume'
+                           features=[dict(key=key, value=round(5 + value, 2) if key == 'log_matched_size'
+                                          else round(value * .029, 4) if group != 'volume'
                                           else round(1 + value * .4, 2))]) for group, key, weight in factors]
             p = base + sum(item['impact'] for item in groups)
             guess = p >= .5
@@ -265,13 +336,50 @@ def synthetic_opening():
             if (end - timedelta(days=i)).weekday() < 5]
     history_rows = {day: generate(specs, transfers=True) for day in days}
     constituent_rows = {day: [row for row in rows if row['constituent']] for day, rows in history_rows.items()}
-    weekly = {COLLECTION_DAYS[-1].isoformat(): generate(specs[-1:])}
+    weekly = {COLLECTION_DAYS[-1].isoformat(): generate(auction_specs)}
     all_history = [row for rows in constituent_rows.values() for row in rows]
     ranked = sorted(sum(row['correct'] for row in all_history if row['ticker'] == ticker) / len(days)
                     for ticker in symbols)
     week_day, week_rows = next(iter(weekly.items()))
-    rule = sum((row['groups'][0]['features'][0]['value'] > 0) == row['actual_up'] for row in week_rows) / len(week_rows)
-    not_up = sum(not row['actual_up'] for row in week_rows) / len(week_rows)
+    correction = -.001
+    repaired = []
+    baseline = []
+    auction_factors = []
+    for row in week_rows:
+        trial_gap = row['groups'][0]['features'][0]['value']
+        base = dict(ticker=row['ticker'], actual_up=row['actual_up'], trial_up=trial_gap > 0,
+                    trial_gap=trial_gap, correction=correction, adjusted_gap=trial_gap + correction,
+                    predicted_up=trial_gap + correction > 0)
+        repaired.append(dict(_repair_row(base), constituent=True, transfer=False))
+        baseline.append(dict(row, predicted_up=base['trial_up'], correct=base['trial_up'] == row['actual_up']))
+        factors = [dict(group['features'][0], impact=group['impact']) for group in row['groups']]
+        row.update(groups=[dict(group='auction', impact=sum(group['impact'] for group in row['groups']),
+                                features=factors)], model='auction_logistic')
+        auction_factors.append(dict(actual_up=row['actual_up'], factors=factors))
+    keys = [key for _, key, _ in auction_specs]
+    auction_stats = _week_diagnostics(dict(validation_rows=auction_factors,
+                                          model=dict(features=keys, coefficients=[.4, .1, .2])))
+    repair_stats = _repair_diagnostics(repaired)
+
+    def score(sample):
+        counts = _summary(sample)
+        recall = {}
+        for direction, label in ((True, 'up'), (False, 'not_up')):
+            cohort = [row['correct'] for row in sample if row['actual_up'] is direction]
+            recall[label] = sum(cohort) / len(cohort) if cohort else None
+        return dict(accuracy=counts['accuracy'], expected=len(sample), correct=counts['hits'],
+                    worst_five=max(0, counts['hits'] - (len(sample) - 5)) / 5,
+                    unknown_answers=0, recall=recall)
+
+    def paired(sample):
+        return dict(rescued=sum(row['correct'] and not old['correct'] for row, old in zip(sample, baseline, strict=True)),
+                    added_errors=sum(old['correct'] and not row['correct'] for row, old in zip(sample, baseline, strict=True)))
+
+    days_covered = [dict(date=day.isoformat(), inputs=50, expected=50) for day in COLLECTION_DAYS]
+    comparison = dict(original=score(week_rows), repair=score(repaired), trial=score(baseline),
+                      original_paired=paired(week_rows), repair_paired=paired(repaired),
+                      original_diagnostics=auction_stats, repair_diagnostics=repair_stats,
+                      original_training_rows=40, original_fitted=True, repair_training_rows=40, correction=correction)
     def diagnostics(rows, groups):
         values = [dict(actual_up=row['actual_up'],
                        **{f"impact_{group['group']}": group['impact'] for group in row['groups']},
@@ -285,8 +393,10 @@ def synthetic_opening():
                              diagnostics=diagnostics(all_history, {group: [key] for group,key,_ in specs}),
                              days=[dict(date=day, **_summary(rows)) for day, rows in constituent_rows.items()]),
                 week=dict(evidence='synthetic', status='ready', date=week_day, training_rows=40, fitted=True,
-                          **_summary(week_rows), trial_rule=rule, always_not_up=not_up,
-                          diagnostics=diagnostics(week_rows, {'auction': ['trial_gap']}),
-                          days=[dict(date=day.isoformat(), inputs=count, expected=50)
-                                for day, count in zip(COLLECTION_DAYS, [44, 48, 47, 50, 50], strict=True)]),
-                rows=dict(history=history_rows, week=weekly))
+                          **_summary(week_rows), trial_rule=comparison['trial']['accuracy'],
+                          always_not_up=sum(not row['actual_up'] for row in week_rows) / len(week_rows),
+                          diagnostics=auction_stats, days=days_covered),
+                repair=dict(evidence='synthetic', status='ready', date=week_day, training_rows=40,
+                            **_summary(repaired), diagnostics=repair_stats, days=days_covered),
+                comparisons={week_day: comparison},
+                rows=dict(history=history_rows, week=weekly, repair={week_day: repaired}))

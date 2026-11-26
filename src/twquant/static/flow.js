@@ -1,56 +1,40 @@
 import { finite, integer, percent } from './state.js';
-import { groupNames, factorInfo } from './opening-state.js';
+import { factorInfo } from './opening-state.js';
 import { tracedEdges } from './flow-state.js';
 
 const $ = id => document.getElementById(id);
 const safe = value => String(value ?? '').replace(/[&<>"']/g, key => (
   {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[key]));
-const sources = {
-  price:{label:'台股價格', detail:'報酬、均線、波動、同儕表現'},
-  volume:{label:'成交量', detail:'相對成交量、流動性'},
-  us:{label:'美股與 ADR', detail:'大盤、台積電 ADR、個股與產業隔夜報酬'},
-  night:{label:'期貨夜盤', detail:'臺指期、電子期、金融期的報酬、振幅與量比'},
-  other:{label:'籌碼與總經', detail:'法人買賣超、融資券、VIX、匯率、美債殖利率'},
-  auction:{label:'盤前試撮', detail:'試撮價相對前收、試撮量、五檔委買賣'},
-  news:{label:'公告與新聞', detail:'公告及媒體事件數、情緒分數'},
-  morning:{label:'早盤期貨與匯率', detail:'08:45 起的臺指期與美元兌臺幣變動'}
+const auctionSources = {
+  trial_gap:{label:'試撮相對前收', detail:'最後一筆合格試撮價相對上一交易日收盤的變動。'},
+  log_matched_size:{label:'試撮成交量', detail:'最後一筆合格試撮量，以 log(1＋量) 入模。'},
+  book_imbalance:{label:'五檔委買賣', detail:'五檔買量減賣量，再除以買賣總量。'}
 };
-const stages = [
-  ['資料輸入', Object.keys(sources)],
-  ['時點檢查', ['snapshot', 'cutoff']],
-  ['模型', ['model']],
-  ['結果', ['result','audit']]
-];
-const links = [
-  ...Object.keys(sources).map(from => ({from, to:['auction','news','morning'].includes(from) ? 'cutoff' : 'snapshot'})),
-  {from:'snapshot',to:'model'}, {from:'cutoff',to:'model'},
-  {from:'model',to:'result'}, {from:'model',to:'audit'}
-];
-let selection = 'night';
+let selection = 'trial_gap';
 let state = null;
 let pendingFrame;
 let curves = [];
 
-function modelNodes(data, view) {
-  const week = view === 'week';
-  const captured = data.week.days.filter(day => finite(day.inputs)).length;
-  const ready = data[view].status === 'ready';
-  const sessions = data.history.sessions;
-  const historyRange = finite(sessions) ? `${integer(sessions)} 個${data.history.evidence === 'synthetic' ? '示範' : '歷史'}交易日` : '—';
+function modelNodes(data) {
+  const repair = data.view === 'repair';
+  const fitted = data.fitted;
+  const ready = finite(data.accuracy);
+  const train = finite(data.trainRows) ? `${integer(data.trainRows)} 筆` : '—';
   return {
-    snapshot:{label:'08:30 快照', detail:'上一交易日歷史價量與盤前跨市場資料', badge:'決策前', fields:[
-      ['輸入','價量、美股、夜盤與籌碼'], ['檢查','只使用當時已可得的資料']]},
-    cutoff:{label:'08:59 雙時鐘', detail:'核對交易所發生時間與 VM 實際收件時間', badge:'截止', fields:[
-      ['試撮窗口','08:58:30 – 08:59 前'], ['已收件',`${captured} / ${data.week.days.length} 日`]]},
-    model:{label:'固定十檔', detail:week ? '前四天擬合試撮邏輯斯模型' : '按時間分折，在固定十檔校準後選模',
-      badge:ready ? '可查' : '等待', fields:[
+    cutoff:{label:'08:59 雙時鐘', detail:'比對交易所發生時間與 VM 實際收件時間', fields:[
+      ['試撮窗口','08:58:30 至 08:59 前'], ['已收件',`${data.captured} / ${data.days} 日`]]},
+    model:{label:repair ? '中位數修正' : '邏輯斯迴歸',
+      detail:repair ? '試撮價差加固定十檔的共同修正' : '用同一組試撮因子預測 50 檔',
+      badge:fitted === false ? '回退' : fitted ? '已擬合' : '等待', fields:[
         ['訓練範圍','2330、2454、2317、2308、3711、1303、2383、2881、2891、3037'],
-        ['模型',week ? '試撮邏輯斯迴歸' : '邏輯斯迴歸與梯度提升樹']]},
+        ['成熟訓練樣本',train],
+        [repair ? '共同修正' : '上漲門檻', repair ? finite(data.correction) ?
+          `${signed(data.correction * 10000, 1)} bp` : '沿用試撮方向' : '分數大於 50%']]},
     result:{label:'高於前收？', detail:'08:59 判斷當日正式開盤是否高於上一交易日收盤',
-      badge:'二元', fields:[['高於','正式開盤價 > 前收'], ['未高於','平盤或低於前收']]},
-    audit:{label:'全成分驗證', detail:'同一模型覆蓋全部 50 檔，保留缺答並報告最弱五檔',
-      badge:ready ? '可查' : '等待', fields:[['驗證範圍',week ? '11/27 完整 50 檔' : historyRange],
-        ['目標',percent(data.target,0)], ['整體準確率',percent(data[view].accuracy,2)]]}
+      fields:[['高於',repair ? '修正後價差 > 0' : '模型分數 > 50%'], ['未高於','平盤或低於前收']]},
+    audit:{label:'全成分驗證', detail:'完整 50 檔留出驗證，缺答計入分母',
+      badge:ready ? '可查' : '等待', fields:[['驗證日',data.day || '—'],
+        ['整體準確率',percent(data.accuracy,1)]]}
   };
 }
 
@@ -59,12 +43,9 @@ function signed(value, digits = 2) {
 }
 
 function inspect(id) {
-  let active = sources[id];
+  const active = state.sources[id];
   const stage = state.nodes[id];
   if (!active && !stage) return;
-  if (id === 'auction' && state.view === 'week') {
-    active = { ...active, detail:'試撮相對前收、試撮量、五檔不平衡。08:59 前收件才入模。' };
-  }
   const data = state.stats[id];
   const panel = $('flow-inspector');
   if (stage) {
@@ -73,27 +54,20 @@ function inspect(id) {
     return;
   }
   const measured = data?.features || [];
-  const historical = state.historicalInputs[id];
-  if (historical?.length && !measured.length) {
-    const names = historical.map(key => safe(factorInfo(key)[0])).join('、');
-    panel.innerHTML = `<div class="flow-caption">真實歷史模型已使用</div><h3>${safe(active.label)}</h3>
-      <dl class="flow-facts"><div><dt>採用因子</dt><dd>${names}</dd></div></dl>
-      <p class="flow-note">此處是合成示範。實測覆蓋率、相關性和模型影響可在本機歷史驗證查看。</p>`;
-    return;
-  }
   const weights = measured.some(item => finite(item.coefficient));
-  panel.innerHTML = `<div class="flow-caption">資料來源</div><h3>${safe(groupNames[id] || active.label)}</h3><p>${safe(active.detail)}</p>
+  panel.innerHTML = `<div class="flow-caption">模型輸入</div><h3>${safe(active.label)}</h3><p>${safe(active.detail)}</p>
     <div class="flow-metrics">
       <div><span>有效覆蓋</span><strong>${percent(data?.coverage,1)}</strong></div>
+      ${state.view === 'repair' ? '' : `
       <div><span>平均絕對影響</span><strong>${finite(data?.impact) ? `${(data.impact*100).toFixed(2)} 點` : '—'}</strong></div>
-      <div><span>影響比重</span><strong>${percent(data?.impact_share,1)}</strong></div>
+      <div><span>影響比重</span><strong>${percent(data?.impact_share,1)}</strong></div>`}
     </div>
     ${measured.length ? `<div class="flow-factors" role="region" aria-label="來源因子明細" tabindex="0">
       <table><thead><tr><th>因子</th><th>相關 r</th><th>樣本</th>${weights ? '<th>係數</th>' : ''}</tr></thead>
         <tbody>${measured.map(item=>`<tr><td>${safe(factorInfo(item.key)[0])}</td><td>${signed(item.correlation)}</td>
           <td>${integer(item.samples)}</td>${weights ? `<td>${signed(item.coefficient,3)}</td>` : ''}</tr>`).join('')}</tbody></table></div>
       <p class="flow-note">相關 r 以該驗證範圍的實際開盤方向計算。${weights ? '係數使用標準化輸入。' : ''}</p>`
-    : '<p class="flow-note">這個版本尚無可計算的因子與權重。</p>'}`;
+    : '<p class="flow-note">待驗證後顯示這一天的數值。</p>'}`;
 }
 
 function show(id) {
@@ -126,10 +100,10 @@ function draw() {
   const context = canvas.getContext('2d');
   context.scale(scale,scale);
   context.lineCap = 'round';
-  const active = new Set(tracedEdges(links, selection));
+  const active = new Set(tracedEdges(state.links, selection));
   curves = [];
 
-  for (const edge of [...links].sort((a,b)=>Number(active.has(a))-Number(active.has(b)))) {
+  for (const edge of [...state.links].sort((a,b)=>Number(active.has(a))-Number(active.has(b)))) {
     const from = panel.querySelector(`[data-node="${edge.from}"]`).getBoundingClientRect();
     const to = panel.querySelector(`[data-node="${edge.to}"]`).getBoundingClientRect();
     const x0 = from.right - box.left;
@@ -139,7 +113,7 @@ function draw() {
     const middle = (x0+x1)/2;
     const info = state.stats[edge.from];
     const weight = finite(info?.impact_share) ? Number(info.impact_share) : 0;
-    const missing = sources[edge.from] && !finite(info?.impact_share);
+    const missing = state.sources[edge.from] && !finite(info?.coverage);
     const current = active.has(edge);
     const gradient = context.createLinearGradient(x0,y0,x1,y1);
     gradient.addColorStop(0,current ? '#86E7E4' : '#4f6092');
@@ -156,17 +130,25 @@ function draw() {
   }
 }
 
-export function renderFlow(data, view) {
-  const stats = { ...(data[view].diagnostics || {}) };
-  if (view === 'week' && !stats.auction) {
-    const observed = data.week.days.filter(day => finite(day.inputs) && day.expected);
-    if (observed.length) stats.auction = {
-      coverage:observed.reduce((sum,day)=>sum+day.inputs,0)/observed.reduce((sum,day)=>sum+day.expected,0)
-    };
-  }
-  const historicalInputs = data[view].historical_inputs || {};
-  state = { data, view, stats, historicalInputs, nodes:modelNodes(data,view) };
-  if (view === 'week' && !state.stats[selection]) selection = 'auction';
+export function renderFlow(data) {
+  const repair = data.view === 'repair';
+  const { auction, ...stats } = data.diagnostics || {};
+  const keys = repair ? ['trial_gap'] : data.fitted === false ? [] : auction ?
+    auction.features.map(item => item.key).filter(key => auctionSources[key]) : Object.keys(auctionSources);
+  const sources = Object.fromEntries(keys.map(key => [key, auctionSources[key]]));
+  const stages = [
+    ...(keys.length ? [['資料輸入', keys], ['時點檢查', ['cutoff']]] : []),
+    ['模型', ['model']], ['結果', ['result','audit']]
+  ];
+  const links = [
+    ...keys.map(from => ({from, to:'cutoff'})),
+    ...(keys.length ? [{from:'cutoff',to:'model'}] : []),
+    {from:'model',to:'result'}, {from:'model',to:'audit'}
+  ];
+  state = { view:data.view, stats, sources, links, nodes:modelNodes(data) };
+  if (!sources[selection] && !stages.some(([,ids]) => ids.includes(selection))) selection = keys[0] || 'model';
+  $('flow-key').textContent = repair ? '價差修正 · bp' : '線寬表示影響比重';
+  $('flow-layer').dataset.columns = String(stages.length);
   $('flow-layer').innerHTML = stages.map(([title, ids]) =>
     `<div class="flow-column"><div class="flow-layer-name">${title}</div><div class="flow-nodes">
       ${ids.map(id => {

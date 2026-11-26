@@ -16,7 +16,11 @@
 
 11/20 已停用九個舊排程並確認原 Telegram 提醒仍在運作。用新服務的帳號和隔離設定實測 50 檔訂閱、接收正式開盤欄位和 SQLite 完整性。已另用隔離合成資料驗證 40 筆固定十檔擬合、50 筆最後一日評分及缺答案扣分。新週真實收件以 11/23 開始。
 
-期末結果的每筆資料附有基準機率、最終機率、各因子影響、填補狀態和兩項時鐘。可使用同一支 VM 程式的 `export-events --root /opt/twquant-opening/runtime --output <私人CSV>` 輸出合格的試撮價及五檔不平衡，保留原始發生與收件時間。該 CSV 能在取得對齊的 08:30 歷史特徵後交給 `opening-gap --events`，與其他來源作完整消融比較。新網頁的本機「試撮週」從已匯入的私人期末檔讀取實績。
+期末結果的每筆資料附有基準機率、最終機率、各因子影響、填補狀態和兩項時鐘。可使用同一支 VM 程式的 `export-events --root /opt/twquant-opening/runtime --output <私人CSV>` 輸出合格的試撮價及五檔不平衡，保留原始發生與收件時間。該 CSV 能在取得對齊的 08:30 歷史特徵後交給 `opening-gap --events`，與其他來源作完整消融比較。本機工作台的「原試撮模型」可讀取已匯入的私人期末結果。
+
+11/27 原版週報完成後，`twquant-opening-compare.timer` 在 14:32 啟動離線比較，14:47 提供補跑。它讀取原版 `evaluation.json` 和私人 SQLite，另存 `comparison-2026-11-27.json`。本機工作台從 `--opening-capture` 指定的私人目錄讀取每個 `comparison-YYYY-MM-DD.json`，線上預覽使用合成資料。
+
+VM 的 `opening_compare.py` 支援在明列交易日的私人 `approved-sessions.json` 上延伸採集與盤後補件。日曆採遞增、無重複的 ISO 交易日期，應以核實交易所日曆和已授權範圍準備。用 `units --root /opt/twquant-opening/runtime --sessions /opt/twquant-opening/runtime/approved-sessions.json` 產生有明確結束日期的採集與補件單元。後續離線比較用 `compare --root /opt/twquant-opening/runtime --sessions /opt/twquant-opening/runtime/approved-sessions.json --holdout YYYY-MM-DD`，每個留出日仍只用較早成熟的固定十檔資料。
 
 ## 舊盤中試驗紀錄
 

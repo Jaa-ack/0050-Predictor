@@ -40,19 +40,23 @@
             <p>每日 <strong>08:59</strong> 預測正式開盤是否高於前收</p>
           </div>
           <div class="heading-actions">
-            <div class="segment" aria-label="驗證範圍">
-              <button type="button" data-view="history" aria-pressed="true">歷史驗證</button>
-              <button type="button" data-view="week" aria-pressed="false">試撮週</button>
+            <div class="segment" aria-label="開盤模型">
+              <button type="button" data-view="week" aria-pressed="true" aria-controls="architecture predictions">原試撮模型</button>
+              <button type="button" data-view="repair" aria-pressed="false" aria-controls="architecture predictions">試撮＋修正</button>
             </div>
             <button class="secondary" type="button" id="refresh">重新整理</button>
           </div>
         </div>
         <p id="alert" class="alert" role="status" hidden></p>
         <div id="metrics" class="metrics" aria-label="核心指標" aria-live="polite"></div>
+        <section class="panel comparison" aria-labelledby="comparison-title">
+          <header class="panel-heading"><div><h2 id="comparison-title">同日模型比較</h2><p id="comparison-date"></p></div></header>
+          <div id="comparison" class="table-frame" role="region" aria-labelledby="comparison-title" tabindex="0"></div>
+        </section>
         <section class="panel network" id="architecture" aria-labelledby="architecture-title">
           <header class="panel-heading">
             <div><h2 id="architecture-title">系統運作圖</h2><p>選取節點或連線查看資料與權重</p></div>
-            <span class="flow-key">資料線寬 · 影響比重</span>
+            <span id="flow-key" class="flow-key">資料線寬 · 影響比重</span>
           </header>
           <div class="flow-layout">
             <div class="flow-board" id="flow-board"><canvas id="flow-canvas" aria-hidden="true"></canvas><div id="flow-layer"></div></div>
@@ -75,13 +79,13 @@
           <div class="table-controls">
             <label><span class="visually-hidden">交易日</span><select id="decision-day" aria-label="交易日"></select></label>
             <label><span class="visually-hidden">代號或公司</span><input id="query" type="search" placeholder="搜尋代號或公司" autocomplete="off"></label>
-            <label><span class="visually-hidden">篩選結果</span><select id="result-filter" aria-label="篩選結果"><option value="all">成分股結果</option><option value="hit">命中</option><option value="miss">未命中</option><option value="pending">缺答案</option><option value="transfer" id="transfer-option">延伸標的</option></select></label>
+            <label><span class="visually-hidden">篩選結果</span><select id="result-filter" aria-label="篩選結果"><option value="all">成分股結果</option><option value="hit">命中</option><option value="miss">未命中</option><option value="pending">缺答案</option></select></label>
           </div>
         </header>
-        <div class="prediction-key"><span><b>比較基準</b> 上一交易日收盤</span><span><b>未高於</b> 平盤或開低</span><span><b>機率</b> 開高的模型分數</span><span><b>缺答案</b> 計入評分分母</span></div>
+        <div class="prediction-key"><span><b>比較基準</b> 上一交易日收盤</span><span><b>未高於</b> 平盤或開低</span><span><b>缺答案</b> 計入評分分母</span></div>
         <div class="table-frame">
           <table>
-            <thead><tr><th scope="col">標的</th><th scope="col">預測</th><th scope="col">高於前收機率</th><th scope="col" class="actual-col">正式開盤</th><th scope="col" class="result-col">判定</th><th scope="col"><span class="visually-hidden">影響因素</span></th></tr></thead>
+            <thead><tr><th scope="col">標的</th><th scope="col">預測</th><th scope="col" id="signal-column">高於前收分數</th><th scope="col" class="actual-col">正式開盤</th><th scope="col" class="result-col">判定</th><th scope="col"><span class="visually-hidden">影響因素</span></th></tr></thead>
             <tbody id="rows"></tbody>
           </table>
         </div>

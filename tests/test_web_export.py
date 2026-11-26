@@ -45,6 +45,11 @@ def test_export_contains_only_synthetic_data_and_never_live_configuration(tmp_pa
         'f_ext_fred_DEXTAUS', 'f_ext_fred_DGS10']
     assert 'other' not in opening['history']['diagnostics']
     assert 'historical_inputs' not in opening['week']
+    assert opening['repair']['evidence'] == 'synthetic'
+    comparison = opening['comparisons'][opening['repair']['date']]
+    assert comparison['repair']['expected'] == comparison['original']['expected'] == 50
+    assert set(comparison['repair_diagnostics']) == {'trial_gap'}
+    assert all(row['probability'] is None for row in opening['rows']['repair'][opening['repair']['date']])
     assert all(sum(row['constituent'] for row in rows)==50 for view in opening['rows'].values() for rows in view.values())
     assert all(sum(row['transfer'] for row in rows)==5 for rows in opening['rows']['history'].values())
     assert not (output/'legacy.html').exists()
