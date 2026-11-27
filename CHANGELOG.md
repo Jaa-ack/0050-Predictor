@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — 2026-11-27 — Official opening-week holdout
+
+- Reconcile all 250 capture-week directions against official unadjusted TWSE opening and preceding closing prices. The direct trial rule scored 236/250 with 80% minimum stock accuracy. On the designated November 27 holdout the direct and median-correction rules scored 45/50 each, and the original model scored 18/50.
+- Record matched fixed-ten model and ablation results under both receipt clocks. The single retrospective gain from peer fallback was on an external stock. The frozen prospective rule retains its original fallback.
+
 ## Unreleased — 2026-11-27 — Matched opening model families and missing-trial backup
 
 - Compare fixed-ten-calibrated linear, source-weighted and tree models with direct trial direction on the same capture-week sessions. Preserve original download times and distinguish reconstructed inputs from documented predecision receipts.
