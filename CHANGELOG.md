@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — 2026-11-28 — Issuer-specific ADR opening signals
+
+- Compare four US depositary receipts and SPY with the same Taiwan stock-days using both reconstructed and observed receipt clocks. Restrict each ADR to its own issuer and fit or select only on the fixed ten.
+- The fixed-ten tie-break favored own-ADR weighting. It rescued 11 forecasts and introduced 16 errors across the 6,300-row historical holdout. The frozen direct trial rule remains the prospective baseline.
+
 ## Unreleased — 2026-11-27 — Pinned prospective opening capture and daily scoring
 
 - Run the existing bounded collection and recovery windows against the frozen calendar and membership. Preserve ascending retries for incomplete recovery and keep the original pilot window available.
