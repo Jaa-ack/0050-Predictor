@@ -115,3 +115,11 @@ test('opening evidence counts no replay or synthetic days toward prospective iss
   assert.match(openingEvidence('local', 'unknown', true), /待驗證/);
   assert.match(openingEvidence('local', 'chronological_auction_comparison', false), /待驗證/);
 });
+
+test('private delivery status is separate from the synthetic opening preview', async () => {
+  const { deliveryStatus } = await import('../src/twquant/static/opening-state.js');
+  const counts = {timely:1, due:3, planned:126, late:1, missing:1};
+  assert.equal(deliveryStatus('snapshot', counts), '');
+  assert.equal(deliveryStatus('local', null), '');
+  assert.match(deliveryStatus('local', counts), /及時 1／126 日.*到期 3 日.*遲報 1 日.*缺報 1 日/);
+});

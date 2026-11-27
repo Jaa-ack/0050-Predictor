@@ -72,3 +72,8 @@ export function openingEvidence(mode, kind, hasDay) {
   const replay = ['short_chronological_capture_replay', 'chronological_auction_comparison'].includes(kind);
   return hasDay && replay ? '實際收件重播 · 本組可計入實際發報 0／126 日' : '待驗證';
 }
+
+export function deliveryStatus(mode, counts) {
+  if (mode === 'snapshot' || !counts) return '';
+  return `08:59 實際發報 · 及時 ${counts.timely}／${counts.planned} 日 · 已到期 ${counts.due} 日 · 遲報 ${counts.late} 日 · 缺報 ${counts.missing} 日`;
+}

@@ -135,3 +135,21 @@ LOKY_MAX_CPU_COUNT=1 .venv/bin/python -m twquant opening-gap \
 另查證交所 6/09–11 日行情：3665 在 6/10 的成交股數為零，正式開盤與收盤皆空缺。6/10 的開盤答案及 6/11 計算方向所需的上一交易日原始收盤均缺件，兩筆仍在長歷史留出期分母。
 
 11/27 01:36 已將直接試撮基準的可執行配方、50 檔和 126 日候選日曆一起凍結於私人目錄 `artifacts/opening-capture/frozen-direct-20261130`。協定 SHA-256 為 `30c4432332110fd02ee01c32dce99aa48600e1691a43f71a7fbb70543fed55b2`。它只讀同一 SQLite 快照內截止前的試撮和前收，缺合格試撮或前收時答未開高。曾逐檔對照 11/23–26 的 200 次舊重播，方向全部相符。以凍結目錄的 `rule.py replay --bundle <凍結目錄> --archives <私人逐日SQLite目錄> --session YYYY-MM-DD` 可重播協定內日期。未來驗收另需原始發報時間及可核對的投遞紀錄；這個指令產生歷史重播。
+
+### 私人收件與發報時間
+
+`scripts/opening_delivery.py` 支援在協定內當日 08:58 這一分鐘預先啟動，等到 08:59:00 才讀取凍結模型的因果快照。它將全部 50 檔一併寫入私人 SQLite 收件匣，再由另一條連線讀回已提交的相同批次並記下奈秒時間。重試沿用第一批資料及已存在的收件證據；若中斷發生在提交與讀回之間，恢復作業使用當時的實際讀回時間。缺整個行情檔時 50 檔均按凍結規則回退，缺整批發報時則保留 50 筆缺答。
+
+下列指令需由實際發報主機執行。傳入的協定指紋應來自上述已登記版本。發報程式使用標準函式庫及同目錄下與凍結版本一致的 `opening_trial_rule.py`。
+
+```bash
+python3 scripts/opening_delivery.py --bundle "$BUNDLE" --protocol-sha256 "$PROTOCOL_SHA" \
+  --archives "$CAPTURE" --ledger "$CAPTURE/deliveries.sqlite"
+.venv/bin/python scripts/audit_opening_delivery.py --bundle "$BUNDLE" --protocol-sha256 "$PROTOCOL_SHA" \
+  --previous-session 2026-11-27 --ledger "$CAPTURE/deliveries.sqlite" \
+  --bars "$CAPTURE/twse-raw-check" --workbench "$CAPTURE"
+```
+
+評分採用保守界線，以獨立連線實際看見整批發報的時間作為可驗證的送達上界，任何正延遲均計入遲報。尚未到期的交易日另列。已到期的遲報、缺報、無正式開盤或缺前收，均保留在逐檔評分分母。工作台顯示最新評分生成時刻與實際發報日數。收件事實的範圍限於私人本機收件匣。
+
+11/27 盤前在共用 VM 四個已完成存檔上各讀三次，50 檔推論耗時 1.02–48.94 毫秒，中位數 1.21 毫秒，另須計入提交與讀回所花時間。若同時要求使用完整截止前資料與整批在 08:59:00.000000000 前送達，目前的截止後推論流程會遲報。正式啟動前應定案收件界線；現有統計保留完整奈秒，工作台目前有 0 個到期日。

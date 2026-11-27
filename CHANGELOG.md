@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — 2026-11-27 — Private opening delivery evidence
+
+- Accept one durable, pinned 50-stock batch per scheduled session. Preserve the original directions and independently observed receipt clock through retries.
+- Score due sessions on raw official labels with explicit late, missing and pending dates. Show the private issuance audit separately in the local workbench.
+
 ## Unreleased — 2026-11-27 — Opening factor and receipt replay audits
 
 - Add same-grid factor additions and removals, a market-beta/night-futures interaction, and a fixed-ten calibration rule that prioritizes coverage and the minimum stock threshold. Report direction-specific recall, weakest stocks, paired errors and per-session source coverage.

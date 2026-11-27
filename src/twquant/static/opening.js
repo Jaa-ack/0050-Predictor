@@ -1,5 +1,5 @@
 import { finite, integer, percent } from './state.js';
-import { factorInfo, groupNames, openingEvidence, openingRows, stockName } from './opening-state.js';
+import { deliveryStatus, factorInfo, groupNames, openingEvidence, openingRows, stockName } from './opening-state.js';
 import { renderFlow } from './flow.js';
 import { prepareDaily } from './daily.js';
 
@@ -111,6 +111,14 @@ function renderOverview() {
   const countDisplay = captured.length ? `${integer(receiptCount)} / ${integer(receiptTotal)}` : '—';
   const caption = week.days.length ? `${captured.length} / ${week.days.length} 個收件日` : '等待排程';
   $('mode').textContent = evidence();
+  const delivery = deliveryStatus(app.config.mode, app.data.issuance);
+  const status = $('delivery-status');
+  status.hidden = !delivery;
+  if (delivery) {
+    const stamp = new Date(app.data.issuance.as_of);
+    status.textContent = delivery + (Number.isFinite(stamp.valueOf()) ?
+      ' · 統計至 ' + stamp.toLocaleString('zh-TW', {timeZone:'Asia/Taipei', hour12:false}) : '');
+  }
   $('rail-status').textContent = app.config.mode === 'snapshot' ? '唯讀合成快照' : '本機研究資料';
   for (const tab of document.querySelectorAll('[data-view]')) {
     tab.setAttribute('aria-pressed', String(tab.dataset.view === app.view));

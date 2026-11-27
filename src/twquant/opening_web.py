@@ -200,6 +200,21 @@ class OpeningWorkspace:
     def _latest_week(self, comparison):
         return max(self._week(), comparison.get('original', {}), key=lambda report: report.get('validation_date', ''))
 
+    def _issuance(self):
+        data = _json(self.capture / 'delivery-audit.json') if self.capture else {}
+        if (data.get('task') != TASK or data.get('evidence_kind') != 'private_local_delivery'
+                or not re.fullmatch('[0-9a-f]{64}', str(data.get('protocol', '')))):
+            return None
+        planned, due, timely = (data.get(k) for k in ('scheduled_sessions', 'due_sessions', 'timely_sessions'))
+        missing, late = data.get('missing_sessions'), data.get('late_sessions')
+        if (not all(type(n) is int for n in (planned, due, timely)) or not 0 <= timely <= due <= planned
+                or not isinstance(missing, list) or not isinstance(late, list)
+                or len(missing) + len(late) + timely != due):
+            return None
+        score = data.get('score') or {}
+        return dict(as_of=data.get('as_of'), planned=planned, due=due, timely=timely, missing=len(missing),
+                    late=len(late), accuracy=_number(score.get('accuracy')), coverage=_number(score.get('coverage')))
+
     def summary(self):
         report, path = self._history()
         comparisons = self._comparisons()
@@ -243,7 +258,7 @@ class OpeningWorkspace:
                                original_training_rows=result['original']['train_rows'],
                                original_fitted=result['original']['model'] is not None,
                                repair_training_rows=variant['train_rows'], correction=variant['correction'])
-        return dict(task=TASK, target=TARGET, history=history,
+        return dict(task=TASK, target=TARGET, history=history, issuance=self._issuance(),
                     week=dict(evidence=week.get('evidence_kind'), days=planned, date=evaluation_day,
                               status='ready' if week else status,
                               accuracy=_number(score.get('accuracy')), expected=score.get('expected'),

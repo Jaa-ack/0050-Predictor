@@ -103,3 +103,21 @@ def test_opening_diagnostics_keeps_correlation_separate_from_impact():
     assert result['night']['features'][0]['correlation'] == approx(-1)
     assert result['price']['features'][0]['samples'] == 4
     assert result['price']['impact_share'] == approx(.75)
+
+
+def test_opening_workspace_projects_only_private_issuance_audit(tmp_path):
+    import json
+    from twquant.opening_web import OpeningWorkspace
+    ws = OpeningWorkspace(None, tmp_path)
+    audit = dict(task='0859_open_above_previous_session_close', evidence_kind='historical',
+                 protocol='a'*64, as_of='2026-11-30T01:05:00+00:00', scheduled_sessions=126,
+                 due_sessions=1, timely_sessions=0, missing_sessions=[], late_sessions=['2026-11-30'],
+                 score={'accuracy': 0., 'coverage': 0.}, private_rows=['private-marker'])
+    path = tmp_path / 'delivery-audit.json'
+    path.write_text(json.dumps(audit))
+    assert ws.summary().get('issuance') is None
+    audit['evidence_kind'] = 'private_local_delivery'
+    path.write_text(json.dumps(audit))
+    summary = ws.summary()['issuance']
+    assert (summary['timely'], summary['late'], summary['missing'], summary['planned']) == (0, 1, 0, 126)
+    assert summary['as_of'] == audit['as_of'] and 'private-marker' not in str(summary)
