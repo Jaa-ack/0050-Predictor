@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — 2026-11-27 — Regional opening and currency ablation
+
+- Compare the same-day Nikkei 225 opening gap and the preceding Taiwan session's USD/TWD change on the existing 126-session historical holdout. Fixed-ten calibration retained the model without either addition. Include both matched baselines, weak-stock and class metrics, and missing Japanese sessions.
+- Add a private snapshot downloader for the official daily series. Preserve the download clocks and verify fingerprints on replay.
+
 ## Unreleased — 2026-11-27 — Official opening-week holdout
 
 - Reconcile all 250 capture-week directions against official unadjusted TWSE opening and preceding closing prices. The direct trial rule scored 236/250 with 80% minimum stock accuracy. On the designated November 27 holdout the direct and median-correction rules scored 45/50 each, and the original model scored 18/50.
