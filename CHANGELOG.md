@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — 2026-11-27 — Ex-rights and ex-dividend opening reference
+
+- Replay TWSE opening auction bases against verified unadjusted prior closes. A fixed-ten-selected 1% decline condition rescued 11 forecasts across six historical holdout sessions with zero added errors. All 52 constituent events lacked contemporaneous receipts in this archive.
+- Preserve original dates, receipt clocks and digests when fetching official result tables. Report the separate receipt-gated comparison and keep the prospective trial rule frozen.
+
 ## Unreleased — 2026-11-27 — Regional opening and currency ablation
 
 - Compare the same-day Nikkei 225 opening gap and the preceding Taiwan session's USD/TWD change on the existing 126-session historical holdout. Fixed-ten calibration retained the model without either addition. Include both matched baselines, weak-stock and class metrics, and missing Japanese sessions.
