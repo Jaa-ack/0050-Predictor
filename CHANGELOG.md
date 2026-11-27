@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — 2026-11-27 — Matched opening model families and missing-trial backup
+
+- Compare fixed-ten-calibrated linear, source-weighted and tree models with direct trial direction on the same capture-week sessions. Preserve original download times and distinguish reconstructed inputs from documented predecision receipts.
+- Evaluate a leave-one-stock-out fixed-ten trial vote for individual missing trials. It rescued one of 200 retrospective forecasts with no additional errors. Keep the frozen prospective baseline and the simulated missing-input stress test separate.
+
 ## Unreleased — 2026-11-27 — Opening receipt lead-time replay
 
 - Compare the frozen input window with an otherwise identical rule that stops reading both price references and trials one second earlier. Preserve missing stock-days and report paired errors against official unadjusted prices. Both policies returned identical directions for November 23–27; four scored days yielded 191/200 before the scheduled weekly report.
