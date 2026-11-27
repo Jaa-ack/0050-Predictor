@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — 2026-11-28 — Opening trial direction over three updates
+
+- Compare the latest trial with majority voting over three distinct exchange timestamps, both unconditionally and when the latest trial equals the prior close. Retain missing archives and short paths in the denominator.
+- The fixed-ten calibration tied at 39/40 and retained direct trial. Each challenger introduced one error and rescued none over the five-session replay. The final session scored 45/50 for all three rules.
+
 ## Unreleased — 2026-11-28 — Issuer-specific ADR opening signals
 
 - Compare four US depositary receipts and SPY with the same Taiwan stock-days using both reconstructed and observed receipt clocks. Restrict each ADR to its own issuer and fit or select only on the fixed ten.
