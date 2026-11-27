@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — 2026-11-27 — Opening receipt lead-time replay
+
+- Compare the frozen input window with an otherwise identical rule that stops reading both price references and trials one second earlier. Preserve missing stock-days and report paired errors against official unadjusted prices. Both policies returned identical directions for November 23–27; four scored days yielded 191/200 before the scheduled weekly report.
+
 ## Unreleased — 2026-11-27 — Private opening delivery evidence
 
 - Accept one durable, pinned 50-stock batch per scheduled session. Preserve the original directions and independently observed receipt clock through retries.
