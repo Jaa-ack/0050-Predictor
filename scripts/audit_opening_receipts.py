@@ -16,7 +16,10 @@ from twquant.opening_gap import _metrics, _paired_hits
 def read_bars(path, day):
     if not path.is_file():
         return {}
-    payload = json.loads(path.read_text())['data']
+    return official_bars(json.loads(path.read_text())['data'], day)
+
+
+def official_bars(payload, day):
     if payload['stat'] != 'OK' or payload.get('date') != day.strftime('%Y%m%d'):
         raise ValueError('Unexpected official market date or status')
     columns = ('證券代號', '開盤價', '收盤價')

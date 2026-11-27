@@ -82,6 +82,14 @@ def assess(protocol, sha, prior, prices, batches, as_of_ns):
                 and score['known'] == score['expected'] and score['minimum_stock_accuracy'] >= .75))
 
 
+def audit_cached(protocol, sha, previous_session, bars, ledger, as_of_ns):
+    due = [date.fromisoformat(d) for d in protocol['sessions']
+           if delivery.rule.clock_us(date.fromisoformat(d), delivery.rule.DECISION)*1000 <= as_of_ns]
+    prices = {d: read_bars(bars / f'{d:%Y%m%d}.json', d) for d in [previous_session, *due]}
+    batches = {str(d): delivery.read_day(ledger, sha, str(d)) for d in due}
+    return assess(protocol, sha, previous_session, prices, batches, as_of_ns)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for key in ('bundle', 'ledger', 'bars'):
@@ -94,12 +102,7 @@ def main():
     sha = delivery.rule.digest((args.bundle / 'protocol.json').read_bytes())
     if sha != args.protocol_sha256:
         parser.error('Wrong pinned opening protocol')
-    now = time.time_ns()
-    due = [date.fromisoformat(d) for d in protocol['sessions']
-           if delivery.rule.clock_us(date.fromisoformat(d), delivery.rule.DECISION)*1000 <= now]
-    prices = {d: read_bars(args.bars / f'{d:%Y%m%d}.json', d) for d in [args.previous_session, *due]}
-    batches = {str(d): delivery.read_day(args.ledger, sha, str(d)) for d in due}
-    report = assess(protocol, sha, args.previous_session, prices, batches, now)
+    report = audit_cached(protocol, sha, args.previous_session, args.bars, args.ledger, time.time_ns())
     if args.workbench:
         from twquant.opening_compare import _save
         _save(args.workbench / 'delivery-audit.json', report)

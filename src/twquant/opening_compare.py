@@ -183,13 +183,14 @@ def _symbols(root):
     return symbols
 
 
-def _supplement(root, calendar):
+def _supplement(root, calendar, symbols=None):
     from twquant.live_market import market_sdk
 
     now = capture._now()
     if now.date() not in calendar or not capture.RECOVER_START <= now.time() < capture.RECOVER_END:
         raise ValueError('opening_supplement_outside_window')
-    symbols = _symbols(root)
+    if symbols is None:
+        symbols = _symbols(root)
     archive = capture.Archive(root, now.date())
     with capture._lock(root / 'opening.lock') as locked:
         if not locked or not archive.path.is_file():
@@ -216,6 +217,30 @@ def _supplement(root, calendar):
             complete = all(store.done(stage, ticker) for stage in ('open_rest_complete', 'trial_rest_complete')
                            for ticker in symbols)
     return 0 if complete else 1
+
+
+def acquire_future(mode, root, days, symbols, now):
+    start, end = {'collect': (capture.PREPARE, capture.COLLECT_END),
+                  'recover': (capture.RECOVER_START, capture.RECOVER_END)}[mode]
+    if now.date() not in days or not start <= now.time() < end:
+        if mode == 'collect':
+            capture._notify_ready()
+        return 0
+    if symbols is None:
+        symbols = _symbols(root)
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with capture._lock(root / 'opening.lock') as locked:
+        if not locked:
+            return 1
+        with capture.Archive(root, now.date()) as store:
+            if mode == 'collect':
+                return 0 if capture._collect(store, symbols) else 1
+            try:
+                recovered = capture._recover(store, symbols)
+            except Exception:
+                # The first recovery pass can fail before returning its completion flag.
+                recovered = False
+    return 0 if recovered else _supplement(root, days, symbols)
 
 
 def _save(path, report):
@@ -255,8 +280,9 @@ def main(argv=None):
                     raise ValueError('opening_units_require_vm_paths')
                 print(json.dumps(future_units(days)))
                 return 0
-            runner = capture if days == capture.COLLECTION_DAYS else _capture_for(days)
-            status = runner.main([args.mode, '--root', str(args.root)])
+            if days != capture.COLLECTION_DAYS:
+                return acquire_future(args.mode, args.root, days, None, capture._now())
+            status = capture.main([args.mode, '--root', str(args.root)])
             return _supplement(args.root, days) if args.mode == 'recover' and status else status
         now = capture._now()
         holdout = args.holdout or capture.COLLECTION_DAYS[-1]

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — 2026-11-27 — Pinned prospective opening capture and daily scoring
+
+- Run the existing bounded collection and recovery windows against the frozen calendar and membership. Preserve ascending retries for incomplete recovery and keep the original pilot window available.
+- Settle due forecasts with official raw TWSE prices, retaining first receipts and retrying unpublished sessions. Refresh the private workbench even when forecasts or labels are missing.
+- Measure the time to read back a complete 50-stock batch on the collection VM using archived inputs and a separate timing database. These measurements add zero timely prospective sessions.
+
 ## Unreleased — 2026-11-27 — Ex-rights and ex-dividend opening reference
 
 - Replay TWSE opening auction bases against verified unadjusted prior closes. A fixed-ten-selected 1% decline condition rescued 11 forecasts across six historical holdout sessions with zero added errors. All 52 constituent events lacked contemporaneous receipts in this archive.
