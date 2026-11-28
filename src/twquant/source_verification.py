@@ -15,12 +15,14 @@ from .source_workflows import source_status
 from .sources import (SourceTransport,SourceHTTPError,FubonAuthenticationError,fetch_fred,fetch_fmp,fetch_finmind,fetch_fugle,
     fetch_fugle_prices,fetch_fubon_prices,fetch_news,fetch_public,TwinkleClient,events_from_result)
 from .workflows import write_json
-from .public_sources import fetch_tdcc,fetch_gdelt
+from .public_sources import fetch_cna,fetch_tdcc,fetch_gdelt
 
 
 def _probes(provider,start,end,full):
     jobs=[]
-    if provider=='tdcc':
+    if provider=='cna':
+        jobs.append(('finance',lambda t:fetch_cna(t,'finance')))
+    elif provider=='tdcc':
         jobs.append(('distribution',lambda t:fetch_tdcc(t,['2330','0050'])))
     elif provider=='gdelt':
         jobs.append(('latest-gkg',lambda t:fetch_gdelt(t,['tsmc','nvidia','semiconductor'],25)))

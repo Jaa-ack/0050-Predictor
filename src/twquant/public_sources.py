@@ -1,5 +1,7 @@
 """Documented free feeds with explicit coverage, provenance and conservative receipt times."""
+from contextlib import closing
 import csv
+from email.utils import parsedate_to_datetime
 import hashlib
 import io
 import json
@@ -7,6 +9,7 @@ from pathlib import Path
 import re
 import uuid
 import zipfile
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pandas as pd
@@ -107,6 +110,39 @@ def normalize_tdcc(raw,retrieved_at,tickers=()):
         dict(complete=True,coverage='current_official_snapshot_only',availability_basis='observed_retrieval_only',
              license='Open Government Data License Taiwan v1',
              limitation='No historical publication timestamp inferred; grade16 correction and grade17 total are not model inputs.'))
+
+
+def fetch_cna(t, feed):
+    if feed not in ('finance','technology'):
+        raise ValueError('Expected a CNA finance or technology feed')
+    url = 'https://feeds.feedburner.com/rsscna/' + feed
+    with closing(t.session.get(url, timeout=(8,20), stream=True)) as response:
+        response.raise_for_status()
+        body = bytearray()
+        for chunk in response.iter_content(65536):
+            body.extend(chunk)
+            if len(body) > 3_000_000:
+                raise ValueError('CNA feed exceeds size bound')
+        received = now_utc()
+    if b'<!DOCTYPE' in body.upper():
+        raise ValueError('Unexpected RSS document type declaration')
+    try:
+        items = ET.fromstring(body).findall('./channel/item')
+    except ET.ParseError:
+        raise ValueError('Invalid CNA RSS document') from None
+    if not items:
+        raise ValueError('CNA feed returned no items')
+    records = []
+    for item in items:
+        title = item.findtext('title')
+        identity = item.findtext('guid') or item.findtext('link')
+        published = parsedate_to_datetime(item.findtext('pubDate') or '')
+        if not title or not identity or published.tzinfo is None:
+            raise ValueError('Incomplete CNA headline or publication time')
+        records.append(dict(title=title, published_at=published.isoformat(), available_at=received,
+                            document_id=hashlib.sha256(identity.encode()).hexdigest()))
+    return SourceResult('cna',feed,'news',records,received,dict(source_url=url,coverage='feed_snapshot_only',
+                        sha256=hashlib.sha256(body).hexdigest()))
 
 
 def fetch_tdcc(t,tickers=()):

@@ -365,16 +365,19 @@ def fetch_fugle(transport, dataset, symbol, start, end):
                    missing_ranges=missing_ranges)
 
 
-def fetch_news(transport, query, start, end, tickers=(), max_pages=10):
+def fetch_news(transport, query, start, end, tickers=(), max_pages=10, *, title_only=False):
     if not query or len(query)>500 or not 1<=max_pages<=100:
         raise ValueError("News query/page limit invalid")
     records=[]
     seen=set()
     received=0
     total=0
+    params={"q":query,"from":start,"to":end,"sortBy":"publishedAt","pageSize":100}
+    if title_only:
+        params["searchIn"]="title"
     for page in range(1,max_pages+1):
         payload=transport.request("newsapi","GET","https://newsapi.org/v2/everything",
-            params={"q":query,"from":start,"to":end,"sortBy":"publishedAt","pageSize":100,"page":page},
+            params=dict(params,page=page),
             headers={"X-Api-Key":transport.credentials.get("NEWS_API_KEY").get_secret_value()})
         if payload.get("status")!="ok" or not isinstance(payload.get("articles"),list):
             raise RuntimeError("newsapi: rejected request or invalid articles")
@@ -398,7 +401,8 @@ def fetch_news(transport, query, start, end, tickers=(), max_pages=10):
         if received>=total or not batch:
             break
     return _result(transport,"newsapi","everything","news",records,query=query,complete=received>=total,
-                   received=received,total_results=total,sentiment_model="not_applied")
+                   received=received,total_results=total,sentiment_model="not_applied",
+                   search_in="title" if title_only else "default",start=start,end=end)
 
 
 class TwinkleClient:

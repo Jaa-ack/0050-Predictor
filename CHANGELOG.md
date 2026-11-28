@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — 2026-11-28 — Issuer news and disclosure timing
+
+- Compare using auction direction on overnight issuer-event stock-days with using the fixed-ten-selected multisource model or direct trial throughout. Score the same 250 rows under original receipts and reconstructed publication clocks, with a same-day, equal-count switching control.
+- Add CNA finance and technology feeds and title-only NewsAPI acquisition. Verify the current official 50-stock holdings against the frozen membership and preserve source clocks, feed limits and article attribution in private snapshots.
+- The reconstructed event switch gained 67 hits over multisource, versus 67.54 expected from switching the same number without event information. All five historical dates lacked eligible real-time event receipts. Direct trial remains frozen.
+
 ## Unreleased — 2026-11-28 — Opening delivery under concurrent archive writes
 
 - Replay recorded WebSocket receipt times into a temporary WAL database on the capture host while an independent connection verifies the committed 50-stock payload. Score directions and deadline-gated results separately, retaining every due stock-day.

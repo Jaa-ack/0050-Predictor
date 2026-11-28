@@ -394,3 +394,11 @@ def test_index_prices_preserve_price_index_basis_instead_of_stock_total_return()
     assert set(frame.asset_class)=={'index'}
     assert set(frame.return_basis)=={'price_index'}
     assert set(frame.adjustment_source)=={'fugle_price_index_no_dividend_reinvestment'}
+
+
+def test_title_only_news_search_sends_and_records_the_restriction():
+    def handler(method, url, kwargs):
+        assert kwargs['params']['searchIn'] == 'title'
+        return Response({'status':'ok','totalResults':0,'articles':[]})
+    result = fetch_news(transport(handler), 'TSMC', '2025-01-01', '2025-01-02', title_only=True)
+    assert result.metadata['search_in'] == 'title'

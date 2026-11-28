@@ -13,11 +13,11 @@ from .source_store import SourceStore
 from .sources import (SourceTransport,fetch_fred,fetch_fmp,fetch_finmind,fetch_fugle,fetch_fugle_prices,
                       fetch_news,fetch_fubon_prices,fetch_public,TwinkleClient)
 from .workflows import write_json
-from .public_sources import fetch_tdcc,fetch_gdelt
+from .public_sources import fetch_cna,fetch_tdcc,fetch_gdelt
 
 REQUIRED={"finmind":["FINMIND_TOKEN"],"fred":["FRED_API_KEY"],"fmp":["FMP_API_KEY"],
           "newsapi":["NEWS_API_KEY"],"twinkle":["TWINKLE_API_KEY"],"fugle":["FUGLE_API_KEY"],
-          "fubon":["FUBON_PERSONAL_ID","FUBON_CERT_PATH"],"twse":[],"taifex":[],"tdcc":[],"gdelt":[]}
+          "fubon":["FUBON_PERSONAL_ID","FUBON_CERT_PATH"],"twse":[],"taifex":[],"tdcc":[],"gdelt":[],"cna":[]}
 
 
 def source_status(credentials):
@@ -43,6 +43,8 @@ def _execute_job(t,job):
     if end=='today':
         end=pd.Timestamp.now(tz='Asia/Taipei').date().isoformat()
     symbol=job.get('symbol','2330')
+    if provider=='cna':
+        return fetch_cna(t,dataset)
     if provider=='tdcc' and dataset=='distribution':
         return fetch_tdcc(t,job.get('tickers',[]))
     if provider=='gdelt' and dataset=='gkg':
@@ -52,7 +54,8 @@ def _execute_job(t,job):
     if provider=='fmp':
         return fetch_fmp(t,dataset,symbol,start,end,statement_limit=job.get('limit',5),period=job.get('period','quarter'))
     if provider=='newsapi':
-        return fetch_news(t,job['query'],start,end,job.get('tickers',[]),job.get('max_pages',10))
+        return fetch_news(t,job['query'],start,end,job.get('tickers',[]),job.get('max_pages',10),
+                          title_only=job.get('title_only',False))
     if provider=='twinkle':
         return TwinkleClient(t).call(dataset,job.get('arguments',{}))
     if provider in {'twse','taifex'}:
