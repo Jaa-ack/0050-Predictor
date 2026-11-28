@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — 2026-11-28 — Opening delivery under concurrent archive writes
+
+- Replay recorded WebSocket receipt times into a temporary WAL database on the capture host while an independent connection verifies the committed 50-stock payload. Score directions and deadline-gated results separately, retaining every due stock-day.
+- Across two runs on five archived dates and two write phases, all 20 reads started at the deadline arrived late. All 20 with one second reserved arrived before the rehearsal deadline. Actual prospective issuance remains at zero.
+- Received the US November 27 ADR and SPY bars and the TAIFEX night reports attributed to November 30 before the upcoming Taiwan decision. Verified all four issuer pairings and three futures contracts.
+
 ## Unreleased — 2026-11-28 — Opening trial direction over three updates
 
 - Compare the latest trial with majority voting over three distinct exchange timestamps, both unconditionally and when the latest trial equals the prior close. Retain missing archives and short paths in the denominator.
